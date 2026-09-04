@@ -1,3 +1,22 @@
-"""cpre package metadata."""
+"""Public package interface for cpre."""
 
-__version__ = "0.1.1"
+from .api import (
+    AnalysisResult,
+    ConditionalTree,
+    Finding,
+    FindingKind,
+    SourceLocation,
+    analyze_source,
+)
+
+__version__ = "0.2.0"
+
+__all__ = [
+    "AnalysisResult",
+    "ConditionalTree",
+    "Finding",
+    "FindingKind",
+    "SourceLocation",
+    "__version__",
+    "analyze_source",
+]
