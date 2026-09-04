@@ -101,7 +101,7 @@ def test_exact_only_simplification_has_global_result_type_and_edit():
     assert finding.edit == cpre.SuggestedEdit(
         range=cpre.SourceRange(
             start=cpre.SourceLocation(line=1, column=5),
-            end=cpre.SourceLocation(line=1, column=29),
+            end=cpre.SourceLocation(line=1, column=26),
         ),
         replacement="A",
         confidence=cpre.FixConfidence.EXACT,
