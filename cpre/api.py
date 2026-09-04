@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Iterator
 
 from . import cpre as _engine
+from .errors import AnalysisError, CpreError, ErrorCode, ParseError, SourceLocation
 
 
 class FindingKind(str, Enum):
@@ -16,14 +17,6 @@ class FindingKind(str, Enum):
     REDUNDANT_BRANCH = "redundant_branch"
     SIMPLIFIABLE_CONDITION = "simplifiable_condition"
     CONTEXTUAL_SIMPLIFICATION = "contextual_simplification"
-
-
-@dataclass(frozen=True)
-class SourceLocation:
-    """One-based physical source location for a finding."""
-
-    line: int
-    column: int | None = None
 
 
 @dataclass(frozen=True)
@@ -235,19 +228,46 @@ def _finding_for_branch(
     return tuple(findings)
 
 
+def _translate_parse_error(
+    error: _engine.ConditionError,
+    filename: str | None,
+) -> ParseError:
+    location = getattr(error, "location", None)
+    public_location = None
+    if location is not None and location.line is not None:
+        public_location = SourceLocation(location.line, location.column)
+
+    raw_code = getattr(error, "code", ErrorCode.EXPRESSION_SYNTAX.value)
+    try:
+        code = raw_code if isinstance(raw_code, ErrorCode) else ErrorCode(raw_code)
+    except ValueError:
+        code = ErrorCode.EXPRESSION_SYNTAX
+
+    return ParseError(
+        getattr(error, "message", str(error)),
+        code=code,
+        location=public_location,
+        filename=filename,
+    )
+
+
 def analyze_source(source: str, *, filename: str | None = None) -> AnalysisResult:
     """Analyze C/C++ source text and return stable structured findings.
 
     The source is analyzed symbolically; no C/C++ preprocessing is performed.
-    ``filename`` is optional metadata for downstream callers and does not affect
-    analysis semantics. Malformed conditional input raises :class:`ConditionError`.
+    ``filename`` is optional metadata propagated to both successful results and
+    structured :class:`CpreError` failures.
 
     Exact simplifications are globally equivalent to the source expression.
     Contextual simplifications are only equivalent within the effective branch
     context established by enclosing and preceding conditions.
     """
 
-    tree = _engine.analyze_source(source)
+    try:
+        tree = _engine.analyze_source(source)
+    except _engine.ConditionError as error:
+        raise _translate_parse_error(error, filename) from error
+
     findings = tuple(
         finding
         for branch in _branches(tree.groups)
@@ -257,16 +277,20 @@ def analyze_source(source: str, *, filename: str | None = None) -> AnalysisResul
 
 
 ConditionalTree = _engine.ConditionalTree
-ConditionError = _engine.ConditionError
+ConditionError = CpreError
 
 __all__ = [
+    "AnalysisError",
     "AnalysisResult",
     "ConditionError",
     "ConditionalTree",
     "ContextualSimplification",
+    "CpreError",
+    "ErrorCode",
     "ExactSimplification",
     "Finding",
     "FindingKind",
+    "ParseError",
     "SourceLocation",
     "analyze_source",
 ]

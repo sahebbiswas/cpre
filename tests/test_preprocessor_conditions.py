@@ -267,12 +267,13 @@ def test_multiline_directive_error_reports_physical_line_and_column():
     assert error.value.location == conditions._SourceLocation(line=2, column=6)
 
 
-def test_locationless_expression_error_gets_directive_line_prefix():
+def test_empty_directive_expression_has_structured_location():
     with pytest.raises(conditions.ExpressionSyntaxError) as error:
         conditions.analyze_source("#if\n#endif\n")
 
-    assert error.value.location is None
-    assert str(error.value) == "line 1: expected a Boolean expression"
+    assert error.value.code == "expression_syntax"
+    assert error.value.location == conditions._SourceLocation(line=1, column=1)
+    assert str(error.value) == "expected a Boolean expression at line 1, column 1"
 
 
 @pytest.mark.parametrize(

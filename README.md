@@ -64,8 +64,9 @@ import cpre
 
 try:
     result = cpre.analyze_source(source_text, filename="example.c")
-except cpre.ConditionError as error:
-    print(f"invalid preprocessor condition: {error}")
+except cpre.CpreError as error:
+    line = error.location.line if error.location else 1
+    print(error.code, line, error.message)
 else:
     for finding in result.findings:
         if finding.exact_simplification is not None:
@@ -78,7 +79,11 @@ The supported public symbols are:
 
 - `analyze_source`
 - `AnalysisResult`
-- `ConditionError`
+- `CpreError`
+- `ParseError`
+- `AnalysisError`
+- `ErrorCode`
+- `ConditionError` (compatibility alias for `CpreError`)
 - `Finding`
 - `FindingKind`
 - `SourceLocation`
@@ -88,6 +93,19 @@ The supported public symbols are:
 - `__version__`
 
 `analyze_source` returns an `AnalysisResult` containing the analyzed conditional tree and an ordered tuple of structured findings. Finding kinds currently distinguish dead branches, redundant branches, globally simplifiable conditions, and contextual simplifications.
+
+### Structured errors and diagnostics
+
+Malformed conditional input raises `ParseError`, rooted in the public `CpreError` hierarchy. Consumers should use structured fields rather than parsing exception strings:
+
+- `error.code` is a stable `ErrorCode` such as `EXPRESSION_SYNTAX`, `UNMATCHED_DIRECTIVE`, `MISPLACED_DIRECTIVE`, `MALFORMED_MACRO_DIRECTIVE`, `TRAILING_DIRECTIVE_TEXT`, or `UNTERMINATED_CONDITIONAL`.
+- `error.location` is a `SourceLocation` containing the physical one-based line and, when available, column. Backslash-continued directives retain the physical line and column where the failure occurred.
+- `error.message` is human-readable diagnostic text.
+- `error.filename` carries the optional `filename` value passed to `analyze_source` without requiring it to be recovered from rendered text.
+
+`AnalysisError` is reserved for supported analysis-stage failures distinct from malformed input. Unexpected programming errors are not converted into `CpreError`, keeping malformed source clearly distinguishable from implementation failures.
+
+The public wrapper preserves the original parser exception as `__cause__` when translating malformed source. Library calls do not print, call `sys.exit()`, or otherwise perform CLI output. The `cpre.cli` layer is responsible for rendering diagnostics and mapping failures to terminal exit codes.
 
 ### Simplification guarantees
 
@@ -101,8 +119,6 @@ A simplification field is `None` when that mode does not produce a semantic impr
 Boolean constants are represented canonically as the strings `"0"` and `"1"`. Contextual `0` is consistent with an unreachable/dead condition in its effective context, while contextual `1` supports redundant-branch classification.
 
 For compatibility with the initial `0.2` API, `Finding.simplified_condition` and `Finding.contextual_condition` remain read-only convenience properties that return the corresponding replacement string or `None`. New integrations should prefer the typed `exact_simplification` and `contextual_simplification` fields because their equivalence guarantees are explicit at the type level.
-
-Malformed conditional input raises `ConditionError`, which is the supported public catch-all for parser and directive-structure failures.
 
 Consumers should import supported symbols from `cpre` rather than from `cpre.cpre` or private helpers such as the ROBDD implementation. Private implementation details are not part of the compatibility contract.
 
@@ -135,24 +151,24 @@ Run the complete test suite with:
 pytest
 ```
 
-The tests include parser and analyzer unit coverage, CLI behavior, property-based checks, source-location handling, filtered/verbose reporting, and the stable public API contract.
+The tests include parser and analyzer unit coverage, CLI behavior, property-based checks, source-location handling, filtered/verbose reporting, structured diagnostics, and the stable public API contract.
 
 The GitHub Actions CI matrix runs the suite across supported Python versions on Linux, macOS, and Windows. Changes should keep both CLI behavior and public API tests green unless the corresponding behavior is intentionally revised.
 
 ## Extending cpre
 
-The initial implementation remains in `cpre/cpre.py`, while `cpre/api.py` provides the stable programmatic boundary for downstream consumers.
+The analysis engine remains in `cpre/cpre.py`, `cpre/api.py` provides the stable programmatic boundary, and `cpre/cli.py` translates structured results and errors into terminal behavior.
 
 When adding or changing analyzer behavior:
 
 1. Keep CLI-specific argument parsing, output formatting, and exit-code handling separate from programmatic APIs.
 2. Prefer adding structured data to the public API rather than requiring consumers to parse human-readable output.
 3. Avoid exposing ROBDD node IDs, parser internals, or private helpers through the top-level package.
-4. Add focused regression tests for new Boolean identities, directives, source-location cases, and finding classifications.
+4. Add focused regression tests for new Boolean identities, directives, source-location cases, finding classifications, and diagnostic codes.
 5. Preserve deterministic results and ordering so static-analysis clients can rely on repeatable output.
 6. Treat changes to top-level public imports and result semantics as compatibility-sensitive.
 
-Planned extension areas include richer structured fix metadata, configuration-aware macro assumptions, structured diagnostic errors, and bounded analysis resources for large or pathological inputs.
+Planned extension areas include richer structured fix metadata, configuration-aware macro assumptions, and bounded analysis resources for large or pathological inputs.
 
 ## Versioning
 
