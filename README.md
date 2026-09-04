@@ -16,18 +16,24 @@ cd cpre
 python -m pip install -e ".[dev]"
 ```
 
-## Usage
+## Command-line usage
 
-After installation, run:
+Analyze a single source file:
 
 ```bash
 cpre source.c
 ```
 
-Or invoke the module directly:
+You can also invoke the package directly:
 
 ```bash
-python -m cpre.cpre source.c
+python -m cpre source.c
+```
+
+On Windows, the Python launcher works as well:
+
+```bash
+py -3 -m cpre source.c
 ```
 
 Useful options include:
@@ -41,46 +47,100 @@ Useful options include:
 
 By default, text and JSON reports are filtered to branches that are dead, redundant, or whose condition can be simplified. `--verbose` restores the full conditional tree.
 
-## Python API
+Examples:
 
-The analyzer implementation currently lives in `cpre/cpre.py` and can be imported as:
-
-```python
-from cpre import cpre
-
-tree = cpre.analyze_source(source_text)
+```bash
+cpre --recursive path/to/project
+cpre --recursive --json path/to/project
+cpre --fail-on-findings source.c
 ```
 
-The initial package layout intentionally preserves the analyzer implementation while establishing a reusable Python package boundary. Public API refinement can follow independently.
+## Python API
 
-## Development
+`cpre` exposes a stable top-level API for programmatic consumers:
 
-Run the test suite with:
+```python
+import cpre
+
+try:
+    result = cpre.analyze_source(source_text, filename="example.c")
+except cpre.ConditionError as error:
+    print(f"invalid preprocessor condition: {error}")
+else:
+    for finding in result.findings:
+        print(finding.kind, finding.location.line, finding.reason)
+```
+
+The supported public symbols are:
+
+- `analyze_source`
+- `AnalysisResult`
+- `ConditionError`
+- `Finding`
+- `FindingKind`
+- `SourceLocation`
+- `ConditionalTree`
+- `__version__`
+
+`analyze_source` returns an `AnalysisResult` containing the analyzed conditional tree and an ordered tuple of structured findings. Finding kinds currently distinguish dead branches, redundant branches, globally simplifiable conditions, and contextual simplifications.
+
+Malformed conditional input raises `ConditionError`, which is the supported public catch-all for parser and directive-structure failures.
+
+Consumers should import supported symbols from `cpre` rather than from `cpre.cpre` or private helpers such as the ROBDD implementation. Private implementation details are not part of the compatibility contract.
+
+The optional `filename` argument is metadata for downstream tools and does not affect analysis semantics.
+
+## Analysis behavior
+
+`cpre` reasons symbolically about preprocessor conditions rather than evaluating one specific build configuration. Identifiers are treated as Boolean flags, while value-bearing expressions that are outside the Boolean model are preserved as opaque predicates.
+
+The analyzer can identify:
+
+- dead or unreachable conditional branches
+- redundant conditions that are always true in their effective branch context
+- globally equivalent Boolean simplifications
+- context-dependent simplifications derived from enclosing and preceding branch conditions
+
+The current engine uses ROBDD-backed Boolean reasoning for exact satisfiability and equivalence checks while retaining a dependency-free runtime.
+
+## Testing
+
+Install the development dependencies:
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
+Run the complete test suite with:
 
 ```bash
 pytest
 ```
 
-The CI workflow runs the tests across supported Python versions on Linux, macOS, and Windows.
+The tests include parser and analyzer unit coverage, CLI behavior, property-based checks, source-location handling, filtered/verbose reporting, and the stable public API contract.
+
+The GitHub Actions CI matrix runs the suite across supported Python versions on Linux, macOS, and Windows. Changes should keep both CLI behavior and public API tests green unless the corresponding behavior is intentionally revised.
+
+## Extending cpre
+
+The initial implementation remains in `cpre/cpre.py`, while `cpre/api.py` provides the stable programmatic boundary for downstream consumers.
+
+When adding or changing analyzer behavior:
+
+1. Keep CLI-specific argument parsing, output formatting, and exit-code handling separate from programmatic APIs.
+2. Prefer adding structured data to the public API rather than requiring consumers to parse human-readable output.
+3. Avoid exposing ROBDD node IDs, parser internals, or private helpers through the top-level package.
+4. Add focused regression tests for new Boolean identities, directives, source-location cases, and finding classifications.
+5. Preserve deterministic results and ordering so static-analysis clients can rely on repeatable output.
+6. Treat changes to top-level public imports and result semantics as compatibility-sensitive.
+
+Planned extension areas include richer structured fix metadata, stronger separation of exact and contextual simplifications, configuration-aware macro assumptions, structured diagnostic errors, and bounded analysis resources for large or pathological inputs.
 
 ## Versioning
 
-The package version is defined once in `cpre/__init__.py` as `__version__` and is consumed by `pyproject.toml` during builds. The initial version is `0.1.0`.
+The package version is defined in `cpre/__init__.py` as `__version__` and is consumed by `pyproject.toml` during builds.
 
-## Publishing releases
-
-Publishing to PyPI is handled by `.github/workflows/release.yml` using PyPI Trusted Publishing. The workflow runs whenever a GitHub release is published, builds both source and wheel distributions, and publishes them to PyPI without a stored API token.
-
-Before the first release, configure a PyPI Trusted Publisher for this repository with:
-
-- Owner: `sahebbiswas`
-- Repository: `cpre`
-- Workflow: `release.yml`
-- Environment: `pypi`
-
-Create a GitHub Actions environment named `pypi` as well. It can optionally require approval before deployment.
-
-Before publishing a release, update `cpre/__init__.py` to the release version and create the GitHub release from a matching tag. Both `0.1.0` and `v0.1.0` tag forms are accepted for version `0.1.0`; a mismatch causes the publish workflow to fail before uploading anything.
+Public API additions use a minor version bump, while backward-compatible fixes use patch releases. Changes that affect the documented public API should update compatibility tests alongside the implementation.
 
 ## License
 
