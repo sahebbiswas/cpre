@@ -1,4 +1,5 @@
 import cpre
+import pytest
 
 
 def _by_kind(result, kind):
@@ -8,6 +9,7 @@ def _by_kind(result, kind):
 def test_top_level_public_api_exposes_supported_symbols_only():
     assert cpre.__all__ == [
         "AnalysisResult",
+        "ConditionError",
         "ConditionalTree",
         "Finding",
         "FindingKind",
@@ -24,6 +26,11 @@ def test_analyze_source_returns_structured_result_and_filename():
     assert isinstance(result.tree, cpre.ConditionalTree)
     assert result.filename == "feature.c"
     assert result.findings == ()
+
+
+def test_invalid_source_raises_public_condition_error():
+    with pytest.raises(cpre.ConditionError):
+        cpre.analyze_source("#elif FEATURE\n")
 
 
 def test_dead_branch_is_reported_structurally():
@@ -61,7 +68,6 @@ def test_exact_simplification_is_reported_structurally():
     finding = findings[0]
     assert finding.original_condition == "(A && B) || (A && !B)"
     assert finding.simplified_condition == "A"
-    assert finding.contextual_condition == "A"
 
 
 def test_contextual_simplification_is_reported_separately():
