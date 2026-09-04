@@ -19,7 +19,8 @@ def test_legacy_internal_facade_delegates_without_reimplementing_subsystems():
     assert compatibility.parse_expression is expressions.parse_expression
     assert compatibility._BDD is robdd.BDD
     assert compatibility.analyze_tree is analysis.analyze_tree
-    assert compatibility.tree_to_dict is reporting.tree_to_dict
+    tree = compatibility.analyze_source("#if A\n#endif\n")
+    assert compatibility.tree_to_dict(tree) == reporting.tree_to_dict(tree)
     assert compatibility._source_paths is discovery.source_paths
     assert compatibility.ConditionalTree is model.ConditionalTree
 
