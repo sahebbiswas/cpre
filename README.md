@@ -68,7 +68,10 @@ except cpre.ConditionError as error:
     print(f"invalid preprocessor condition: {error}")
 else:
     for finding in result.findings:
-        print(finding.kind, finding.location.line, finding.reason)
+        if finding.exact_simplification is not None:
+            print("safe global replacement:", finding.exact_simplification.replacement)
+        if finding.contextual_simplification is not None:
+            print("context-only replacement:", finding.contextual_simplification.replacement)
 ```
 
 The supported public symbols are:
@@ -79,10 +82,25 @@ The supported public symbols are:
 - `Finding`
 - `FindingKind`
 - `SourceLocation`
+- `ExactSimplification`
+- `ContextualSimplification`
 - `ConditionalTree`
 - `__version__`
 
 `analyze_source` returns an `AnalysisResult` containing the analyzed conditional tree and an ordered tuple of structured findings. Finding kinds currently distinguish dead branches, redundant branches, globally simplifiable conditions, and contextual simplifications.
+
+### Simplification guarantees
+
+The public API deliberately represents the two simplification modes with different types:
+
+- `ExactSimplification` is globally Boolean-equivalent to the original source condition for every assignment of the modeled predicates. Its `replacement` is suitable for consumers that require a context-independent mechanical replacement.
+- `ContextualSimplification` is equivalent only within the branch's effective reachable context. That context includes enclosing conditional branches and exclusions introduced by preceding `#if`/`#elif` branches. A contextual replacement must not be treated as globally equivalent to the source condition.
+
+A simplification field is `None` when that mode does not produce a semantic improvement. In particular, formatting-only normalization and results equivalent to the current comparison form are represented by absence rather than by returning the original expression again. Contextual simplification is compared with the exact form when one exists, so it is present only when branch context provides an additional simplification.
+
+Boolean constants are represented canonically as the strings `"0"` and `"1"`. Contextual `0` is consistent with an unreachable/dead condition in its effective context, while contextual `1` supports redundant-branch classification.
+
+For compatibility with the initial `0.2` API, `Finding.simplified_condition` and `Finding.contextual_condition` remain read-only convenience properties that return the corresponding replacement string or `None`. New integrations should prefer the typed `exact_simplification` and `contextual_simplification` fields because their equivalence guarantees are explicit at the type level.
 
 Malformed conditional input raises `ConditionError`, which is the supported public catch-all for parser and directive-structure failures.
 
@@ -101,7 +119,7 @@ The analyzer can identify:
 - globally equivalent Boolean simplifications
 - context-dependent simplifications derived from enclosing and preceding branch conditions
 
-The current engine uses ROBDD-backed Boolean reasoning for exact satisfiability and equivalence checks while retaining a dependency-free runtime.
+The current engine uses ROBDD-backed Boolean reasoning for exact satisfiability and equivalence checks while retaining a dependency-free runtime. ROBDD nodes and implementation details are intentionally private and are not exposed by the public API.
 
 ## Testing
 
@@ -134,7 +152,7 @@ When adding or changing analyzer behavior:
 5. Preserve deterministic results and ordering so static-analysis clients can rely on repeatable output.
 6. Treat changes to top-level public imports and result semantics as compatibility-sensitive.
 
-Planned extension areas include richer structured fix metadata, stronger separation of exact and contextual simplifications, configuration-aware macro assumptions, structured diagnostic errors, and bounded analysis resources for large or pathological inputs.
+Planned extension areas include richer structured fix metadata, configuration-aware macro assumptions, structured diagnostic errors, and bounded analysis resources for large or pathological inputs.
 
 ## Versioning
 
