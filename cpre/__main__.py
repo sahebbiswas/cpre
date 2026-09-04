@@ -1,6 +1,6 @@
 """Module entry point for ``python -m cpre``."""
 
-from .cpre import main
+from .cli import main
 
 
 if __name__ == "__main__":
