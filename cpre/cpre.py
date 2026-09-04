@@ -75,22 +75,46 @@ def _format_location(location: _SourceLocation) -> str:
 class ConditionError(ValueError):
     """Base class for input errors reported by the analyzer."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str | None = None,
+        location: _SourceLocation | None = None,
+    ) -> None:
+        self.message = message
+        self.code = code
+        self.location = location
+        super().__init__(message)
+
 
 class ExpressionSyntaxError(ConditionError):
     """Raised for a malformed Boolean expression."""
 
     def __init__(
-        self, message: str, *, location: _SourceLocation | None = None
+        self,
+        message: str,
+        *,
+        code: str = "expression_syntax",
+        location: _SourceLocation | None = None,
     ) -> None:
-        self.message = message
-        self.location = location
+        super().__init__(message, code=code, location=location)
         if location is not None:
-            message = f"{message} at {_format_location(location)}"
-        super().__init__(message)
+            self.args = (f"{message} at {_format_location(location)}",)
 
 
 class DirectiveStructureError(ConditionError):
     """Raised for unmatched or misplaced conditional directives."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str,
+        location: _SourceLocation,
+    ) -> None:
+        super().__init__(message, code=code, location=location)
+        self.args = (f"line {location.line}: {message}",)
 
 
 _TOKEN_RE = re.compile(
@@ -784,6 +808,20 @@ def _logical_lines(source: str) -> Iterator[_LogicalLine]:
         index += 1
 
 
+def _remainder_location(
+    remainder: str,
+    line: int,
+    locations: Sequence[_SourceLocation] | None,
+) -> _SourceLocation:
+    leading_space_count = len(remainder) - len(remainder.lstrip())
+    if locations is not None and leading_space_count < len(locations):
+        return locations[leading_space_count]
+    if locations:
+        last = locations[-1]
+        return _SourceLocation(last.line or line, last.column + 1)
+    return _SourceLocation(line, 1)
+
+
 def _directive_expression(
     kind: str,
     remainder: str,
@@ -791,6 +829,7 @@ def _directive_expression(
     locations: Sequence[_SourceLocation] | None = None,
 ) -> tuple[str, Expression]:
     text = remainder.strip()
+    location = _remainder_location(remainder, line, locations)
     if locations is not None:
         leading_space_count = len(remainder) - len(remainder.lstrip())
         locations = locations[
@@ -799,7 +838,9 @@ def _directive_expression(
     if kind in {"ifdef", "ifndef", "elifdef", "elifndef"}:
         if not re.fullmatch(r"[A-Za-z_]\w*", text):
             raise ExpressionSyntaxError(
-                f"line {line}: #{kind} expects exactly one macro name"
+                f"#{kind} expects exactly one macro name",
+                code="malformed_macro_directive",
+                location=location,
             )
         expression: Expression = Variable(text)
         if kind in {"ifndef", "elifndef"}:
@@ -810,7 +851,11 @@ def _directive_expression(
     except ExpressionSyntaxError as error:
         if error.location is not None:
             raise
-        raise ExpressionSyntaxError(f"line {line}: {error}") from error
+        raise ExpressionSyntaxError(
+            error.message,
+            code=error.code or "expression_syntax",
+            location=location,
+        ) from error
 
 
 def parse_source(source: str) -> ConditionalTree:
@@ -843,13 +888,19 @@ def parse_source(source: str) -> ConditionalTree:
             continue
 
         if not stack:
-            raise DirectiveStructureError(f"line {line}: #{kind} has no matching #if")
+            raise DirectiveStructureError(
+                f"#{kind} has no matching #if",
+                code="unmatched_directive",
+                location=_SourceLocation(line, 1),
+            )
         group, current = stack[-1]
 
         if kind in {"elif", "elifdef", "elifndef"}:
             if current.directive == "else":
                 raise DirectiveStructureError(
-                    f"line {line}: #{kind} appears after #else"
+                    f"#{kind} appears after #else",
+                    code="misplaced_directive",
+                    location=_SourceLocation(line, 1),
                 )
             expression_text, expression = _directive_expression(
                 kind, remainder, line, remainder_locations
@@ -860,24 +911,36 @@ def parse_source(source: str) -> ConditionalTree:
         elif kind == "else":
             if remainder.strip():
                 raise DirectiveStructureError(
-                    f"line {line}: unexpected text after #else"
+                    "unexpected text after #else",
+                    code="trailing_directive_text",
+                    location=_remainder_location(remainder, line, remainder_locations),
                 )
             if current.directive == "else":
-                raise DirectiveStructureError(f"line {line}: duplicate #else")
+                raise DirectiveStructureError(
+                    "duplicate #else",
+                    code="misplaced_directive",
+                    location=_SourceLocation(line, 1),
+                )
             branch = ConditionalBranch(kind, line, None, None)
             group.branches.append(branch)
             stack[-1] = (group, branch)
         else:
             if remainder.strip():
                 raise DirectiveStructureError(
-                    f"line {line}: unexpected text after #endif"
+                    "unexpected text after #endif",
+                    code="trailing_directive_text",
+                    location=_remainder_location(remainder, line, remainder_locations),
                 )
             group.end_line = line
             stack.pop()
 
     if stack:
         group, _ = stack[-1]
-        raise DirectiveStructureError(f"line {group.line}: #if has no matching #endif")
+        raise DirectiveStructureError(
+            "#if has no matching #endif",
+            code="unterminated_conditional",
+            location=_SourceLocation(group.line, 1),
+        )
     return tree
 
 
