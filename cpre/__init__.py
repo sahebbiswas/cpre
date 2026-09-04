@@ -11,12 +11,15 @@ from .api import (
     ExactSimplification,
     Finding,
     FindingKind,
+    FixConfidence,
     ParseError,
     SourceLocation,
+    SourceRange,
+    SuggestedEdit,
     analyze_source,
 )
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = [
     "AnalysisError",
@@ -29,8 +32,11 @@ __all__ = [
     "ExactSimplification",
     "Finding",
     "FindingKind",
+    "FixConfidence",
     "ParseError",
     "SourceLocation",
+    "SourceRange",
+    "SuggestedEdit",
     "__version__",
     "analyze_source",
 ]
