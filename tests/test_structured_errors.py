@@ -1,5 +1,6 @@
 import cpre
 import pytest
+from cpre import cpre as engine
 
 
 @pytest.mark.parametrize(
@@ -25,6 +26,27 @@ def test_directive_failures_have_structured_codes_and_locations(source, code, li
     assert error.filename == "broken.c"
     assert isinstance(error, cpre.CpreError)
     assert isinstance(error, cpre.ConditionError)
+
+
+def test_engine_is_single_source_of_structured_directive_diagnostics():
+    with pytest.raises(engine.DirectiveStructureError) as caught:
+        engine.parse_source("#if A\n#else\n#elif B\n#endif\n")
+
+    error = caught.value
+    assert error.code == cpre.ErrorCode.MISPLACED_DIRECTIVE.value
+    assert error.location == engine._SourceLocation(line=3, column=1)
+    assert error.message == "#elif appears after #else"
+
+
+def test_engine_carries_malformed_macro_code_and_location():
+    with pytest.raises(engine.ExpressionSyntaxError) as caught:
+        engine.parse_source("#if A\n#elifdef FEATURE EXTRA\n#endif\n")
+
+    error = caught.value
+    assert error.code == cpre.ErrorCode.MALFORMED_MACRO_DIRECTIVE.value
+    assert error.location is not None
+    assert error.location.line == 2
+    assert error.message == "#elifdef expects exactly one macro name"
 
 
 def test_malformed_expression_has_physical_location():
