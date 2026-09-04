@@ -31,7 +31,7 @@ Repository = "https://github.com/sahebbiswas/cpre"
 Issues = "https://github.com/sahebbiswas/cpre/issues"
 
 [project.scripts]
-cpre = "cpre.cpre:main"
+cpre = "cpre.cli:main"
 
 [project.optional-dependencies]
 dev = [
