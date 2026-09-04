@@ -48,23 +48,27 @@ By default, text and JSON reports are filtered to branches that are dead, redund
 ```python
 import cpre
 
-result = cpre.analyze_source(source_text, filename="example.c")
-
-for finding in result.findings:
-    print(finding.kind, finding.location.line, finding.reason)
+try:
+    result = cpre.analyze_source(source_text, filename="example.c")
+except cpre.ConditionError as error:
+    print(f"invalid preprocessor condition: {error}")
+else:
+    for finding in result.findings:
+        print(finding.kind, finding.location.line, finding.reason)
 ```
 
 The supported public symbols are:
 
 - `analyze_source`
 - `AnalysisResult`
+- `ConditionError`
 - `Finding`
 - `FindingKind`
 - `SourceLocation`
 - `ConditionalTree`
 - `__version__`
 
-`analyze_source` returns an `AnalysisResult` containing the analyzed conditional tree and an ordered tuple of structured findings. Finding kinds currently distinguish dead branches, redundant branches, globally simplifiable conditions, and contextual simplifications.
+`analyze_source` returns an `AnalysisResult` containing the analyzed conditional tree and an ordered tuple of structured findings. Finding kinds currently distinguish dead branches, redundant branches, globally simplifiable conditions, and contextual simplifications. Malformed conditional input raises `ConditionError`, which is the supported public catch-all for parser and directive-structure failures.
 
 Consumers should import these symbols from `cpre` rather than from `cpre.cpre` or relying on private helpers such as the ROBDD implementation. Private implementation details are not part of the compatibility contract.
 
