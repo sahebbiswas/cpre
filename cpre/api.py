@@ -19,6 +19,30 @@ class FindingKind(str, Enum):
     CONTEXTUAL_SIMPLIFICATION = "contextual_simplification"
 
 
+class FixConfidence(str, Enum):
+    """Equivalence guarantee attached to a structured source edit."""
+
+    EXACT = "exact"
+    CONTEXTUAL = "contextual"
+
+
+@dataclass(frozen=True)
+class SourceRange:
+    """Physical one-based source range with an exclusive end location."""
+
+    start: SourceLocation
+    end: SourceLocation
+
+
+@dataclass(frozen=True)
+class SuggestedEdit:
+    """A direct replacement for one preprocessor condition source range."""
+
+    range: SourceRange
+    replacement: str
+    confidence: FixConfidence
+
+
 @dataclass(frozen=True)
 class ExactSimplification:
     """A globally equivalent replacement for a source condition.
@@ -58,9 +82,10 @@ class ContextualSimplification:
 class Finding:
     """A structured preprocessor-analysis finding.
 
-    Exact and contextual simplifications deliberately use distinct result types
-    so downstream callers cannot confuse their equivalence guarantees through a
-    shared untyped string field.
+    ``edit`` is present only when cpre can identify the complete condition
+    expression range and can represent the simplification as a direct
+    replacement. Exact and contextual edits carry distinct confidence values.
+    Dead/redundant branch diagnostics deliberately do not imply branch deletion.
     """
 
     kind: FindingKind
@@ -71,6 +96,7 @@ class Finding:
     contextual_simplification: ContextualSimplification | None
     reason: str
     opaque_predicates: tuple[str, ...] = ()
+    edit: SuggestedEdit | None = None
 
     @property
     def simplified_condition(self) -> str | None:
@@ -128,6 +154,53 @@ def _globally_equivalent(
     return bdd.equivalent_under(_engine.TRUE, left, right)
 
 
+def _condition_ranges(source: str) -> dict[tuple[int, str], SourceRange]:
+    """Map editable #if/#elif conditions to their physical source ranges."""
+
+    result: dict[tuple[int, str], SourceRange] = {}
+    for logical_line in _engine._logical_lines(source):
+        match = _engine._DIRECTIVE_RE.match(logical_line.text)
+        if match is None:
+            continue
+        kind, remainder = match.group(1), match.group(2)
+        if kind not in {"if", "elif"}:
+            continue
+
+        start_offset = len(remainder) - len(remainder.lstrip())
+        end_offset = len(remainder.rstrip())
+        if end_offset <= start_offset:
+            continue
+
+        locations = logical_line.locations[match.start(2) :]
+        start = locations[start_offset]
+        last = locations[end_offset - 1]
+        if start.line is None or last.line is None:
+            continue
+        result[(logical_line.start_line, kind)] = SourceRange(
+            start=SourceLocation(start.line, start.column),
+            end=SourceLocation(last.line, last.column + 1),
+        )
+    return result
+
+
+def _edit_for(
+    branch: _engine.ConditionalBranch,
+    ranges: dict[tuple[int, str], SourceRange],
+    replacement: str,
+    confidence: FixConfidence,
+) -> SuggestedEdit | None:
+    if branch.directive not in {"if", "elif"}:
+        return None
+    source_range = ranges.get((branch.line, branch.directive))
+    if source_range is None:
+        return None
+    return SuggestedEdit(
+        range=source_range,
+        replacement=replacement,
+        confidence=confidence,
+    )
+
+
 def _simplifications_for_branch(
     branch: _engine.ConditionalBranch,
 ) -> tuple[ExactSimplification | None, ContextualSimplification | None]:
@@ -165,6 +238,7 @@ def _simplifications_for_branch(
 
 def _finding_for_branch(
     branch: _engine.ConditionalBranch,
+    ranges: dict[tuple[int, str], SourceRange],
 ) -> tuple[Finding, ...]:
     analysis = branch.analysis
     assert analysis is not None
@@ -190,6 +264,7 @@ def _finding_for_branch(
             Finding(
                 kind=FindingKind.DEAD_BRANCH,
                 reason=analysis.reason or "branch is unreachable",
+                edit=None,
                 **common,
             ),
         )
@@ -199,6 +274,7 @@ def _finding_for_branch(
             Finding(
                 kind=FindingKind.REDUNDANT_BRANCH,
                 reason=analysis.reason or "condition is redundant in this context",
+                edit=None,
                 **common,
             ),
         )
@@ -212,6 +288,12 @@ def _finding_for_branch(
             Finding(
                 kind=FindingKind.SIMPLIFIABLE_CONDITION,
                 reason="condition has a globally equivalent simpler form",
+                edit=_edit_for(
+                    branch,
+                    ranges,
+                    exact.replacement,
+                    FixConfidence.EXACT,
+                ),
                 **common,
             )
         )
@@ -221,6 +303,12 @@ def _finding_for_branch(
             Finding(
                 kind=FindingKind.CONTEXTUAL_SIMPLIFICATION,
                 reason="condition has a simpler equivalent under its branch context",
+                edit=_edit_for(
+                    branch,
+                    ranges,
+                    contextual.replacement,
+                    FixConfidence.CONTEXTUAL,
+                ),
                 **common,
             )
         )
@@ -260,7 +348,9 @@ def analyze_source(source: str, *, filename: str | None = None) -> AnalysisResul
 
     Exact simplifications are globally equivalent to the source expression.
     Contextual simplifications are only equivalent within the effective branch
-    context established by enclosing and preceding conditions.
+    context established by enclosing and preceding conditions. When a direct
+    condition edit is available, its range uses one-based physical locations
+    and an exclusive end position.
     """
 
     try:
@@ -268,10 +358,11 @@ def analyze_source(source: str, *, filename: str | None = None) -> AnalysisResul
     except _engine.ConditionError as error:
         raise _translate_parse_error(error, filename) from error
 
+    ranges = _condition_ranges(source)
     findings = tuple(
         finding
         for branch in _branches(tree.groups)
-        for finding in _finding_for_branch(branch)
+        for finding in _finding_for_branch(branch, ranges)
     )
     return AnalysisResult(findings=findings, tree=tree, filename=filename)
 
@@ -290,7 +381,10 @@ __all__ = [
     "ExactSimplification",
     "Finding",
     "FindingKind",
+    "FixConfidence",
     "ParseError",
     "SourceLocation",
+    "SourceRange",
+    "SuggestedEdit",
     "analyze_source",
 ]

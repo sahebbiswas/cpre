@@ -1,5 +1,5 @@
 import cpre
 
 
-def test_version_for_structured_error_api():
-    assert cpre.__version__ == "0.4.0"
+def test_version_for_structured_edit_api():
+    assert cpre.__version__ == "0.5.0"
