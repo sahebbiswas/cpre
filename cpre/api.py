@@ -120,6 +120,23 @@ def _formatted(expression: _engine.Expression | None) -> str | None:
     return _engine.format_expression(expression)
 
 
+def _globally_equivalent(
+    left: _engine.Expression,
+    right: _engine.Expression,
+) -> bool:
+    """Return whether two expressions are equivalent without branch context."""
+
+    atoms: list[_engine.BooleanAtom] = []
+    seen: set[_engine.BooleanAtom] = set()
+    for expression in (left, right):
+        for atom in _engine._expression_atoms_in_order(expression):
+            if atom not in seen:
+                seen.add(atom)
+                atoms.append(atom)
+    bdd = _engine._BDD(atoms)
+    return bdd.equivalent_under(_engine.TRUE, left, right)
+
+
 def _simplifications_for_branch(
     branch: _engine.ConditionalBranch,
 ) -> tuple[ExactSimplification | None, ContextualSimplification | None]:
@@ -140,8 +157,10 @@ def _simplifications_for_branch(
 
     comparison = analysis.simplified or branch.expression
     contextual: ContextualSimplification | None = None
-    if analysis.contextual is not None and _engine._expressions_differ(
-        comparison, analysis.contextual
+    if (
+        analysis.contextual is not None
+        and _engine._expressions_differ(comparison, analysis.contextual)
+        and not _globally_equivalent(comparison, analysis.contextual)
     ):
         replacement = _formatted(analysis.contextual)
         assert replacement is not None
