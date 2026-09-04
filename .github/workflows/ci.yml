@@ -39,3 +39,11 @@ jobs:
         run: python -m build
       - name: Validate distributions
         run: python -m twine check dist/*
+      - name: Validate installed wheel public API contract
+        run: |
+          python -m pip install --force-reinstall dist/*.whl pytest
+          mkdir -p /tmp/cpre-contract
+          cp tests/test_downstream_contract.py /tmp/cpre-contract/
+          cd /tmp/cpre-contract
+          python -m pytest -q test_downstream_contract.py
+          python -m cpre --help
