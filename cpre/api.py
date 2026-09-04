@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Iterator
 
 from . import cpre as _engine
+from .errors import AnalysisError, CpreError, ErrorCode, ParseError, SourceLocation
 
 
 class FindingKind(str, Enum):
@@ -16,14 +18,6 @@ class FindingKind(str, Enum):
     REDUNDANT_BRANCH = "redundant_branch"
     SIMPLIFIABLE_CONDITION = "simplifiable_condition"
     CONTEXTUAL_SIMPLIFICATION = "contextual_simplification"
-
-
-@dataclass(frozen=True)
-class SourceLocation:
-    """One-based physical source location for a finding."""
-
-    line: int
-    column: int | None = None
 
 
 @dataclass(frozen=True)
@@ -235,19 +229,147 @@ def _finding_for_branch(
     return tuple(findings)
 
 
+def _location_at_remainder(logical_line, match) -> SourceLocation:
+    remainder = match.group(2)
+    offset = len(remainder) - len(remainder.lstrip())
+    locations = logical_line.locations[match.start(2) :]
+    if offset < len(locations):
+        location = locations[offset]
+        return SourceLocation(location.line or logical_line.start_line, location.column)
+    return SourceLocation(logical_line.start_line, len(logical_line.text) + 1)
+
+
+def _structure_diagnostic(source: str):
+    """Locate directive-only parse failures without inspecting exception text."""
+
+    stack: list[tuple[int, str]] = []
+    macro_name = re.compile(r"[A-Za-z_]\w*\Z")
+    for logical_line in _engine._logical_lines(source):
+        match = _engine._DIRECTIVE_RE.match(logical_line.text)
+        if not match:
+            continue
+        kind, remainder = match.group(1), match.group(2)
+        location = _location_at_remainder(logical_line, match)
+        text = remainder.strip()
+
+        if kind in {"if", "ifdef", "ifndef"}:
+            if kind in {"ifdef", "ifndef"} and not macro_name.fullmatch(text):
+                return (
+                    ErrorCode.MALFORMED_MACRO_DIRECTIVE,
+                    f"#{kind} expects exactly one macro name",
+                    location,
+                )
+            if kind == "if" and not text:
+                return ErrorCode.EXPRESSION_SYNTAX, "expected a Boolean expression", location
+            stack.append((logical_line.start_line, kind))
+            continue
+
+        if not stack:
+            return (
+                ErrorCode.UNMATCHED_DIRECTIVE,
+                f"#{kind} has no matching #if",
+                SourceLocation(logical_line.start_line, 1),
+            )
+
+        _, current = stack[-1]
+        if kind in {"elif", "elifdef", "elifndef"}:
+            if current == "else":
+                return (
+                    ErrorCode.MISPLACED_DIRECTIVE,
+                    f"#{kind} appears after #else",
+                    SourceLocation(logical_line.start_line, 1),
+                )
+            if kind in {"elifdef", "elifndef"} and not macro_name.fullmatch(text):
+                return (
+                    ErrorCode.MALFORMED_MACRO_DIRECTIVE,
+                    f"#{kind} expects exactly one macro name",
+                    location,
+                )
+            if kind == "elif" and not text:
+                return ErrorCode.EXPRESSION_SYNTAX, "expected a Boolean expression", location
+            stack[-1] = (stack[-1][0], kind)
+        elif kind == "else":
+            if text:
+                return (
+                    ErrorCode.TRAILING_DIRECTIVE_TEXT,
+                    "unexpected text after #else",
+                    location,
+                )
+            if current == "else":
+                return (
+                    ErrorCode.MISPLACED_DIRECTIVE,
+                    "duplicate #else",
+                    SourceLocation(logical_line.start_line, 1),
+                )
+            stack[-1] = (stack[-1][0], "else")
+        else:
+            if text:
+                return (
+                    ErrorCode.TRAILING_DIRECTIVE_TEXT,
+                    "unexpected text after #endif",
+                    location,
+                )
+            stack.pop()
+
+    if stack:
+        line, _ = stack[-1]
+        return (
+            ErrorCode.UNTERMINATED_CONDITIONAL,
+            "#if has no matching #endif",
+            SourceLocation(line, 1),
+        )
+    return None
+
+
+def _translate_parse_error(
+    source: str,
+    error: _engine.ConditionError,
+    filename: str | None,
+) -> ParseError:
+    location = getattr(error, "location", None)
+    if location is not None and location.line is not None:
+        return ParseError(
+            getattr(error, "message", str(error)),
+            code=ErrorCode.EXPRESSION_SYNTAX,
+            location=SourceLocation(location.line, location.column),
+            filename=filename,
+        )
+
+    diagnostic = _structure_diagnostic(source)
+    if diagnostic is not None:
+        code, message, public_location = diagnostic
+        return ParseError(
+            message,
+            code=code,
+            location=public_location,
+            filename=filename,
+        )
+
+    return ParseError(
+        getattr(error, "message", str(error)),
+        code=ErrorCode.EXPRESSION_SYNTAX,
+        location=None,
+        filename=filename,
+    )
+
+
 def analyze_source(source: str, *, filename: str | None = None) -> AnalysisResult:
     """Analyze C/C++ source text and return stable structured findings.
 
     The source is analyzed symbolically; no C/C++ preprocessing is performed.
-    ``filename`` is optional metadata for downstream callers and does not affect
-    analysis semantics. Malformed conditional input raises :class:`ConditionError`.
+    ``filename`` is optional metadata propagated to both successful results and
+    structured :class:`CpreError` failures.
 
     Exact simplifications are globally equivalent to the source expression.
     Contextual simplifications are only equivalent within the effective branch
     context established by enclosing and preceding conditions.
     """
 
-    tree = _engine.analyze_source(source)
+    try:
+        tree = _engine.analyze_source(source)
+    except _engine.ConditionError as error:
+        raise _translate_parse_error(source, error, filename) from error
+
     findings = tuple(
         finding
         for branch in _branches(tree.groups)
@@ -257,16 +379,20 @@ def analyze_source(source: str, *, filename: str | None = None) -> AnalysisResul
 
 
 ConditionalTree = _engine.ConditionalTree
-ConditionError = _engine.ConditionError
+ConditionError = CpreError
 
 __all__ = [
+    "AnalysisError",
     "AnalysisResult",
     "ConditionError",
     "ConditionalTree",
     "ContextualSimplification",
+    "CpreError",
+    "ErrorCode",
     "ExactSimplification",
     "Finding",
     "FindingKind",
+    "ParseError",
     "SourceLocation",
     "analyze_source",
 ]
