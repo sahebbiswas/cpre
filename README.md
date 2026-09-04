@@ -67,6 +67,21 @@ The CI workflow runs the tests across supported Python versions on Linux, macOS,
 
 The package version is defined once in `cpre/__init__.py` as `__version__` and is consumed by `pyproject.toml` during builds. The initial version is `0.1.0`.
 
+## Publishing releases
+
+Publishing to PyPI is handled by `.github/workflows/release.yml` using PyPI Trusted Publishing. The workflow runs whenever a GitHub release is published, builds both source and wheel distributions, and publishes them to PyPI without a stored API token.
+
+Before the first release, configure a PyPI Trusted Publisher for this repository with:
+
+- Owner: `sahebbiswas`
+- Repository: `cpre`
+- Workflow: `release.yml`
+- Environment: `pypi`
+
+Create a GitHub Actions environment named `pypi` as well. It can optionally require approval before deployment.
+
+Before publishing a release, update `cpre/__init__.py` to the release version and create the GitHub release from a matching tag. Both `0.1.0` and `v0.1.0` tag forms are accepted for version `0.1.0`; a mismatch causes the publish workflow to fail before uploading anything.
+
 ## License
 
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
