@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cpre"
+dynamic = ["version"]
+description = "Analyze and simplify C/C++ preprocessor conditional logic"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {file = "LICENSE"}
+authors = [
+  {name = "Saheb Biswas"},
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Quality Assurance",
+  "Topic :: Software Development :: Testing",
+]
+
+[project.urls]
+Homepage = "https://github.com/sahebbiswas/cpre"
+Repository = "https://github.com/sahebbiswas/cpre"
+Issues = "https://github.com/sahebbiswas/cpre/issues"
+
+[project.scripts]
+cpre = "cpre.cpre:main"
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7",
+  "hypothesis>=6",
+  "build>=1",
+  "twine>=5",
+]
+
+[tool.setuptools.dynamic]
+version = {attr = "cpre.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["cpre*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
