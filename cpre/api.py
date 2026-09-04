@@ -126,13 +126,11 @@ def _globally_equivalent(
 ) -> bool:
     """Return whether two expressions are equivalent without branch context."""
 
-    atoms: list[_engine.BooleanAtom] = []
-    seen: set[_engine.BooleanAtom] = set()
-    for expression in (left, right):
-        for atom in _engine._expression_atoms_in_order(expression):
-            if atom not in seen:
-                seen.add(atom)
-                atoms.append(atom)
+    atoms = [
+        atom
+        for expression in (left, right)
+        for atom in _engine._expression_atoms_in_order(expression)
+    ]
     bdd = _engine._BDD(atoms)
     return bdd.equivalent_under(_engine.TRUE, left, right)
 
