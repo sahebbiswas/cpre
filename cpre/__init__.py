@@ -2,6 +2,7 @@
 
 from .api import (
     AnalysisResult,
+    ConditionError,
     ConditionalTree,
     Finding,
     FindingKind,
@@ -13,6 +14,7 @@ __version__ = "0.2.0"
 
 __all__ = [
     "AnalysisResult",
+    "ConditionError",
     "ConditionalTree",
     "Finding",
     "FindingKind",
