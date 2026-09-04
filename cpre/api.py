@@ -140,7 +140,7 @@ def analyze_source(source: str, *, filename: str | None = None) -> AnalysisResul
 
     The source is analyzed symbolically; no C/C++ preprocessing is performed.
     ``filename`` is optional metadata for downstream callers and does not affect
-    analysis semantics.
+    analysis semantics. Malformed conditional input raises :class:`ConditionError`.
     """
 
     tree = _engine.analyze_source(source)
@@ -153,9 +153,11 @@ def analyze_source(source: str, *, filename: str | None = None) -> AnalysisResul
 
 
 ConditionalTree = _engine.ConditionalTree
+ConditionError = _engine.ConditionError
 
 __all__ = [
     "AnalysisResult",
+    "ConditionError",
     "ConditionalTree",
     "Finding",
     "FindingKind",
