@@ -24,10 +24,10 @@ After installation, run:
 cpre source.c
 ```
 
-Or invoke the module directly:
+Or invoke the package directly:
 
 ```bash
-python -m cpre.cpre source.c
+python -m cpre source.c
 ```
 
 Useful options include:
@@ -43,15 +43,32 @@ By default, text and JSON reports are filtered to branches that are dead, redund
 
 ## Python API
 
-The analyzer implementation currently lives in `cpre/cpre.py` and can be imported as:
+`cpre` exposes a stable top-level API for programmatic consumers:
 
 ```python
-from cpre import cpre
+import cpre
 
-tree = cpre.analyze_source(source_text)
+result = cpre.analyze_source(source_text, filename="example.c")
+
+for finding in result.findings:
+    print(finding.kind, finding.location.line, finding.reason)
 ```
 
-The initial package layout intentionally preserves the analyzer implementation while establishing a reusable Python package boundary. Public API refinement can follow independently.
+The supported public symbols are:
+
+- `analyze_source`
+- `AnalysisResult`
+- `Finding`
+- `FindingKind`
+- `SourceLocation`
+- `ConditionalTree`
+- `__version__`
+
+`analyze_source` returns an `AnalysisResult` containing the analyzed conditional tree and an ordered tuple of structured findings. Finding kinds currently distinguish dead branches, redundant branches, globally simplifiable conditions, and contextual simplifications.
+
+Consumers should import these symbols from `cpre` rather than from `cpre.cpre` or relying on private helpers such as the ROBDD implementation. Private implementation details are not part of the compatibility contract.
+
+The optional `filename` argument is metadata for downstream tools and does not affect analysis semantics.
 
 ## Development
 
@@ -65,7 +82,7 @@ The CI workflow runs the tests across supported Python versions on Linux, macOS,
 
 ## Versioning
 
-The package version is defined once in `cpre/__init__.py` as `__version__` and is consumed by `pyproject.toml` during builds. The initial version is `0.1.0`.
+The package version is defined once in `cpre/__init__.py` as `__version__` and is consumed by `pyproject.toml` during builds. Public API additions are released with a minor version bump while backward-compatible fixes use patch releases.
 
 ## Publishing releases
 
@@ -80,7 +97,7 @@ Before the first release, configure a PyPI Trusted Publisher for this repository
 
 Create a GitHub Actions environment named `pypi` as well. It can optionally require approval before deployment.
 
-Before publishing a release, update `cpre/__init__.py` to the release version and create the GitHub release from a matching tag. Both `0.1.0` and `v0.1.0` tag forms are accepted for version `0.1.0`; a mismatch causes the publish workflow to fail before uploading anything.
+Before publishing a release, update `cpre/__init__.py` to the release version and create the GitHub release from a matching tag. Both plain and `v`-prefixed tags are accepted when they match the package version; a mismatch causes the publish workflow to fail before uploading anything.
 
 ## License
 
