@@ -34,8 +34,8 @@ def tree_expressions(groups: Sequence[ConditionalGroup]) -> Iterator[Expression]
             yield from tree_expressions(branch.children)
 
 
-def _macro_semantics(tree: ConditionalTree, *, legacy_symbolic: bool) -> Expression:
-    """Return Boolean relationships between macro value and definedness atoms."""
+def _macro_semantics(tree: ConditionalTree) -> Expression:
+    """Return C preprocessor relationships between value and definedness atoms."""
 
     names: set[str] = set()
     for expression in tree_expressions(tree.groups):
@@ -45,14 +45,15 @@ def _macro_semantics(tree: ConditionalTree, *, legacy_symbolic: bool) -> Express
             elif isinstance(atom, DefinedVariable):
                 names.add(atom.name)
 
-    constraints: list[Expression] = []
-    for name in sorted(names):
-        value = Variable(name)
-        defined = DefinedVariable(name)
-        constraints.append(disjunction(negate(value), defined))
-        if legacy_symbolic:
-            constraints.append(disjunction(negate(defined), value))
-    return conjunction(*constraints)
+    # An undefined macro evaluates to zero in a preprocessor expression. Thus a
+    # truthy bare macro implies that the macro is defined; the converse is not
+    # true because a defined macro may expand to zero.
+    return conjunction(
+        *(
+            disjunction(negate(Variable(name)), DefinedVariable(name))
+            for name in sorted(names)
+        )
+    )
 
 
 def analyze_tree(
@@ -60,15 +61,19 @@ def analyze_tree(
     *,
     assumptions: Expression | None = None,
 ) -> ConditionalTree:
-    assumption_expression = assumptions or TRUE
-    proof_context = conjunction(
-        assumption_expression,
-        _macro_semantics(tree, legacy_symbolic=assumptions is None),
+    configuration_aware = assumptions is not None
+    proof_context = (
+        conjunction(assumptions, _macro_semantics(tree))
+        if assumptions is not None
+        else TRUE
     )
 
     atoms: list[BooleanAtom] = []
     seen_atoms: set[BooleanAtom] = set()
-    for expression in (*tree_expressions(tree.groups), proof_context):
+    expressions = list(tree_expressions(tree.groups))
+    if configuration_aware:
+        expressions.append(proof_context)
+    for expression in expressions:
         for atom in expression_atoms_in_order(expression):
             if atom not in seen_atoms:
                 seen_atoms.add(atom)
@@ -76,6 +81,8 @@ def analyze_tree(
     bdd = BDD(atoms)
 
     def satisfiable(expression: Expression) -> bool:
+        if not configuration_aware:
+            return bdd.satisfiable(expression)
         return bdd.satisfiable(conjunction(proof_context, expression))
 
     def analyze_groups(groups: Sequence[ConditionalGroup], parent: Expression) -> None:
@@ -85,12 +92,18 @@ def analyze_tree(
                 available = conjunction(parent, negate(covered))
                 condition = branch.expression if branch.expression is not None else TRUE
                 effective = conjunction(available, condition)
-                simplified = (
-                    simplify_under(condition, proof_context, bdd)
-                    if branch.expression is not None and bdd.satisfiable(proof_context)
-                    else exact_simplify(condition, bdd) if branch.expression is not None else None
+                if branch.expression is None:
+                    simplified = None
+                elif configuration_aware:
+                    simplified = simplify_under(condition, proof_context, bdd)
+                else:
+                    simplified = exact_simplify(condition, bdd)
+
+                contextual_context = (
+                    conjunction(proof_context, available)
+                    if configuration_aware
+                    else available
                 )
-                contextual_context = conjunction(proof_context, available)
                 contextual = (
                     simplify_under(condition, contextual_context, bdd)
                     if branch.expression is not None and bdd.satisfiable(contextual_context)
