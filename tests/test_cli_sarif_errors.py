@@ -31,9 +31,10 @@ def test_sarif_still_emits_valid_log_when_one_file_has_parse_error(tmp_path, cap
 
 
 def test_sarif_source_read_error_uses_stable_declared_descriptor(tmp_path, capsys):
-    missing = tmp_path / "missing.c"
+    unreadable = tmp_path / "invalid-utf8.c"
+    unreadable.write_bytes(b"#if A\n\xff\n#endif\n")
 
-    exit_code = main([str(missing), "--sarif"])
+    exit_code = main([str(unreadable), "--sarif"])
 
     captured = capsys.readouterr()
     assert exit_code == 2
