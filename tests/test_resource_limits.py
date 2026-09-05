@@ -1,3 +1,8 @@
+import json
+import os
+import subprocess
+import sys
+
 import cpre
 import pytest
 
@@ -73,6 +78,45 @@ def test_higher_node_and_work_limits_allow_dead_branch_proof():
 
     assert result.complete
     assert [finding.kind for finding in result.findings] == [cpre.FindingKind.DEAD_BRANCH]
+
+
+def test_large_realistic_nested_fixture_completes_with_defaults():
+    lines = []
+    for index in range(24):
+        lines.append(f"#if FEATURE_{index % 8} || PLATFORM_{index % 4}\n")
+    lines.append("int enabled;\n")
+    lines.extend("#endif\n" for _ in range(24))
+
+    result = cpre.analyze_source("".join(lines))
+
+    assert result.complete
+
+
+def test_limit_diagnostic_is_stable_across_python_hash_seeds():
+    script = """
+import json
+import cpre
+result = cpre.analyze_source(
+    '#if A && B && C\\n#endif\\n',
+    options=cpre.AnalysisOptions(max_atoms=2),
+)
+d = result.incomplete[0]
+print(json.dumps([d.resource, d.limit, d.observed, d.location.line if d.location else None]))
+"""
+    outputs = []
+    for seed in ("1", "7"):
+        env = os.environ.copy()
+        env["PYTHONHASHSEED"] = seed
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        outputs.append(json.loads(completed.stdout))
+
+    assert outputs == [["atoms", 2, 3, None], ["atoms", 2, 3, None]]
 
 
 @pytest.mark.parametrize("name", ["max_atoms", "max_bdd_nodes", "max_work"])
