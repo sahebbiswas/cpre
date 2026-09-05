@@ -21,10 +21,8 @@ class Variable:
 
 
 @dataclass(frozen=True)
-class DefinedVariable:
+class DefinedVariable(Variable):
     """Whether a preprocessor macro is defined, distinct from its Boolean value."""
-
-    name: str
 
 
 @dataclass(frozen=True)
