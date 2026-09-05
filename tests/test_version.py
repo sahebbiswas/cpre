@@ -1,5 +1,5 @@
 import cpre
 
 
-def test_version_for_sarif_output():
-    assert cpre.__version__ == "0.6.2"
+def test_version_for_beta_release():
+    assert cpre.__version__ == "0.7.0"
