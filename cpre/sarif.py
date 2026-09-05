@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 from urllib.parse import quote
 
-from .api import AnalysisIncomplete, AnalysisResult, Finding, FindingKind, SourceRange
+from .api import (
+    AnalysisIncomplete,
+    AnalysisResult,
+    Finding,
+    FindingKind,
+    SourceLocation,
+    SourceRange,
+)
 
 SARIF_SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
 SARIF_VERSION = "2.1.0"
@@ -58,9 +66,19 @@ _RULE_FOR_KIND = {
 }
 
 
+@dataclass(frozen=True)
+class ToolNotification:
+    """One CLI/tool failure to represent in the SARIF invocation."""
+
+    message: str
+    descriptor_id: str
+    filename: str | None = None
+    location: SourceLocation | None = None
+
+
 def _artifact_uri(filename: str | None) -> str:
     if filename is None:
-        return "<memory>"
+        return "memory"
     path = Path(filename)
     if path.is_absolute():
         try:
@@ -129,6 +147,12 @@ def _fix(finding: Finding, uri: str) -> list[dict[str, object]] | None:
 def _finding_result(finding: Finding, filename: str | None) -> dict[str, object]:
     rule_id, rule_index, level = _RULE_FOR_KIND[finding.kind]
     uri = _artifact_uri(filename)
+    properties: dict[str, object] = {
+        "kind": finding.kind.value,
+        "directive": finding.directive,
+        "dependsOnAssumptions": finding.depends_on_assumptions,
+        "opaquePredicates": list(finding.opaque_predicates),
+    }
     result: dict[str, object] = {
         "ruleId": rule_id,
         "ruleIndex": rule_index,
@@ -142,22 +166,36 @@ def _finding_result(finding: Finding, filename: str | None) -> dict[str, object]
                 }
             }
         ],
-        "properties": {
-            "kind": finding.kind.value,
-            "directive": finding.directive,
-            "dependsOnAssumptions": finding.depends_on_assumptions,
-            "opaquePredicates": list(finding.opaque_predicates),
-        },
+        "properties": properties,
     }
     if finding.original_condition is not None:
-        result["properties"]["originalCondition"] = finding.original_condition  # type: ignore[index]
+        properties["originalCondition"] = finding.original_condition
     if finding.edit is not None:
-        result["properties"]["fixConfidence"] = finding.edit.confidence.value  # type: ignore[index]
+        properties["fixConfidence"] = finding.edit.confidence.value
         result["fixes"] = _fix(finding, uri)
     return result
 
 
-def _notification(diagnostic: AnalysisIncomplete, filename: str | None) -> dict[str, object]:
+def _location(filename: str | None, location: SourceLocation | None) -> list[dict[str, object]] | None:
+    if location is None:
+        return None
+    region: dict[str, int] = {"startLine": location.line}
+    if location.column is not None:
+        region["startColumn"] = location.column
+    return [
+        {
+            "physicalLocation": {
+                "artifactLocation": {"uri": _artifact_uri(filename)},
+                "region": region,
+            }
+        }
+    ]
+
+
+def _incomplete_notification(
+    diagnostic: AnalysisIncomplete,
+    filename: str | None,
+) -> dict[str, object]:
     notification: dict[str, object] = {
         "level": "error",
         "message": {"text": diagnostic.message},
@@ -168,37 +206,52 @@ def _notification(diagnostic: AnalysisIncomplete, filename: str | None) -> dict[
             "observed": diagnostic.observed,
         },
     }
-    if diagnostic.location is not None:
-        notification["locations"] = [
-            {
-                "physicalLocation": {
-                    "artifactLocation": {"uri": _artifact_uri(filename)},
-                    "region": {"startLine": diagnostic.location.line},
-                }
-            }
-        ]
+    locations = _location(filename, diagnostic.location)
+    if locations is not None:
+        notification["locations"] = locations
     return notification
 
 
-def sarif_log(results: Iterable[AnalysisResult], *, tool_version: str) -> dict[str, object]:
+def _tool_notification(notification: ToolNotification) -> dict[str, object]:
+    result: dict[str, object] = {
+        "level": "error",
+        "message": {"text": notification.message},
+        "descriptor": {"id": notification.descriptor_id},
+    }
+    locations = _location(notification.filename, notification.location)
+    if locations is not None:
+        result["locations"] = locations
+    return result
+
+
+def sarif_log(
+    results: Iterable[AnalysisResult],
+    *,
+    tool_version: str,
+    notifications: Iterable[ToolNotification] = (),
+) -> dict[str, object]:
     """Return a deterministic SARIF 2.1.0 log for one cpre invocation."""
 
     analyses = tuple(results)
+    external_notifications = tuple(notifications)
     sarif_results = [
         _finding_result(finding, analysis.filename)
         for analysis in analyses
         for finding in analysis.findings
     ]
-    notifications = [
-        _notification(diagnostic, analysis.filename)
+    execution_notifications = [
+        _incomplete_notification(diagnostic, analysis.filename)
         for analysis in analyses
         for diagnostic in analysis.incomplete
     ]
+    execution_notifications.extend(
+        _tool_notification(notification) for notification in external_notifications
+    )
     invocation: dict[str, object] = {
-        "executionSuccessful": not notifications,
+        "executionSuccessful": not execution_notifications,
     }
-    if notifications:
-        invocation["toolExecutionNotifications"] = notifications
+    if execution_notifications:
+        invocation["toolExecutionNotifications"] = execution_notifications
 
     return {
         "$schema": SARIF_SCHEMA,
@@ -220,4 +273,4 @@ def sarif_log(results: Iterable[AnalysisResult], *, tool_version: str) -> dict[s
     }
 
 
-__all__ = ["SARIF_SCHEMA", "SARIF_VERSION", "sarif_log"]
+__all__ = ["SARIF_SCHEMA", "SARIF_VERSION", "ToolNotification", "sarif_log"]
