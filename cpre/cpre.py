@@ -16,8 +16,9 @@ from pathlib import Path
 # absolute imports. Normal package imports continue to use relative imports.
 if __package__ in {None, ""}:
     package_parent = str(Path(__file__).resolve().parent.parent)
-    if package_parent not in sys.path:
-        sys.path.insert(0, package_parent)
+    while package_parent in sys.path:
+        sys.path.remove(package_parent)
+    sys.path.insert(0, package_parent)
 
     from cpre.analysis import analyze_source, analyze_tree, tree_expressions as _tree_expressions
     from cpre.discovery import SOURCE_SUFFIXES as _SOURCE_SUFFIXES, source_paths as _source_paths
