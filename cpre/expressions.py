@@ -9,6 +9,7 @@ from .model import (
     BooleanAtom,
     Conjunction,
     Constant,
+    DefinedVariable,
     Disjunction,
     Expression,
     ExpressionSyntaxError,
@@ -41,9 +42,7 @@ class Token:
         self.location = location
 
 
-def tokens(
-    text: str, locations: Sequence[SourceLocation] | None = None
-) -> list[Token]:
+def tokens(text: str, locations: Sequence[SourceLocation] | None = None) -> list[Token]:
     if locations is not None and len(locations) != len(text):
         raise ValueError("source locations must correspond to every input character")
 
@@ -59,8 +58,7 @@ def tokens(
         if not match:
             if text[offset:].strip():
                 raise ExpressionSyntaxError(
-                    f"unsupported input: {text[offset:]!r}",
-                    location=location_at(offset),
+                    f"unsupported input: {text[offset:]!r}", location=location_at(offset)
                 )
             break
         kind = match.lastgroup
@@ -73,10 +71,15 @@ def tokens(
 
 class ExpressionParser:
     def __init__(
-        self, text: str, locations: Sequence[SourceLocation] | None = None
+        self,
+        text: str,
+        locations: Sequence[SourceLocation] | None = None,
+        *,
+        distinguish_defined: bool = False,
     ) -> None:
         self.text = text
         self.tokens = tokens(text, locations)
+        self.distinguish_defined = distinguish_defined
 
     def parse(self) -> Expression:
         if not self.tokens:
@@ -180,20 +183,22 @@ class ExpressionParser:
                     return True
         return False
 
-    @staticmethod
-    def _parse_defined(items: Sequence[Token]) -> Expression | None:
+    def _parse_defined(self, items: Sequence[Token]) -> Expression | None:
         if not items or items[0].kind != "identifier" or items[0].text != "defined":
             return None
+        name: str | None = None
         if len(items) == 2 and items[1].kind == "identifier":
-            return Variable(items[1].text)
-        if (
+            name = items[1].text
+        elif (
             len(items) == 4
             and items[1].kind == "lparen"
             and items[2].kind == "identifier"
             and items[3].kind == "rparen"
         ):
-            return Variable(items[2].text)
-        return None
+            name = items[2].text
+        if name is None:
+            return None
+        return DefinedVariable(name) if self.distinguish_defined else Variable(name)
 
     @staticmethod
     def _parse_number(token: Token) -> Constant:
@@ -311,6 +316,8 @@ def _precedence(expression: Expression) -> int:
 def format_expression(expression: Expression, parent_precedence: int = 0) -> str:
     if isinstance(expression, Constant):
         text = "1" if expression.value else "0"
+    elif isinstance(expression, DefinedVariable):
+        text = f"defined({expression.name})"
     elif isinstance(expression, Variable):
         text = expression.name
     elif isinstance(expression, Predicate):
@@ -354,6 +361,8 @@ def expression_predicates(expression: Expression) -> set[str]:
 def expression_comparison_key(expression: Expression) -> tuple[object, ...]:
     if isinstance(expression, Constant):
         return ("constant", expression.value)
+    if isinstance(expression, DefinedVariable):
+        return ("defined", expression.name)
     if isinstance(expression, Variable):
         return ("variable", expression.name)
     if isinstance(expression, Predicate):
@@ -363,12 +372,14 @@ def expression_comparison_key(expression: Expression) -> tuple[object, ...]:
     operator = "and" if isinstance(expression, Conjunction) else "or"
     expression_type = type(expression)
     operands: list[Expression] = []
+
     def collect(item: Expression) -> None:
         if isinstance(item, expression_type):
             for operand in item.operands:
                 collect(operand)
         else:
             operands.append(item)
+
     collect(expression)
     return (operator, tuple(sorted(expression_comparison_key(item) for item in operands)))
 

@@ -11,6 +11,7 @@ PUBLIC_IMPORTS = (
     cpre.Finding,
     cpre.FindingKind,
     cpre.FixConfidence,
+    cpre.MacroAssumptions,
     cpre.SourceLocation,
     cpre.SourceRange,
     cpre.SuggestedEdit,
@@ -65,6 +66,7 @@ def test_representative_findings_have_stable_kinds_and_ordering():
     )
     assert exact.edit is not None
     assert exact.edit.confidence is cpre.FixConfidence.EXACT
+    assert exact.depends_on_assumptions is False
 
     assert contextual.location == cpre.SourceLocation(line=4)
     assert contextual.contextual_simplification == cpre.ContextualSimplification(
@@ -104,3 +106,12 @@ def test_macro_form_and_branch_classification_do_not_imply_mechanical_edits():
     finding = _by_kind(result, cpre.FindingKind.REDUNDANT_BRANCH)[0]
     assert finding.directive == "ifdef"
     assert finding.edit is None
+
+
+def test_assumption_contract_marks_profile_specific_findings():
+    result = cpre.analyze_source(
+        "#ifdef FEATURE\n#endif\n",
+        assumptions=cpre.MacroAssumptions(defined={"FEATURE"}),
+    )
+    finding = _by_kind(result, cpre.FindingKind.REDUNDANT_BRANCH)[0]
+    assert finding.depends_on_assumptions is True

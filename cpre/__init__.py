@@ -12,6 +12,7 @@ from .api import (
     Finding,
     FindingKind,
     FixConfidence,
+    MacroAssumptions,
     ParseError,
     SourceLocation,
     SourceRange,
@@ -19,7 +20,7 @@ from .api import (
     analyze_source,
 )
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 __all__ = [
     "AnalysisError",
@@ -33,6 +34,7 @@ __all__ = [
     "Finding",
     "FindingKind",
     "FixConfidence",
+    "MacroAssumptions",
     "ParseError",
     "SourceLocation",
     "SourceRange",
