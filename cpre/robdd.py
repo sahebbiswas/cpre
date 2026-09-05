@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Iterable
 
 from .expressions import conjunction, disjunction, negate, simplify
@@ -11,9 +12,52 @@ from .model import (
 )
 
 
+@dataclass(frozen=True)
+class ResourceLimits:
+    """Deterministic structural limits for one ROBDD-backed analysis session."""
+
+    max_atoms: int = 64
+    max_bdd_nodes: int = 100_000
+    max_work: int = 500_000
+
+
+class AnalysisLimitExceeded(RuntimeError):
+    """Raised internally when a deterministic ROBDD resource limit is reached."""
+
+    def __init__(self, resource: str, limit: int, observed: int):
+        self.resource = resource
+        self.limit = limit
+        self.observed = observed
+        self.line: int | None = None
+        super().__init__(f"analysis limit exceeded for {resource}: {observed} > {limit}")
+
+
+class AnalysisBudget:
+    """Shared deterministic work budget across all BDD managers for one source."""
+
+    def __init__(self, limit: int):
+        self.limit = limit
+        self.work = 0
+
+    def consume(self) -> None:
+        self.work += 1
+        if self.work > self.limit:
+            raise AnalysisLimitExceeded("work", self.limit, self.work)
+
+
 class BDD:
-    def __init__(self, atoms: Iterable[BooleanAtom]):
+    def __init__(
+        self,
+        atoms: Iterable[BooleanAtom],
+        *,
+        limits: ResourceLimits | None = None,
+        budget: AnalysisBudget | None = None,
+    ):
         ordered_atoms = list(dict.fromkeys(atoms))
+        self.limits = limits or ResourceLimits()
+        self.budget = budget or AnalysisBudget(self.limits.max_work)
+        if len(ordered_atoms) > self.limits.max_atoms:
+            raise AnalysisLimitExceeded("atoms", self.limits.max_atoms, len(ordered_atoms))
         self.order = {atom: index for index, atom in enumerate(ordered_atoms)}
         self.atoms = ordered_atoms
         self.nodes: list[tuple[int, int, int] | None] = [None, None]
@@ -22,6 +66,9 @@ class BDD:
         self._not_cache: dict[int, int] = {0: 1, 1: 0}
         self._build_cache: dict[Expression, int] = {}
         self._expression_cache: dict[int, Expression] = {0: FALSE, 1: TRUE}
+
+    def _consume_work(self) -> None:
+        self.budget.consume()
 
     def node_count(self, root: int) -> int:
         reachable: set[int] = set()
@@ -42,6 +89,10 @@ class BDD:
             return low
         key = (variable, low, high)
         if key not in self.unique:
+            self._consume_work()
+            next_count = len(self.nodes) - 1
+            if next_count > self.limits.max_bdd_nodes:
+                raise AnalysisLimitExceeded("bdd_nodes", self.limits.max_bdd_nodes, next_count)
             self.unique[key] = len(self.nodes)
             self.nodes.append(key)
         return self.unique[key]
@@ -51,6 +102,7 @@ class BDD:
         cached = self._build_cache.get(expression)
         if cached is not None:
             return cached
+        self._consume_work()
         if isinstance(expression, Constant):
             result = int(expression.value)
         elif isinstance(expression, (Variable, Predicate)):
@@ -71,6 +123,7 @@ class BDD:
     def negate(self, node: int) -> int:
         if node in self._not_cache:
             return self._not_cache[node]
+        self._consume_work()
         item = self.nodes[node]
         assert item is not None
         variable, low, high = item
@@ -84,6 +137,7 @@ class BDD:
         key = (operation, left, right)
         if key in self._apply_cache:
             return self._apply_cache[key]
+        self._consume_work()
         if operation == "and":
             if left == 0 or right == 0:
                 return 0
@@ -121,6 +175,7 @@ class BDD:
         cached = self._expression_cache.get(node)
         if cached is not None:
             return cached
+        self._consume_work()
         item = self.nodes[node]
         assert item is not None
         variable_index, low_node, high_node = item
@@ -197,4 +252,11 @@ def simplify_under(expression: Expression, context: Expression, bdd: BDD) -> Exp
     return candidate
 
 
-__all__ = ["BDD", "exact_simplify", "simplify_under"]
+__all__ = [
+    "AnalysisBudget",
+    "AnalysisLimitExceeded",
+    "BDD",
+    "ResourceLimits",
+    "exact_simplify",
+    "simplify_under",
+]

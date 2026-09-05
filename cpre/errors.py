@@ -24,6 +24,7 @@ class ErrorCode(str, Enum):
     TRAILING_DIRECTIVE_TEXT = "trailing_directive_text"
     UNTERMINATED_CONDITIONAL = "unterminated_conditional"
     INVALID_ASSUMPTIONS = "invalid_assumptions"
+    ANALYSIS_LIMIT_EXCEEDED = "analysis_limit_exceeded"
     ANALYSIS_FAILURE = "analysis_failure"
 
 

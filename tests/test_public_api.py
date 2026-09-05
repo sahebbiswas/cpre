@@ -20,6 +20,8 @@ def _apply_edit(source, edit):
 def test_top_level_public_api_exposes_supported_symbols_only():
     assert cpre.__all__ == [
         "AnalysisError",
+        "AnalysisIncomplete",
+        "AnalysisOptions",
         "AnalysisResult",
         "ConditionError",
         "ConditionalTree",
@@ -47,6 +49,8 @@ def test_analyze_source_returns_structured_result_and_filename():
     assert isinstance(result.tree, cpre.ConditionalTree)
     assert result.filename == "feature.c"
     assert result.findings == ()
+    assert result.complete
+    assert result.incomplete == ()
 
 
 def test_invalid_source_raises_public_condition_error():

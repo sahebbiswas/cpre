@@ -11,6 +11,9 @@ from . import cpre as _engine
 from .errors import AnalysisError, CpreError, ErrorCode, ParseError, SourceLocation
 from .expressions import conjunction, negate
 from .model import DefinedVariable, TRUE, Variable
+from .robdd import AnalysisBudget as _AnalysisBudget
+from .robdd import AnalysisLimitExceeded as _AnalysisLimitExceeded
+from .robdd import ResourceLimits as _ResourceLimits
 
 
 class FindingKind(str, Enum):
@@ -27,6 +30,43 @@ class FixConfidence(str, Enum):
 
     EXACT = "exact"
     CONTEXTUAL = "contextual"
+
+
+@dataclass(frozen=True)
+class AnalysisOptions:
+    """Deterministic resource limits for one source analysis."""
+
+    max_atoms: int = 64
+    max_bdd_nodes: int = 100_000
+    max_work: int = 500_000
+
+    def __post_init__(self) -> None:
+        for name in ("max_atoms", "max_bdd_nodes", "max_work"):
+            value = getattr(self, name)
+            if type(value) is not int or value <= 0:
+                raise AnalysisError(
+                    f"{name} must be a positive integer",
+                    code=ErrorCode.ANALYSIS_FAILURE,
+                )
+
+    def _resource_limits(self) -> _ResourceLimits:
+        return _ResourceLimits(
+            max_atoms=self.max_atoms,
+            max_bdd_nodes=self.max_bdd_nodes,
+            max_work=self.max_work,
+        )
+
+
+@dataclass(frozen=True)
+class AnalysisIncomplete:
+    """Structured diagnostic describing intentionally curtailed exact analysis."""
+
+    code: ErrorCode
+    resource: str
+    limit: int
+    observed: int
+    message: str
+    location: SourceLocation | None = None
 
 
 @dataclass(frozen=True, init=False)
@@ -166,6 +206,11 @@ class AnalysisResult:
     findings: tuple[Finding, ...]
     tree: _engine.ConditionalTree
     filename: str | None = None
+    incomplete: tuple[AnalysisIncomplete, ...] = ()
+
+    @property
+    def complete(self) -> bool:
+        return not self.incomplete
 
 
 def _branches(groups: list[_engine.ConditionalGroup]) -> Iterator[_engine.ConditionalBranch]:
@@ -181,13 +226,18 @@ def _formatted(expression: _engine.Expression | None) -> str | None:
     return _engine.format_expression(expression)
 
 
-def _globally_equivalent(left: _engine.Expression, right: _engine.Expression) -> bool:
+def _globally_equivalent(
+    left: _engine.Expression,
+    right: _engine.Expression,
+    limits: _ResourceLimits,
+    budget: _AnalysisBudget,
+) -> bool:
     atoms = [
         atom
         for expression in (left, right)
         for atom in _engine._expression_atoms_in_order(expression)
     ]
-    bdd = _engine._BDD(atoms)
+    bdd = _engine._BDD(atoms, limits=limits, budget=budget)
     return bdd.equivalent_under(_engine.TRUE, left, right)
 
 
@@ -232,6 +282,8 @@ def _edit_for(
 
 def _simplifications_for_branch(
     branch: _engine.ConditionalBranch,
+    limits: _ResourceLimits,
+    budget: _AnalysisBudget,
 ) -> tuple[ExactSimplification | None, ContextualSimplification | None]:
     analysis = branch.analysis
     assert analysis is not None
@@ -250,7 +302,7 @@ def _simplifications_for_branch(
     if (
         analysis.contextual is not None
         and _engine._expressions_differ(comparison, analysis.contextual)
-        and not _globally_equivalent(comparison, analysis.contextual)
+        and not _globally_equivalent(comparison, analysis.contextual, limits, budget)
     ):
         replacement = _formatted(analysis.contextual)
         assert replacement is not None
@@ -277,12 +329,19 @@ def _analysis_dependency(
 def _finding_for_branch(
     branch: _engine.ConditionalBranch,
     ranges: dict[tuple[int, str], SourceRange],
+    limits: _ResourceLimits,
+    budget: _AnalysisBudget,
     baseline: _engine.ConditionalBranch | None = None,
 ) -> tuple[Finding, ...]:
     analysis = branch.analysis
     assert analysis is not None
     original = branch.expression_text
-    exact, contextual = _simplifications_for_branch(branch)
+    try:
+        exact, contextual = _simplifications_for_branch(branch, limits, budget)
+    except _AnalysisLimitExceeded as error:
+        if error.line is None:
+            error.line = branch.line
+        raise
     predicates = tuple(
         sorted(_engine.expression_predicates(branch.expression))
         if branch.expression is not None
@@ -372,41 +431,86 @@ def _assumption_expression(assumptions: MacroAssumptions) -> _engine.Expression:
     return conjunction(*terms) if terms else TRUE
 
 
+def _incomplete_result(
+    source: str,
+    *,
+    filename: str | None,
+    distinguish_defined: bool,
+    error: _AnalysisLimitExceeded,
+) -> AnalysisResult:
+    tree = _engine.parse_source(source, distinguish_defined=distinguish_defined)
+    diagnostic = AnalysisIncomplete(
+        code=ErrorCode.ANALYSIS_LIMIT_EXCEEDED,
+        resource=error.resource,
+        limit=error.limit,
+        observed=error.observed,
+        message=str(error),
+        location=SourceLocation(error.line) if error.line is not None else None,
+    )
+    return AnalysisResult(findings=(), tree=tree, filename=filename, incomplete=(diagnostic,))
+
+
 def analyze_source(
     source: str,
     *,
     filename: str | None = None,
     assumptions: MacroAssumptions | Mapping[str, bool] | None = None,
+    options: AnalysisOptions | None = None,
 ) -> AnalysisResult:
-    """Analyze source with optional explicit macro assumptions.
+    """Analyze source with optional assumptions and deterministic resource limits.
 
-    A plain mapping constrains Boolean values of bare macro identifiers. Use
-    :class:`MacroAssumptions` when defined/undefined state must be expressed
-    independently. Unknown macros always remain symbolic.
+    If exact Boolean reasoning reaches a configured limit, the returned result
+    is marked incomplete and contains no findings. Callers can therefore
+    distinguish a clean analysis from one intentionally curtailed without ever
+    consuming a partial proof as a diagnostic.
     """
 
     normalized = _normalize_assumptions(assumptions)
+    resolved_options = options or AnalysisOptions()
+    if not isinstance(resolved_options, AnalysisOptions):
+        raise AnalysisError(
+            "options must be an AnalysisOptions instance",
+            code=ErrorCode.ANALYSIS_FAILURE,
+        )
+    limits = resolved_options._resource_limits()
+    budget = _AnalysisBudget(limits.max_work)
+    assumption_expression = _assumption_expression(normalized) if normalized is not None else None
     try:
         tree = _engine.analyze_source(
             source,
-            assumptions=_assumption_expression(normalized) if normalized is not None else None,
+            assumptions=assumption_expression,
+            limits=limits,
+            budget=budget,
         )
-        baseline_tree = _engine.analyze_source(source) if normalized is not None else None
+        baseline_tree = (
+            _engine.analyze_source(source, limits=limits, budget=budget)
+            if normalized is not None
+            else None
+        )
+        ranges = _condition_ranges(source)
+        branches = tuple(_branches(tree.groups))
+        baseline_branches = tuple(_branches(baseline_tree.groups)) if baseline_tree is not None else ()
+        findings = tuple(
+            finding
+            for index, branch in enumerate(branches)
+            for finding in _finding_for_branch(
+                branch,
+                ranges,
+                limits,
+                budget,
+                baseline_branches[index] if index < len(baseline_branches) else None,
+            )
+        )
+    except _AnalysisLimitExceeded as error:
+        return _incomplete_result(
+            source,
+            filename=filename,
+            distinguish_defined=normalized is not None,
+            error=error,
+        )
     except _engine.ConditionError as error:
         raise _translate_parse_error(error, filename) from error
 
-    ranges = _condition_ranges(source)
-    branches = tuple(_branches(tree.groups))
-    baseline_branches = tuple(_branches(baseline_tree.groups)) if baseline_tree is not None else ()
-    findings = tuple(
-        finding
-        for index, branch in enumerate(branches)
-        for finding in _finding_for_branch(
-            branch,
-            ranges,
-            baseline_branches[index] if index < len(baseline_branches) else None,
-        )
-    )
     return AnalysisResult(findings=findings, tree=tree, filename=filename)
 
 
@@ -415,6 +519,8 @@ ConditionError = CpreError
 
 __all__ = [
     "AnalysisError",
+    "AnalysisIncomplete",
+    "AnalysisOptions",
     "AnalysisResult",
     "ConditionError",
     "ConditionalTree",
