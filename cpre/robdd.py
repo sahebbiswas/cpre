@@ -32,10 +32,30 @@ class AnalysisLimitExceeded(RuntimeError):
         super().__init__(f"analysis limit exceeded for {resource}: {observed} > {limit}")
 
 
+class AnalysisBudget:
+    """Shared deterministic work budget across all BDD managers for one source."""
+
+    def __init__(self, limit: int):
+        self.limit = limit
+        self.work = 0
+
+    def consume(self) -> None:
+        self.work += 1
+        if self.work > self.limit:
+            raise AnalysisLimitExceeded("work", self.limit, self.work)
+
+
 class BDD:
-    def __init__(self, atoms: Iterable[BooleanAtom], *, limits: ResourceLimits | None = None):
+    def __init__(
+        self,
+        atoms: Iterable[BooleanAtom],
+        *,
+        limits: ResourceLimits | None = None,
+        budget: AnalysisBudget | None = None,
+    ):
         ordered_atoms = list(dict.fromkeys(atoms))
         self.limits = limits or ResourceLimits()
+        self.budget = budget or AnalysisBudget(self.limits.max_work)
         if len(ordered_atoms) > self.limits.max_atoms:
             raise AnalysisLimitExceeded("atoms", self.limits.max_atoms, len(ordered_atoms))
         self.order = {atom: index for index, atom in enumerate(ordered_atoms)}
@@ -46,12 +66,9 @@ class BDD:
         self._not_cache: dict[int, int] = {0: 1, 1: 0}
         self._build_cache: dict[Expression, int] = {}
         self._expression_cache: dict[int, Expression] = {0: FALSE, 1: TRUE}
-        self._work = 0
 
     def _consume_work(self) -> None:
-        self._work += 1
-        if self._work > self.limits.max_work:
-            raise AnalysisLimitExceeded("work", self.limits.max_work, self._work)
+        self.budget.consume()
 
     def node_count(self, root: int) -> int:
         reachable: set[int] = set()
@@ -236,6 +253,7 @@ def simplify_under(expression: Expression, context: Expression, bdd: BDD) -> Exp
 
 
 __all__ = [
+    "AnalysisBudget",
     "AnalysisLimitExceeded",
     "BDD",
     "ResourceLimits",
