@@ -11,12 +11,12 @@ from .model import (
     ConditionalBranch,
     ConditionalGroup,
     ConditionalTree,
+    DefinedVariable,
     DirectiveStructureError,
     Expression,
     ExpressionSyntaxError,
     Negation,
     SourceLocation,
-    Variable,
 )
 
 DIRECTIVE_RE = re.compile(
@@ -98,7 +98,7 @@ def directive_expression(
                 code="malformed_macro_directive",
                 location=location,
             )
-        expression: Expression = Variable(text)
+        expression: Expression = DefinedVariable(text)
         if kind in {"ifndef", "elifndef"}:
             expression = Negation(expression)
         return text, expression
