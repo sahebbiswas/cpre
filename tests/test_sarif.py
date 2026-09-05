@@ -18,15 +18,47 @@ def test_sarif_log_has_github_compatible_shape_and_rules():
     assert log["$schema"] == "https://json.schemastore.org/sarif-2.1.0.json"
     assert log["version"] == "2.1.0"
     run = log["runs"][0]
-    assert run["tool"]["driver"]["name"] == "cpre"
-    assert run["tool"]["driver"]["semanticVersion"] == "0.6.2"
-    assert [rule["id"] for rule in run["tool"]["driver"]["rules"]] == [
+    driver = run["tool"]["driver"]
+    assert driver["name"] == "cpre"
+    assert driver["semanticVersion"] == "0.6.2"
+    assert [rule["id"] for rule in driver["rules"]] == [
         "CPRE001",
         "CPRE002",
         "CPRE003",
         "CPRE004",
     ]
     assert run["invocations"] == [{"executionSuccessful": True}]
+
+
+def test_sarif_result_rule_index_matches_declared_rule_position():
+    analysis = cpre.analyze_source(
+        "#if (A && B) || (A && !B)\n#endif\n",
+        filename="src/example.c",
+    )
+
+    run = sarif_log([analysis], tool_version="0.6.2")["runs"][0]
+    result = run["results"][0]
+    rules = run["tool"]["driver"]["rules"]
+
+    assert rules[result["ruleIndex"]]["id"] == result["ruleId"]
+
+
+def test_sarif_declares_notification_descriptors_for_stable_error_codes():
+    analysis = cpre.analyze_source(
+        "#if A && B\n#endif\n",
+        filename="src/limited.c",
+        options=cpre.AnalysisOptions(max_atoms=1),
+    )
+
+    run = sarif_log([analysis], tool_version="0.6.2")["runs"][0]
+    descriptor_ids = {
+        descriptor["id"] for descriptor in run["tool"]["driver"]["notifications"]
+    }
+    emitted_id = run["invocations"][0]["toolExecutionNotifications"][0]["descriptor"]["id"]
+
+    assert emitted_id == cpre.ErrorCode.ANALYSIS_LIMIT_EXCEEDED.value
+    assert emitted_id in descriptor_ids
+    assert cpre.ErrorCode.SOURCE_READ_ERROR.value in descriptor_ids
 
 
 def test_sarif_exact_simplification_has_precise_location_and_fix():
