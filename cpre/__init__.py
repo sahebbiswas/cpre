@@ -2,6 +2,8 @@
 
 from .api import (
     AnalysisError,
+    AnalysisIncomplete,
+    AnalysisOptions,
     AnalysisResult,
     ConditionError,
     ConditionalTree,
@@ -20,10 +22,12 @@ from .api import (
     analyze_source,
 )
 
-__version__ = "0.6.0"
+__version__ = "0.6.1"
 
 __all__ = [
     "AnalysisError",
+    "AnalysisIncomplete",
+    "AnalysisOptions",
     "AnalysisResult",
     "ConditionError",
     "ConditionalTree",
