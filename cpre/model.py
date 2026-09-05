@@ -21,6 +21,13 @@ class Variable:
 
 
 @dataclass(frozen=True)
+class DefinedVariable:
+    """Whether a preprocessor macro is defined, distinct from its Boolean value."""
+
+    name: str
+
+
+@dataclass(frozen=True)
 class Predicate:
     """A value-bearing expression treated as one opaque Boolean fact."""
 
@@ -42,9 +49,9 @@ class Disjunction:
     operands: tuple["Expression", ...]
 
 
-BooleanAtom = typing.Union[Variable, Predicate]
+BooleanAtom = typing.Union[Variable, DefinedVariable, Predicate]
 Expression = typing.Union[
-    Constant, Variable, Predicate, Negation, Conjunction, Disjunction
+    Constant, Variable, DefinedVariable, Predicate, Negation, Conjunction, Disjunction
 ]
 TRUE = Constant(True)
 FALSE = Constant(False)
@@ -147,6 +154,7 @@ __all__ = [
     "ConditionalTree",
     "Conjunction",
     "Constant",
+    "DefinedVariable",
     "DirectiveStructureError",
     "Disjunction",
     "Expression",
