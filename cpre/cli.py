@@ -8,8 +8,9 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from .api import AnalysisIncomplete, CpreError, analyze_source
-from . import cpre as _engine
+from . import __version__, cpre as _engine
+from .api import AnalysisIncomplete, AnalysisResult, CpreError, analyze_source
+from .sarif import sarif_log
 
 
 def _format_error(error: CpreError) -> str:
@@ -41,8 +42,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="recursively scan C/C++ source files under directory inputs",
     )
-    parser.add_argument(
+    output_group = parser.add_mutually_exclusive_group()
+    output_group.add_argument(
         "--json", action="store_true", help="write the conditional tree as JSON"
+    )
+    output_group.add_argument(
+        "--sarif", action="store_true", help="write findings as SARIF 2.1.0"
     )
     parser.add_argument(
         "--verbose",
@@ -62,11 +67,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error(str(error))
 
     results: list[tuple[Path, _engine.ConditionalTree]] = []
+    analyses: list[AnalysisResult] = []
     had_errors = False
     for path in paths:
         try:
             source = path.read_text(encoding="utf-8")
             result = analyze_source(source, filename=str(path))
+            analyses.append(result)
             if not result.complete:
                 for diagnostic in result.incomplete:
                     print(f"{path}: {_format_incomplete(diagnostic)}", file=sys.stderr)
@@ -81,7 +88,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             had_errors = True
 
     batch_mode = len(args.sources) > 1 or any(path.is_dir() for path in args.sources)
-    if args.json:
+    if args.sarif:
+        print(json.dumps(sarif_log(analyses, tool_version=__version__), indent=2))
+    elif args.json:
         if batch_mode:
             files = []
             for path, tree in results:
