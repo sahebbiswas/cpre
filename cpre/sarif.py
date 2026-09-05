@@ -10,6 +10,7 @@ from urllib.parse import quote
 from .api import (
     AnalysisIncomplete,
     AnalysisResult,
+    ErrorCode,
     Finding,
     FindingKind,
     SourceLocation,
@@ -58,12 +59,36 @@ _RULES: tuple[dict[str, object], ...] = (
     },
 )
 
+_RULE_INDEX = {str(rule["id"]): index for index, rule in enumerate(_RULES)}
 _RULE_FOR_KIND = {
-    FindingKind.DEAD_BRANCH: ("CPRE001", 0, "warning"),
-    FindingKind.REDUNDANT_BRANCH: ("CPRE002", 1, "warning"),
-    FindingKind.SIMPLIFIABLE_CONDITION: ("CPRE003", 2, "note"),
-    FindingKind.CONTEXTUAL_SIMPLIFICATION: ("CPRE004", 3, "note"),
+    FindingKind.DEAD_BRANCH: ("CPRE001", "warning"),
+    FindingKind.REDUNDANT_BRANCH: ("CPRE002", "warning"),
+    FindingKind.SIMPLIFIABLE_CONDITION: ("CPRE003", "note"),
+    FindingKind.CONTEXTUAL_SIMPLIFICATION: ("CPRE004", "note"),
 }
+
+_NOTIFICATION_DESCRIPTIONS = {
+    ErrorCode.EXPRESSION_SYNTAX: "A preprocessor expression could not be parsed.",
+    ErrorCode.MALFORMED_MACRO_DIRECTIVE: "A macro conditional directive is malformed.",
+    ErrorCode.UNMATCHED_DIRECTIVE: "A conditional directive has no matching opener.",
+    ErrorCode.MISPLACED_DIRECTIVE: "A conditional directive appears in an invalid position.",
+    ErrorCode.TRAILING_DIRECTIVE_TEXT: "A directive contains unsupported trailing text.",
+    ErrorCode.UNTERMINATED_CONDITIONAL: "A conditional group is not terminated.",
+    ErrorCode.INVALID_ASSUMPTIONS: "Supplied macro assumptions are invalid or contradictory.",
+    ErrorCode.ANALYSIS_LIMIT_EXCEEDED: "Exact analysis stopped after a configured resource limit was exceeded.",
+    ErrorCode.ANALYSIS_FAILURE: "The analysis could not complete successfully.",
+    ErrorCode.SOURCE_READ_ERROR: "A source file could not be read or decoded as UTF-8.",
+}
+
+_NOTIFICATIONS: tuple[dict[str, object], ...] = tuple(
+    {
+        "id": code.value,
+        "name": code.name.lower().replace("_", "-"),
+        "shortDescription": {"text": description},
+        "defaultConfiguration": {"level": "error"},
+    }
+    for code, description in _NOTIFICATION_DESCRIPTIONS.items()
+)
 
 
 @dataclass(frozen=True)
@@ -71,7 +96,7 @@ class ToolNotification:
     """One CLI/tool failure to represent in the SARIF invocation."""
 
     message: str
-    descriptor_id: str
+    descriptor_id: ErrorCode
     filename: str | None = None
     location: SourceLocation | None = None
 
@@ -145,7 +170,7 @@ def _fix(finding: Finding, uri: str) -> list[dict[str, object]] | None:
 
 
 def _finding_result(finding: Finding, filename: str | None) -> dict[str, object]:
-    rule_id, rule_index, level = _RULE_FOR_KIND[finding.kind]
+    rule_id, level = _RULE_FOR_KIND[finding.kind]
     uri = _artifact_uri(filename)
     properties: dict[str, object] = {
         "kind": finding.kind.value,
@@ -155,7 +180,7 @@ def _finding_result(finding: Finding, filename: str | None) -> dict[str, object]
     }
     result: dict[str, object] = {
         "ruleId": rule_id,
-        "ruleIndex": rule_index,
+        "ruleIndex": _RULE_INDEX[rule_id],
         "level": level,
         "message": {"text": _message(finding)},
         "locations": [
@@ -216,7 +241,7 @@ def _tool_notification(notification: ToolNotification) -> dict[str, object]:
     result: dict[str, object] = {
         "level": "error",
         "message": {"text": notification.message},
-        "descriptor": {"id": notification.descriptor_id},
+        "descriptor": {"id": notification.descriptor_id.value},
     }
     locations = _location(notification.filename, notification.location)
     if locations is not None:
@@ -264,6 +289,7 @@ def sarif_log(
                         "semanticVersion": tool_version,
                         "informationUri": "https://github.com/sahebbiswas/cpre",
                         "rules": list(_RULES),
+                        "notifications": list(_NOTIFICATIONS),
                     }
                 },
                 "invocations": [invocation],
