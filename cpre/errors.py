@@ -26,6 +26,7 @@ class ErrorCode(str, Enum):
     INVALID_ASSUMPTIONS = "invalid_assumptions"
     ANALYSIS_LIMIT_EXCEEDED = "analysis_limit_exceeded"
     ANALYSIS_FAILURE = "analysis_failure"
+    SOURCE_READ_ERROR = "source_read_error"
 
 
 class CpreError(ValueError):
