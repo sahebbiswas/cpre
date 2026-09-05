@@ -11,6 +11,7 @@ from . import cpre as _engine
 from .errors import AnalysisError, CpreError, ErrorCode, ParseError, SourceLocation
 from .expressions import conjunction, negate
 from .model import DefinedVariable, TRUE, Variable
+from .robdd import AnalysisBudget as _AnalysisBudget
 from .robdd import AnalysisLimitExceeded as _AnalysisLimitExceeded
 from .robdd import ResourceLimits as _ResourceLimits
 
@@ -144,7 +145,13 @@ class SuggestedEdit:
 
 @dataclass(frozen=True)
 class ExactSimplification:
-    """An exact replacement for a source condition."""
+    """An exact replacement for a source condition.
+
+    Without macro assumptions, ``replacement`` is Boolean-equivalent to
+    ``original`` for every assignment of the modeled predicates. With explicit
+    assumptions, equivalence is guaranteed for every assignment consistent with
+    those assumptions.
+    """
 
     original: str
     replacement: str
@@ -160,7 +167,13 @@ class ContextualSimplification:
 
 @dataclass(frozen=True)
 class Finding:
-    """A structured preprocessor-analysis finding."""
+    """A structured preprocessor-analysis finding.
+
+    ``depends_on_assumptions`` is true only when supplied macro assumptions
+    materially changed the status or simplification proof that produced this
+    finding. This lets downstream analyzers distinguish universal diagnostics
+    from configuration-specific ones.
+    """
 
     kind: FindingKind
     location: SourceLocation
@@ -217,13 +230,14 @@ def _globally_equivalent(
     left: _engine.Expression,
     right: _engine.Expression,
     limits: _ResourceLimits,
+    budget: _AnalysisBudget,
 ) -> bool:
     atoms = [
         atom
         for expression in (left, right)
         for atom in _engine._expression_atoms_in_order(expression)
     ]
-    bdd = _engine._BDD(atoms, limits=limits)
+    bdd = _engine._BDD(atoms, limits=limits, budget=budget)
     return bdd.equivalent_under(_engine.TRUE, left, right)
 
 
@@ -269,6 +283,7 @@ def _edit_for(
 def _simplifications_for_branch(
     branch: _engine.ConditionalBranch,
     limits: _ResourceLimits,
+    budget: _AnalysisBudget,
 ) -> tuple[ExactSimplification | None, ContextualSimplification | None]:
     analysis = branch.analysis
     assert analysis is not None
@@ -287,7 +302,7 @@ def _simplifications_for_branch(
     if (
         analysis.contextual is not None
         and _engine._expressions_differ(comparison, analysis.contextual)
-        and not _globally_equivalent(comparison, analysis.contextual, limits)
+        and not _globally_equivalent(comparison, analysis.contextual, limits, budget)
     ):
         replacement = _formatted(analysis.contextual)
         assert replacement is not None
@@ -315,13 +330,14 @@ def _finding_for_branch(
     branch: _engine.ConditionalBranch,
     ranges: dict[tuple[int, str], SourceRange],
     limits: _ResourceLimits,
+    budget: _AnalysisBudget,
     baseline: _engine.ConditionalBranch | None = None,
 ) -> tuple[Finding, ...]:
     analysis = branch.analysis
     assert analysis is not None
     original = branch.expression_text
     try:
-        exact, contextual = _simplifications_for_branch(branch, limits)
+        exact, contextual = _simplifications_for_branch(branch, limits, budget)
     except _AnalysisLimitExceeded as error:
         if error.line is None:
             error.line = branch.line
@@ -431,12 +447,7 @@ def _incomplete_result(
         message=str(error),
         location=SourceLocation(error.line) if error.line is not None else None,
     )
-    return AnalysisResult(
-        findings=(),
-        tree=tree,
-        filename=filename,
-        incomplete=(diagnostic,),
-    )
+    return AnalysisResult(findings=(), tree=tree, filename=filename, incomplete=(diagnostic,))
 
 
 def analyze_source(
@@ -462,15 +473,17 @@ def analyze_source(
             code=ErrorCode.ANALYSIS_FAILURE,
         )
     limits = resolved_options._resource_limits()
+    budget = _AnalysisBudget(limits.max_work)
     assumption_expression = _assumption_expression(normalized) if normalized is not None else None
     try:
         tree = _engine.analyze_source(
             source,
             assumptions=assumption_expression,
             limits=limits,
+            budget=budget,
         )
         baseline_tree = (
-            _engine.analyze_source(source, limits=limits)
+            _engine.analyze_source(source, limits=limits, budget=budget)
             if normalized is not None
             else None
         )
@@ -484,6 +497,7 @@ def analyze_source(
                 branch,
                 ranges,
                 limits,
+                budget,
                 baseline_branches[index] if index < len(baseline_branches) else None,
             )
         )
