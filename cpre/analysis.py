@@ -49,11 +49,7 @@ def _macro_semantics(tree: ConditionalTree, *, legacy_symbolic: bool) -> Express
     for name in sorted(names):
         value = Variable(name)
         defined = DefinedVariable(name)
-        # An undefined macro evaluates to zero in a preprocessor condition, so a
-        # truthy bare macro necessarily implies that it is defined.
         constraints.append(disjunction(negate(value), defined))
-        # With no configuration assumptions, retain the historical symbolic
-        # model where bare Boolean identifiers and definedness shared one atom.
         if legacy_symbolic:
             constraints.append(disjunction(negate(defined), value))
     return conjunction(*constraints)
@@ -134,7 +130,10 @@ def analyze_source(
     *,
     assumptions: Expression | None = None,
 ) -> ConditionalTree:
-    return analyze_tree(parse_source(source), assumptions=assumptions)
+    return analyze_tree(
+        parse_source(source, distinguish_defined=assumptions is not None),
+        assumptions=assumptions,
+    )
 
 
 __all__ = ["analyze_source", "analyze_tree", "tree_expressions"]
