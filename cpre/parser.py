@@ -17,6 +17,7 @@ from .model import (
     ExpressionSyntaxError,
     Negation,
     SourceLocation,
+    Variable,
 )
 
 DIRECTIVE_RE = re.compile(
@@ -85,6 +86,8 @@ def directive_expression(
     remainder: str,
     line: int,
     locations: Sequence[SourceLocation] | None = None,
+    *,
+    distinguish_defined: bool = False,
 ) -> tuple[str, Expression]:
     text = remainder.strip()
     location = remainder_location(remainder, line, locations)
@@ -98,12 +101,17 @@ def directive_expression(
                 code="malformed_macro_directive",
                 location=location,
             )
-        expression: Expression = DefinedVariable(text)
+        atom = DefinedVariable(text) if distinguish_defined else Variable(text)
+        expression: Expression = atom
         if kind in {"ifndef", "elifndef"}:
             expression = Negation(expression)
         return text, expression
     try:
-        return text, ExpressionParser(text, locations).parse()
+        return text, ExpressionParser(
+            text,
+            locations,
+            distinguish_defined=distinguish_defined,
+        ).parse()
     except ExpressionSyntaxError as error:
         if error.location is not None:
             raise
@@ -114,7 +122,7 @@ def directive_expression(
         ) from error
 
 
-def parse_source(source: str) -> ConditionalTree:
+def parse_source(source: str, *, distinguish_defined: bool = False) -> ConditionalTree:
     tree = ConditionalTree()
     stack: list[tuple[ConditionalGroup, ConditionalBranch]] = []
     for logical_line in logical_lines(source):
@@ -125,7 +133,13 @@ def parse_source(source: str) -> ConditionalTree:
         kind, remainder = match.group(1), match.group(2)
         remainder_locations = logical_line.locations[match.start(2) :]
         if kind in {"if", "ifdef", "ifndef"}:
-            expression_text, expression = directive_expression(kind, remainder, line, remainder_locations)
+            expression_text, expression = directive_expression(
+                kind,
+                remainder,
+                line,
+                remainder_locations,
+                distinguish_defined=distinguish_defined,
+            )
             group = ConditionalGroup(line)
             branch = ConditionalBranch(kind, line, expression_text, expression)
             group.branches.append(branch)
@@ -149,7 +163,13 @@ def parse_source(source: str) -> ConditionalTree:
                     code="misplaced_directive",
                     location=SourceLocation(line, 1),
                 )
-            expression_text, expression = directive_expression(kind, remainder, line, remainder_locations)
+            expression_text, expression = directive_expression(
+                kind,
+                remainder,
+                line,
+                remainder_locations,
+                distinguish_defined=distinguish_defined,
+            )
             branch = ConditionalBranch(kind, line, expression_text, expression)
             group.branches.append(branch)
             stack[-1] = (group, branch)
