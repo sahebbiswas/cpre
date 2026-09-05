@@ -23,6 +23,7 @@ class ErrorCode(str, Enum):
     MISPLACED_DIRECTIVE = "misplaced_directive"
     TRAILING_DIRECTIVE_TEXT = "trailing_directive_text"
     UNTERMINATED_CONDITIONAL = "unterminated_conditional"
+    INVALID_ASSUMPTIONS = "invalid_assumptions"
     ANALYSIS_FAILURE = "analysis_failure"
 
 
