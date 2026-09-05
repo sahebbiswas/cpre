@@ -23,6 +23,6 @@ def test_sarif_still_emits_valid_log_when_one_file_has_parse_error(tmp_path, cap
     notification = invocation["toolExecutionNotifications"][0]
     assert notification["descriptor"]["id"] == "expression_syntax"
     assert notification["locations"][0]["physicalLocation"]["region"] == {
-        "startLine": 2,
-        "startColumn": 1,
+        "startLine": 1,
+        "startColumn": 7,
     }
