@@ -10,7 +10,7 @@ from typing import Sequence
 
 from . import __version__, cpre as _engine
 from .api import AnalysisIncomplete, AnalysisResult, CpreError, analyze_source
-from .sarif import sarif_log
+from .sarif import ToolNotification, sarif_log
 
 
 def _format_error(error: CpreError) -> str:
@@ -68,6 +68,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     results: list[tuple[Path, _engine.ConditionalTree]] = []
     analyses: list[AnalysisResult] = []
+    sarif_notifications: list[ToolNotification] = []
     had_errors = False
     for path in paths:
         try:
@@ -82,14 +83,38 @@ def main(argv: Sequence[str] | None = None) -> int:
             results.append((path, result.tree))
         except CpreError as error:
             print(f"{path}: {_format_error(error)}", file=sys.stderr)
+            sarif_notifications.append(
+                ToolNotification(
+                    message=error.message,
+                    descriptor_id=error.code.value,
+                    filename=str(path),
+                    location=error.location,
+                )
+            )
             had_errors = True
         except (OSError, UnicodeDecodeError) as error:
             print(f"{path}: {error}", file=sys.stderr)
+            sarif_notifications.append(
+                ToolNotification(
+                    message=str(error),
+                    descriptor_id="source_read_error",
+                    filename=str(path),
+                )
+            )
             had_errors = True
 
     batch_mode = len(args.sources) > 1 or any(path.is_dir() for path in args.sources)
     if args.sarif:
-        print(json.dumps(sarif_log(analyses, tool_version=__version__), indent=2))
+        print(
+            json.dumps(
+                sarif_log(
+                    analyses,
+                    tool_version=__version__,
+                    notifications=sarif_notifications,
+                ),
+                indent=2,
+            )
+        )
     elif args.json:
         if batch_mode:
             files = []
