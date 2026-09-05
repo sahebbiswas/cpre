@@ -34,8 +34,15 @@ def tree_expressions(groups: Sequence[ConditionalGroup]) -> Iterator[Expression]
             yield from tree_expressions(branch.children)
 
 
-def _macro_semantics(tree: ConditionalTree) -> Expression:
+def _macro_semantics(
+    tree: ConditionalTree,
+    *,
+    legacy_symbolic: bool,
+) -> Expression:
     """Return C preprocessor relationships between value and definedness atoms."""
+
+    if legacy_symbolic:
+        return TRUE
 
     names: set[str] = set()
     for expression in tree_expressions(tree.groups):
@@ -61,17 +68,16 @@ def analyze_tree(
     *,
     assumptions: Expression | None = None,
 ) -> ConditionalTree:
-    configuration_aware = assumptions is not None
-    proof_context = (
-        conjunction(assumptions, _macro_semantics(tree))
-        if assumptions is not None
-        else TRUE
+    use_assumptions = assumptions is not None
+    proof_context = conjunction(
+        assumptions or TRUE,
+        _macro_semantics(tree, legacy_symbolic=not use_assumptions),
     )
 
     atoms: list[BooleanAtom] = []
     seen_atoms: set[BooleanAtom] = set()
     expressions = list(tree_expressions(tree.groups))
-    if configuration_aware:
+    if use_assumptions:
         expressions.append(proof_context)
     for expression in expressions:
         for atom in expression_atoms_in_order(expression):
@@ -81,7 +87,7 @@ def analyze_tree(
     bdd = BDD(atoms)
 
     def satisfiable(expression: Expression) -> bool:
-        if not configuration_aware:
+        if not use_assumptions:
             return bdd.satisfiable(expression)
         return bdd.satisfiable(conjunction(proof_context, expression))
 
@@ -92,16 +98,19 @@ def analyze_tree(
                 available = conjunction(parent, negate(covered))
                 condition = branch.expression if branch.expression is not None else TRUE
                 effective = conjunction(available, condition)
-                if branch.expression is None:
-                    simplified = None
-                elif configuration_aware:
-                    simplified = simplify_under(condition, proof_context, bdd)
-                else:
-                    simplified = exact_simplify(condition, bdd)
+                simplified = (
+                    simplify_under(condition, proof_context, bdd)
+                    if branch.expression is not None
+                    and use_assumptions
+                    and bdd.satisfiable(proof_context)
+                    else exact_simplify(condition, bdd)
+                    if branch.expression is not None
+                    else None
+                )
 
                 contextual_context = (
                     conjunction(proof_context, available)
-                    if configuration_aware
+                    if use_assumptions
                     else available
                 )
                 contextual = (
