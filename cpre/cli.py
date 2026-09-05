@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from .api import CpreError, analyze_source
+from .api import AnalysisIncomplete, CpreError, analyze_source
 from . import cpre as _engine
 
 
@@ -18,6 +18,12 @@ def _format_error(error: CpreError) -> str:
     if error.location.column is None:
         return f"line {error.location.line}: {error.message}"
     return f"{error.message} at line {error.location.line}, column {error.location.column}"
+
+
+def _format_incomplete(diagnostic: AnalysisIncomplete) -> str:
+    if diagnostic.location is None:
+        return diagnostic.message
+    return f"line {diagnostic.location.line}: {diagnostic.message}"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -61,6 +67,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             source = path.read_text(encoding="utf-8")
             result = analyze_source(source, filename=str(path))
+            if not result.complete:
+                for diagnostic in result.incomplete:
+                    print(f"{path}: {_format_incomplete(diagnostic)}", file=sys.stderr)
+                had_errors = True
+                continue
             results.append((path, result.tree))
         except CpreError as error:
             print(f"{path}: {_format_error(error)}", file=sys.stderr)
