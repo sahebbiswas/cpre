@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Sequence
 
 from . import __version__, cpre as _engine
-from .api import AnalysisIncomplete, AnalysisResult, CpreError, analyze_source
+from .api import AnalysisIncomplete, AnalysisResult, CpreError, ErrorCode, analyze_source
 from .sarif import ToolNotification, sarif_log
 
 
@@ -86,7 +86,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             sarif_notifications.append(
                 ToolNotification(
                     message=error.message,
-                    descriptor_id=error.code.value,
+                    descriptor_id=error.code,
                     filename=str(path),
                     location=error.location,
                 )
@@ -97,7 +97,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             sarif_notifications.append(
                 ToolNotification(
                     message=str(error),
-                    descriptor_id="source_read_error",
+                    descriptor_id=ErrorCode.SOURCE_READ_ERROR,
                     filename=str(path),
                 )
             )
