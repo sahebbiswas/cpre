@@ -70,9 +70,16 @@ def tokens(text: str, locations: Sequence[SourceLocation] | None = None) -> list
 
 
 class ExpressionParser:
-    def __init__(self, text: str, locations: Sequence[SourceLocation] | None = None) -> None:
+    def __init__(
+        self,
+        text: str,
+        locations: Sequence[SourceLocation] | None = None,
+        *,
+        distinguish_defined: bool = False,
+    ) -> None:
         self.text = text
         self.tokens = tokens(text, locations)
+        self.distinguish_defined = distinguish_defined
 
     def parse(self) -> Expression:
         if not self.tokens:
@@ -176,20 +183,22 @@ class ExpressionParser:
                     return True
         return False
 
-    @staticmethod
-    def _parse_defined(items: Sequence[Token]) -> Expression | None:
+    def _parse_defined(self, items: Sequence[Token]) -> Expression | None:
         if not items or items[0].kind != "identifier" or items[0].text != "defined":
             return None
+        name: str | None = None
         if len(items) == 2 and items[1].kind == "identifier":
-            return DefinedVariable(items[1].text)
-        if (
+            name = items[1].text
+        elif (
             len(items) == 4
             and items[1].kind == "lparen"
             and items[2].kind == "identifier"
             and items[3].kind == "rparen"
         ):
-            return DefinedVariable(items[2].text)
-        return None
+            name = items[2].text
+        if name is None:
+            return None
+        return DefinedVariable(name) if self.distinguish_defined else Variable(name)
 
     @staticmethod
     def _parse_number(token: Token) -> Constant:
