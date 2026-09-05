@@ -2,6 +2,8 @@
 
 `cpre` analyzes Boolean conditions in C and C++ preprocessor conditional blocks without preprocessing or parsing the surrounding source code. It identifies dead and redundant branches, simplifies Boolean conditions using ROBDD-backed reasoning, and preserves value-bearing expressions as opaque Boolean predicates.
 
+**Project status: Beta.** The CLI and documented Python API are suitable for downstream integration, while broader real-world use may still uncover modeling, compatibility, or performance edge cases before a 1.0 release.
+
 ## Installation
 
 ```bash
@@ -170,6 +172,8 @@ When adding analyzer behavior, preserve structured public data, deterministic or
 ## Versioning
 
 The package version is defined in `cpre/__init__.py` as `__version__` and is consumed by `pyproject.toml` during builds.
+
+`0.7.0` marks cpre's transition from Alpha to Beta. During the Beta series, the documented top-level API is intended for real downstream integrations and compatibility-sensitive changes should be deliberate and documented. The path to 1.0 will emphasize downstream integration experience and validation against larger real-world C/C++ codebases.
 
 Public API additions use a minor version bump, while backward-compatible fixes use patch releases. Changes that affect documented public behavior should update compatibility tests alongside the implementation.
 
