@@ -1,0 +1,302 @@
+"""SARIF 2.1.0 rendering for structured cpre analysis results."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable
+from urllib.parse import quote
+
+from .api import (
+    AnalysisIncomplete,
+    AnalysisResult,
+    ErrorCode,
+    Finding,
+    FindingKind,
+    SourceLocation,
+    SourceRange,
+)
+
+SARIF_SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
+SARIF_VERSION = "2.1.0"
+
+_RULES: tuple[dict[str, object], ...] = (
+    {
+        "id": "CPRE001",
+        "name": "dead-branch",
+        "shortDescription": {"text": "Unreachable preprocessor branch"},
+        "fullDescription": {
+            "text": "A preprocessor branch cannot be selected under the modeled Boolean conditions."
+        },
+        "defaultConfiguration": {"level": "warning"},
+    },
+    {
+        "id": "CPRE002",
+        "name": "redundant-branch",
+        "shortDescription": {"text": "Redundant preprocessor condition"},
+        "fullDescription": {
+            "text": "A preprocessor condition is always true in its reachable branch context."
+        },
+        "defaultConfiguration": {"level": "warning"},
+    },
+    {
+        "id": "CPRE003",
+        "name": "simplifiable-condition",
+        "shortDescription": {"text": "Preprocessor condition can be simplified"},
+        "fullDescription": {
+            "text": "A preprocessor condition has a smaller globally equivalent Boolean form."
+        },
+        "defaultConfiguration": {"level": "note"},
+    },
+    {
+        "id": "CPRE004",
+        "name": "contextual-simplification",
+        "shortDescription": {"text": "Preprocessor condition can be simplified in context"},
+        "fullDescription": {
+            "text": "A preprocessor condition has a smaller form equivalent in its reachable context."
+        },
+        "defaultConfiguration": {"level": "note"},
+    },
+)
+
+_RULE_INDEX = {str(rule["id"]): index for index, rule in enumerate(_RULES)}
+_RULE_FOR_KIND = {
+    FindingKind.DEAD_BRANCH: ("CPRE001", "warning"),
+    FindingKind.REDUNDANT_BRANCH: ("CPRE002", "warning"),
+    FindingKind.SIMPLIFIABLE_CONDITION: ("CPRE003", "note"),
+    FindingKind.CONTEXTUAL_SIMPLIFICATION: ("CPRE004", "note"),
+}
+
+_NOTIFICATION_DESCRIPTIONS = {
+    ErrorCode.EXPRESSION_SYNTAX: "A preprocessor expression could not be parsed.",
+    ErrorCode.MALFORMED_MACRO_DIRECTIVE: "A macro conditional directive is malformed.",
+    ErrorCode.UNMATCHED_DIRECTIVE: "A conditional directive has no matching opener.",
+    ErrorCode.MISPLACED_DIRECTIVE: "A conditional directive appears in an invalid position.",
+    ErrorCode.TRAILING_DIRECTIVE_TEXT: "A directive contains unsupported trailing text.",
+    ErrorCode.UNTERMINATED_CONDITIONAL: "A conditional group is not terminated.",
+    ErrorCode.INVALID_ASSUMPTIONS: "Supplied macro assumptions are invalid or contradictory.",
+    ErrorCode.ANALYSIS_LIMIT_EXCEEDED: "Exact analysis stopped after a configured resource limit was exceeded.",
+    ErrorCode.ANALYSIS_FAILURE: "The analysis could not complete successfully.",
+    ErrorCode.SOURCE_READ_ERROR: "A source file could not be read or decoded as UTF-8.",
+}
+
+_NOTIFICATIONS: tuple[dict[str, object], ...] = tuple(
+    {
+        "id": code.value,
+        "name": code.name.lower().replace("_", "-"),
+        "shortDescription": {"text": description},
+        "defaultConfiguration": {"level": "error"},
+    }
+    for code, description in _NOTIFICATION_DESCRIPTIONS.items()
+)
+
+
+@dataclass(frozen=True)
+class ToolNotification:
+    """One CLI/tool failure to represent in the SARIF invocation."""
+
+    message: str
+    descriptor_id: ErrorCode
+    filename: str | None = None
+    location: SourceLocation | None = None
+
+
+def _artifact_uri(filename: str | None) -> str:
+    if filename is None:
+        return "memory"
+    path = Path(filename)
+    if path.is_absolute():
+        try:
+            path = path.relative_to(Path.cwd())
+        except ValueError:
+            pass
+    normalized = str(path).replace("\\", "/")
+    return quote(normalized, safe="/:@")
+
+
+def _region(source_range: SourceRange) -> dict[str, int]:
+    region = {
+        "startLine": source_range.start.line,
+        "endLine": source_range.end.line,
+    }
+    if source_range.start.column is not None:
+        region["startColumn"] = source_range.start.column
+    if source_range.end.column is not None:
+        region["endColumn"] = source_range.end.column
+    return region
+
+
+def _finding_region(finding: Finding) -> dict[str, int]:
+    if finding.edit is not None:
+        return _region(finding.edit.range)
+    region = {"startLine": finding.location.line}
+    if finding.location.column is not None:
+        region["startColumn"] = finding.location.column
+    return region
+
+
+def _message(finding: Finding) -> str:
+    replacement = None
+    if finding.edit is not None:
+        replacement = finding.edit.replacement
+    elif finding.exact_simplification is not None:
+        replacement = finding.exact_simplification.replacement
+    elif finding.contextual_simplification is not None:
+        replacement = finding.contextual_simplification.replacement
+    if replacement is None:
+        return finding.reason
+    return f"{finding.reason}. Suggested condition: {replacement}"
+
+
+def _fix(finding: Finding, uri: str) -> list[dict[str, object]] | None:
+    if finding.edit is None:
+        return None
+    return [
+        {
+            "description": {"text": f"Replace condition with {finding.edit.replacement}"},
+            "artifactChanges": [
+                {
+                    "artifactLocation": {"uri": uri},
+                    "replacements": [
+                        {
+                            "deletedRegion": _region(finding.edit.range),
+                            "insertedContent": {"text": finding.edit.replacement},
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+
+
+def _finding_result(finding: Finding, filename: str | None) -> dict[str, object]:
+    rule_id, level = _RULE_FOR_KIND[finding.kind]
+    uri = _artifact_uri(filename)
+    properties: dict[str, object] = {
+        "kind": finding.kind.value,
+        "directive": finding.directive,
+        "dependsOnAssumptions": finding.depends_on_assumptions,
+        "opaquePredicates": list(finding.opaque_predicates),
+    }
+    result: dict[str, object] = {
+        "ruleId": rule_id,
+        "ruleIndex": _RULE_INDEX[rule_id],
+        "level": level,
+        "message": {"text": _message(finding)},
+        "locations": [
+            {
+                "physicalLocation": {
+                    "artifactLocation": {"uri": uri},
+                    "region": _finding_region(finding),
+                }
+            }
+        ],
+        "properties": properties,
+    }
+    if finding.original_condition is not None:
+        properties["originalCondition"] = finding.original_condition
+    if finding.edit is not None:
+        properties["fixConfidence"] = finding.edit.confidence.value
+        result["fixes"] = _fix(finding, uri)
+    return result
+
+
+def _location(filename: str | None, location: SourceLocation | None) -> list[dict[str, object]] | None:
+    if location is None:
+        return None
+    region: dict[str, int] = {"startLine": location.line}
+    if location.column is not None:
+        region["startColumn"] = location.column
+    return [
+        {
+            "physicalLocation": {
+                "artifactLocation": {"uri": _artifact_uri(filename)},
+                "region": region,
+            }
+        }
+    ]
+
+
+def _incomplete_notification(
+    diagnostic: AnalysisIncomplete,
+    filename: str | None,
+) -> dict[str, object]:
+    notification: dict[str, object] = {
+        "level": "error",
+        "message": {"text": diagnostic.message},
+        "descriptor": {"id": diagnostic.code.value},
+        "properties": {
+            "resource": diagnostic.resource,
+            "limit": diagnostic.limit,
+            "observed": diagnostic.observed,
+        },
+    }
+    locations = _location(filename, diagnostic.location)
+    if locations is not None:
+        notification["locations"] = locations
+    return notification
+
+
+def _tool_notification(notification: ToolNotification) -> dict[str, object]:
+    result: dict[str, object] = {
+        "level": "error",
+        "message": {"text": notification.message},
+        "descriptor": {"id": notification.descriptor_id.value},
+    }
+    locations = _location(notification.filename, notification.location)
+    if locations is not None:
+        result["locations"] = locations
+    return result
+
+
+def sarif_log(
+    results: Iterable[AnalysisResult],
+    *,
+    tool_version: str,
+    notifications: Iterable[ToolNotification] = (),
+) -> dict[str, object]:
+    """Return a deterministic SARIF 2.1.0 log for one cpre invocation."""
+
+    analyses = tuple(results)
+    external_notifications = tuple(notifications)
+    sarif_results = [
+        _finding_result(finding, analysis.filename)
+        for analysis in analyses
+        for finding in analysis.findings
+    ]
+    execution_notifications = [
+        _incomplete_notification(diagnostic, analysis.filename)
+        for analysis in analyses
+        for diagnostic in analysis.incomplete
+    ]
+    execution_notifications.extend(
+        _tool_notification(notification) for notification in external_notifications
+    )
+    invocation: dict[str, object] = {
+        "executionSuccessful": not execution_notifications,
+    }
+    if execution_notifications:
+        invocation["toolExecutionNotifications"] = execution_notifications
+
+    return {
+        "$schema": SARIF_SCHEMA,
+        "version": SARIF_VERSION,
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": "cpre",
+                        "semanticVersion": tool_version,
+                        "informationUri": "https://github.com/sahebbiswas/cpre",
+                        "rules": list(_RULES),
+                        "notifications": list(_NOTIFICATIONS),
+                    }
+                },
+                "invocations": [invocation],
+                "results": sarif_results,
+            }
+        ],
+    }
+
+
+__all__ = ["SARIF_SCHEMA", "SARIF_VERSION", "ToolNotification", "sarif_log"]
