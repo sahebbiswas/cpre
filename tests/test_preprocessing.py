@@ -91,8 +91,8 @@ def test_malformed_raises_structured_error(source, code):
     assert caught.value.location is not None
 
 
-@pytest.mark.parametrize('directive', ['#define X 1', '#undef X', '#include "x.h"'])
-def test_macro_state_changes_are_explicitly_unsupported(directive):
+@pytest.mark.parametrize('directive', ['#include "x.h"', '#include_next <x.h>', '#import "x.h"'])
+def test_includes_are_explicitly_unsupported(directive):
     result = preprocess_source(directive + '\n#if X\nx\n#endif', assumptions={'X': True})
     assert not result.complete
     assert result.source is None

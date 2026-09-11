@@ -22,9 +22,10 @@ from .api import (
     analyze_source,
 )
 
+from .macros import MacroDefinition, MacroEnvironment, MacroState
 from .preprocessing import PreprocessDiagnostic, PreprocessResult, preprocess_source
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"
 
 __all__ = [
     "AnalysisError",
@@ -41,6 +42,9 @@ __all__ = [
     "FindingKind",
     "FixConfidence",
     "MacroAssumptions",
+    "MacroDefinition",
+    "MacroEnvironment",
+    "MacroState",
     "ParseError",
     "PreprocessDiagnostic",
     "PreprocessResult",
