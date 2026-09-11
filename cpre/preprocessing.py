@@ -9,11 +9,12 @@ from typing import Mapping
 from .analysis import _macro_semantics, tree_expressions
 from .api import (
     AnalysisIncomplete, AnalysisOptions, MacroAssumptions,
-    _assumption_expression, _normalize_assumptions, _translate_parse_error,
+    _normalize_assumptions, _translate_parse_error,
 )
 from .errors import AnalysisError, ErrorCode, SourceLocation
 from .expressions import conjunction, expression_atoms_in_order, negate
-from .model import ConditionError, ConditionalGroup, TRUE
+from .model import ConditionError, ConditionalGroup, DefinedVariable, Variable, TRUE
+from .macros import MacroEnvironment, MacroState, _apply_macro_directive
 from .parser import logical_lines, parse_source
 from .robdd import AnalysisBudget, AnalysisLimitExceeded, BDD
 
@@ -35,6 +36,8 @@ class PreprocessResult:
     filename: str | None = None
     incomplete: tuple[PreprocessDiagnostic | AnalysisIncomplete, ...] = ()
 
+    macros: Mapping[str, MacroState] | None = None
+
     @property
     def complete(self) -> bool:
         return self.source is not None and not self.incomplete
@@ -54,8 +57,9 @@ def preprocess_source(
     Inactive text and conditional directives become spaces, preserving physical
     line endings and columns. Block comments overlapping retained text are kept
     whole to balance their delimiters. Retained text is unchanged. No macro
-    expansion or include processing is performed; reachable define/undef/include directives
-    return an incomplete result because they may change subsequent macro state.
+    expansion or include processing is performed. Active define/undef directives
+    update macro state and are masked; includes return an incomplete result.
+    Successful results expose a detached, read-only final macro-state snapshot.
     Malformed conditionals raise the same structured ParseError as analyze_source.
     """
     normalized = _normalize_assumptions(assumptions)
@@ -68,6 +72,7 @@ def preprocess_source(
     except ConditionError as error:
         raise _translate_parse_error(error, filename) from error
 
+    environment = MacroEnvironment(normalized)
     physical = source.splitlines(keepends=True)
     logical = list(logical_lines(source))
     # The next logical start captures even empty final continuation lines.
@@ -83,43 +88,77 @@ def preprocess_source(
     limits = resolved_options._resource_limits()
     current_line = None
     try:
-        context = conjunction(_assumption_expression(normalized) if normalized else TRUE,
-                              _macro_semantics(tree, legacy_symbolic=False))
-        atoms = [atom for expression in (*tree_expressions(tree.groups), context)
+        semantics = _macro_semantics(tree, legacy_symbolic=False)
+        atoms = [atom for expression in (*tree_expressions(tree.groups), semantics)
                  for atom in expression_atoms_in_order(expression)]
         bdd = BDD(atoms, limits=limits, budget=AnalysisBudget(limits.max_work))
+        names = sorted({atom.name for atom in atoms if isinstance(atom, Variable)})
+        starts = {group.line: group for group in tree.groups}
 
-        def select(groups: list[ConditionalGroup]) -> None:
-            nonlocal current_line
+        def index_groups(groups: list[ConditionalGroup]) -> None:
             for group in groups:
-                assert group.end_line is not None
-                selected = False
-                unresolved = False
-                for index, branch in enumerate(group.branches):
-                    current_line = branch.line
-                    end = (group.branches[index + 1].line - 1
-                           if index + 1 < len(group.branches) else group.end_line - 1)
-                    blank(branch.line, ends[branch.line])
-                    if selected or unresolved:
-                        blank(branch.line, end)
-                        continue
-                    condition = branch.expression if branch.expression is not None else TRUE
-                    if not bdd.satisfiable(conjunction(context, condition)):
-                        blank(branch.line, end)
-                    elif bdd.satisfiable(conjunction(context, negate(condition))):
-                        diagnostics.append(PreprocessDiagnostic(
-                            ErrorCode.UNRESOLVED_CONDITION,
-                            "condition is not determined by the supplied macro assumptions",
-                            SourceLocation(branch.line),
-                        ))
-                        unresolved = True
-                        blank(branch.line, end)
-                    else:
-                        selected = True
-                        select(branch.children)
-                blank(group.end_line, ends[group.end_line])
+                starts[group.line] = group
+                for branch in group.branches:
+                    index_groups(branch.children)
 
-        select(tree.groups)
+        index_groups(tree.groups)
+        branches = {branch.line: branch for group in starts.values() for branch in group.branches}
+        # Frames hold [parent-active, any-branch-selected, current-active].
+        stack: list[list[bool]] = []
+        active = True
+        for line in logical:
+            current_line = line.start_line
+            branch = branches.get(current_line)
+            if branch is not None:
+                if current_line in starts:
+                    stack.append([active, False, False])
+                frame = stack[-1]
+                active = False
+                blank(current_line, ends[current_line])
+                if frame[0] and not frame[1]:
+                    terms = [semantics]
+                    for name in names:
+                        state = environment.get(name)
+                        for atom, value in ((DefinedVariable(name), state.defined),
+                                            (Variable(name), state.value)):
+                            if value is not None:
+                                terms.append(atom if value else negate(atom))
+                    context = conjunction(*terms)
+                    condition = branch.expression if branch.expression is not None else TRUE
+                    if bdd.satisfiable(conjunction(context, condition)):
+                        if bdd.satisfiable(conjunction(context, negate(condition))):
+                            diagnostics.append(PreprocessDiagnostic(
+                                ErrorCode.UNRESOLVED_CONDITION,
+                                "condition is not determined by the current macro state",
+                                SourceLocation(current_line),
+                            ))
+                            break  # Subsequent state depends on this unknown choice.
+                        active = True
+                        frame[1] = True
+                frame[2] = active
+                continue
+            match = re.match(r"^\s*#\s*(endif|define|undef|include|include_next|import)\b(.*)$", line.text)
+            if match and match[1] == 'endif':
+                stack.pop()
+                active = stack[-1][2] if stack else True
+                blank(current_line, ends[current_line])
+                continue
+            if not active:
+                blank(current_line, ends[current_line])
+                continue
+            if match:
+                kind = match[1]
+                try:
+                    if kind not in {'define', 'undef'}:
+                        raise ValueError('include processing is not supported')
+                    _apply_macro_directive(environment, kind, match[2], SourceLocation(current_line))
+                except ValueError as error:
+                    diagnostics.append(PreprocessDiagnostic(
+                        ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE, str(error),
+                        SourceLocation(current_line),
+                    ))
+                    break
+                blank(current_line, ends[current_line])
     except AnalysisLimitExceeded as error:
         diagnostics.append(AnalysisIncomplete(
             ErrorCode.ANALYSIS_LIMIT_EXCEEDED, error.resource, error.limit,
@@ -127,15 +166,6 @@ def preprocess_source(
             SourceLocation(current_line) if current_line is not None else None,
         ))
 
-    for line in logical:
-        if retained[line.start_line - 1] and re.match(
-            r"^\s*#\s*(?:define|undef|include|include_next|import)\b", line.text
-        ):
-            diagnostics.append(PreprocessDiagnostic(
-                ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
-                "macro-state directives and includes require preprocessing beyond conditional selection",
-                SourceLocation(line.start_line),
-            ))
     if diagnostics:
         diagnostics.sort(key=lambda item: item.location.line if item.location else 0)
         return PreprocessResult(None, filename, tuple(diagnostics))
@@ -157,7 +187,7 @@ def preprocess_source(
     for token in tokens:
         if token.group().startswith("/*") and any(char_kept[token.start():token.end()]):
             characters[token.start():token.end()] = token.group()
-    return PreprocessResult("".join(characters), filename)
+    return PreprocessResult("".join(characters), filename, macros=environment.snapshot())
 
 
 __all__ = ["PreprocessDiagnostic", "PreprocessResult", "preprocess_source"]

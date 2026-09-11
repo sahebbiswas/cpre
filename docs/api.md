@@ -264,13 +264,52 @@ arithmetic/comparison predicates remain unknown. If they affect a reachable bran
 choice, `unresolved_condition` marks the result incomplete. Tautologies and
 unreachable unknown conditions do not require extra assumptions.
 
-This is conditional selection, not a full C/C++ preprocessor. Active `#define`,
-`#undef`, `#include`, `#include_next`, and `#import` directives produce
-`unsupported_preprocessing_directive`, because ignoring their macro-state effects
-could select the wrong configuration. Such directives in discarded branches do
-not block selection. Other nonconditional directives and ordinary text are retained
-verbatim; no object/function macro substitution, include processing, token pasting,
-or stringification occurs. `complete` certifies conditional selection only, not
-that the output is ready for every AST parser. Existing directive-parser syntax and
+Active `#define` and `#undef` directives update a per-run `MacroEnvironment` in
+source order and are masked in the output. Changes inside discarded branches do
+not affect state. Each active redefinition replaces the previous entry, including
+assumption-seeded state; `#undef` records known-undefined/false state even for an
+unmentioned macro. Earlier conditions are never reevaluated after a later change.
+
+```python
+result = preprocess_source("#define COUNT 0\n#ifdef COUNT\nint enabled;\n#endif\n")
+assert result.complete
+state = result.macros["COUNT"]
+assert state.defined is True and state.value is False
+assert state.definition.numeric_value == 0
+```
+
+The public `MacroDefinition`, `MacroState`, and `MacroEnvironment` types live in
+`cpre.macros` and are exported from `cpre`. `MacroDefinition` stores the name,
+comment-stripped logical replacement text, physical definition location, parameter
+tuple, and variadic flag. `parameters=None` means object-like; `parameters=()` means
+a function-like macro with no named parameters. Standard trailing `...` is supported.
+Replacement text is retained without expansion (and is not a byte-for-byte copy of
+continued source). `MacroState.defined` and `.value` are independent optional
+Booleans: `None` means unknown. Assumption-only entries have no source definition.
+
+Object-like integer literals (decimal, octal, hexadecimal, with suffixes, optional
+sign and enclosing parentheses) expose `numeric_value` and determine Boolean
+truth. Empty replacements are known-defined but have unknown truth. Aliases,
+compound replacement expressions, and function invocations are not expanded;
+conditions requiring their values remain unresolved. A bare function-like macro
+name has false value because it is not invoked. Numeric comparisons remain opaque,
+even when the operand macro has a known integer value.
+
+`MacroEnvironment(assumptions)` provides `get(name)`, `define(MacroDefinition(...))`,
+`undef(name)`, and `snapshot()` for reuse by later expansion work. `get` returns an
+unknown state for unmentioned names. Snapshots contain only explicitly tracked
+names in sorted order and are detached read-only mappings of immutable entries.
+`PreprocessResult.macros` is the final snapshot on success, including an empty
+mapping for an empty environment; it is `None` on incomplete results. This API does
+not currently expose point-in-source snapshots. Directive parsing and Boolean
+resolution remain internal; the symbolic `analyze_source` API is unchanged.
+
+Active `#include`, `#include_next`, and `#import` directives still produce
+`unsupported_preprocessing_directive`. Malformed or unsupported active macro
+definitions produce the same diagnostic. Directives in discarded branches do not
+block selection. Other nonconditional directives and ordinary text are retained
+verbatim; no macro substitution, include processing, token pasting, or
+stringification occurs. `complete` certifies conditional selection only, not that
+the output is ready for every AST parser. Existing directive-parser syntax and
 Boolean-model limitations still apply. `AnalysisOptions` supplies the same
-resource limits as analysis; limit exhaustion returns no source.
+resource limits as analysis; limit exhaustion returns no source or macro snapshot.

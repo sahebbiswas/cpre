@@ -132,3 +132,18 @@ def test_concrete_preprocessing_installed_contract():
     assert not unknown.complete
     assert isinstance(unknown.incomplete[0], cpre.PreprocessDiagnostic)
     assert unknown.incomplete[0].code is cpre.ErrorCode.UNRESOLVED_CONDITION
+
+
+def test_source_order_macro_state_installed_contract():
+    result = cpre.preprocess_source(
+        '#define ZERO 0\n#define F(x) x\n#ifdef ZERO\nint kept;\n#endif\n'
+    )
+    assert result.complete and 'int kept;' in result.source
+    assert isinstance(result.macros['ZERO'], cpre.MacroState)
+    assert isinstance(result.macros['F'].definition, cpre.MacroDefinition)
+    assert result.macros['ZERO'].defined is True
+    assert result.macros['ZERO'].value is False
+    assert result.macros['F'].definition.parameters == ('x',)
+    env = cpre.MacroEnvironment({'X': True})
+    env.undef('X')
+    assert env.snapshot()['X'].defined is False

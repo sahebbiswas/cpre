@@ -186,5 +186,7 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
 Use `cpre.preprocess_source(source, assumptions={"FEATURE": True})` to select
 conditional branches while preserving source coordinates. Check `result.complete`
 before consuming `result.source`: unknown reachable conditions and unsupported
-macro-state directives return structured incomplete diagnostics. See the
+include directives return structured incomplete diagnostics. Active `#define` and
+`#undef` update state in source order, with the final state available as
+`result.macros`. Macro invocations in ordinary source are not expanded. See the
 [concrete selection API](docs/api.md#concrete-conditional-selection) for the contract.

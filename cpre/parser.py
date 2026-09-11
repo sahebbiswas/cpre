@@ -28,8 +28,10 @@ DIRECTIVE_RE = re.compile(
 def strip_comments(source: str) -> str:
     def replacement(match: re.Match[str]) -> str:
         return "".join(character if character in "\r\n" else " " for character in match.group())
-    source = re.sub(r"/\*.*?\*/", replacement, source, flags=re.DOTALL)
-    return re.sub(r"//[^\r\n]*", replacement, source)
+    # Preserve quoted replacement tokens such as URLs and comment delimiters.
+    pattern = r"\b[0-9][A-Za-z0-9_'.]*|" + r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|/\*.*?\*/|//[^\r\n]*'
+    return re.sub(pattern, lambda match: replacement(match) if match.group().startswith('/')
+                  else match.group(), source, flags=re.DOTALL)
 
 
 @dataclass(frozen=True)
