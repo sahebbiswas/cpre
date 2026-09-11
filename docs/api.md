@@ -220,3 +220,57 @@ For a tool such as cgull, this keeps ownership clean: cgull can provide source i
 Supported integrations should import from `cpre`, not internal modules. The top-level `__all__` is the compatibility boundary for public symbols.
 
 The CLI JSON format is a structural conditional-tree report and should not be used as the library API. If a process-to-process interchange format is required, prefer [SARIF output](sarif.md) for findings or call the Python API directly when both components run in Python.
+
+## Concrete conditional selection
+
+`preprocess_source` selects one configuration without expanding macros or reading
+headers. Always check `complete` before passing its output to a downstream parser:
+
+```python
+from cpre import MacroAssumptions, preprocess_source
+
+result = preprocess_source(
+    "#ifdef FEATURE\nint enabled;\n#else\nint disabled;\n#endif\n",
+    filename="example.c",
+    assumptions=MacroAssumptions(defined={"FEATURE"}),
+)
+if result.complete:
+    parse_translation_unit(result.source, filename=result.filename)
+else:
+    for diagnostic in result.incomplete:
+        report(diagnostic.code, diagnostic.location, diagnostic.message)
+```
+
+The public `PreprocessResult` contains `source`, `filename`, `incomplete`, and a
+`complete` property. `source` is `None` whenever selection is incomplete; partial
+selection is never exposed. Diagnostics are ordered by source line and use either
+`PreprocessDiagnostic` or the existing `AnalysisIncomplete` resource diagnostic.
+Malformed conditional directives raise structured `ParseError`, with the same
+codes, physical locations, and filename metadata as `analyze_source`.
+
+On success, conditional directives (including all continuation lines) and inactive
+text become spaces. Block comments overlapping retained text are kept whole to
+balance delimiters across selected lines; comments wholly in discarded regions
+stay masked. Retained text, columns, physical line endings, and the presence
+or absence of a final newline are preserved. Nested `#if`, `#ifdef`, `#ifndef`,
+`#elif`, `#elifdef`, `#elifndef`, `#else`, and `#endif` are supported.
+
+Assumptions accept the same `MacroAssumptions` or Boolean mapping as
+`analyze_source`: mappings constrain Boolean values; definedness alone does not
+imply a nonzero value; undefined macros have false values. This concrete API always
+distinguishes definedness from value, including when assumptions are omitted
+(unlike the legacy symbolic analysis mode). Unmentioned macros and opaque
+arithmetic/comparison predicates remain unknown. If they affect a reachable branch
+choice, `unresolved_condition` marks the result incomplete. Tautologies and
+unreachable unknown conditions do not require extra assumptions.
+
+This is conditional selection, not a full C/C++ preprocessor. Active `#define`,
+`#undef`, `#include`, `#include_next`, and `#import` directives produce
+`unsupported_preprocessing_directive`, because ignoring their macro-state effects
+could select the wrong configuration. Such directives in discarded branches do
+not block selection. Other nonconditional directives and ordinary text are retained
+verbatim; no object/function macro substitution, include processing, token pasting,
+or stringification occurs. `complete` certifies conditional selection only, not
+that the output is ready for every AST parser. Existing directive-parser syntax and
+Boolean-model limitations still apply. `AnalysisOptions` supplies the same
+resource limits as analysis; limit exhaustion returns no source.

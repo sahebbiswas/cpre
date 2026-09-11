@@ -180,3 +180,11 @@ Public API additions use a minor version bump, while backward-compatible fixes u
 ## License
 
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
+
+### Select a concrete configuration
+
+Use `cpre.preprocess_source(source, assumptions={"FEATURE": True})` to select
+conditional branches while preserving source coordinates. Check `result.complete`
+before consuming `result.source`: unknown reachable conditions and unsupported
+macro-state directives return structured incomplete diagnostics. See the
+[concrete selection API](docs/api.md#concrete-conditional-selection) for the contract.
