@@ -115,3 +115,20 @@ def test_assumption_contract_marks_profile_specific_findings():
     )
     finding = _by_kind(result, cpre.FindingKind.REDUNDANT_BRANCH)[0]
     assert finding.depends_on_assumptions is True
+
+
+def test_concrete_preprocessing_installed_contract():
+    result = cpre.preprocess_source(
+        '#ifdef X\nint x;\n#else\nint y;\n#endif\n',
+        filename='contract.c', assumptions=cpre.MacroAssumptions(defined=['X']),
+    )
+    assert isinstance(result, cpre.PreprocessResult)
+    assert result.complete
+    assert result.filename == 'contract.c'
+    assert result.source.splitlines()[1] == 'int x;'
+    assert 'int y;' not in result.source
+    unknown = cpre.preprocess_source('#if UNKNOWN\nx\n#endif')
+    assert unknown.source is None
+    assert not unknown.complete
+    assert isinstance(unknown.incomplete[0], cpre.PreprocessDiagnostic)
+    assert unknown.incomplete[0].code is cpre.ErrorCode.UNRESOLVED_CONDITION

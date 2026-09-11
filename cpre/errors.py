@@ -26,6 +26,8 @@ class ErrorCode(str, Enum):
     INVALID_ASSUMPTIONS = "invalid_assumptions"
     ANALYSIS_LIMIT_EXCEEDED = "analysis_limit_exceeded"
     ANALYSIS_FAILURE = "analysis_failure"
+    UNRESOLVED_CONDITION = "unresolved_condition"
+    UNSUPPORTED_PREPROCESSING_DIRECTIVE = "unsupported_preprocessing_directive"
     SOURCE_READ_ERROR = "source_read_error"
 
 

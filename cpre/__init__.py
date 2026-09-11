@@ -22,7 +22,9 @@ from .api import (
     analyze_source,
 )
 
-__version__ = "0.7.0"
+from .preprocessing import PreprocessDiagnostic, PreprocessResult, preprocess_source
+
+__version__ = "0.8.0"
 
 __all__ = [
     "AnalysisError",
@@ -40,6 +42,9 @@ __all__ = [
     "FixConfidence",
     "MacroAssumptions",
     "ParseError",
+    "PreprocessDiagnostic",
+    "PreprocessResult",
+    "preprocess_source",
     "SourceLocation",
     "SourceRange",
     "SuggestedEdit",
