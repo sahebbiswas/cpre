@@ -27,9 +27,9 @@ DIRECTIVE_RE = re.compile(
 
 def strip_comments(source: str) -> str:
     def replacement(match: re.Match[str]) -> str:
-        return "".join("\n" if character == "\n" else " " for character in match.group())
+        return "".join(character if character in "\r\n" else " " for character in match.group())
     source = re.sub(r"/\*.*?\*/", replacement, source, flags=re.DOTALL)
-    return re.sub(r"//[^\n]*", replacement, source)
+    return re.sub(r"//[^\r\n]*", replacement, source)
 
 
 @dataclass(frozen=True)

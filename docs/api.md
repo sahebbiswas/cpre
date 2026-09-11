@@ -249,8 +249,9 @@ Malformed conditional directives raise structured `ParseError`, with the same
 codes, physical locations, and filename metadata as `analyze_source`.
 
 On success, conditional directives (including all continuation lines) and inactive
-text become spaces, except block comments are retained whole to keep comment
-delimiters balanced across selected lines. Retained text, columns, physical line endings, and the presence
+text become spaces. Block comments overlapping retained text are kept whole to
+balance delimiters across selected lines; comments wholly in discarded regions
+stay masked. Retained text, columns, physical line endings, and the presence
 or absence of a final newline are preserved. Nested `#if`, `#ifdef`, `#ifndef`,
 `#elif`, `#elifdef`, `#elifndef`, `#else`, and `#endif` are supported.
 

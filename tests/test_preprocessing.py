@@ -128,3 +128,34 @@ def test_comments_crossing_selection_boundaries_remain_balanced():
     assert '/* explanation\n*/' in output
     assert 'int removed;' not in output
     assert 'int kept;' in output
+
+
+@pytest.mark.parametrize('ending', ['\n', '\r\n', '\r'])
+@pytest.mark.parametrize('comment', ['/* dead */', '/* dead\ncontinued */'])
+def test_comments_wholly_in_discarded_regions_stay_masked(ending, comment):
+    source = ('#if 0\n' + comment + '\n#else /* directive only */\n'
+              '/* retained */ int kept;\n#endif\n').replace('\n', ending)
+    output = selected(source)
+    assert 'dead' not in output
+    assert 'continued' not in output
+    assert 'directive only' not in output
+    assert '/* retained */ int kept;' in output
+    assert output.count('/*') == output.count('*/') == 1
+
+
+def test_comments_wholly_in_nested_discarded_branches_stay_masked():
+    source = ('#if 1\n#if 0\n/* nested dead */\n#endif\n'
+              '/* retained */\n#else\n/* other dead */\n#endif')
+    output = selected(source)
+    assert 'dead' not in output
+    assert output.count('/*') == output.count('*/') == 1
+    assert '/* retained */' in output
+
+
+def test_line_comment_does_not_hide_directives_after_carriage_return():
+    source = '// heading\r#if 0\r/* dead */\r#endif\rint kept;'
+    output = selected(source)
+    assert output.startswith('// heading\r')
+    assert 'dead' not in output
+    assert '#if' not in output
+    assert output.endswith('int kept;')

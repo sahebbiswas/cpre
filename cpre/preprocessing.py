@@ -52,8 +52,9 @@ def preprocess_source(
     Unmentioned macros and opaque predicates remain unknown. A reachable
     undecidable condition returns an incomplete result with ``source=None``.
     Inactive text and conditional directives become spaces, preserving physical
-    line endings and columns. Retained text is unchanged. No macro expansion or
-    include processing is performed; reachable define/undef/include directives
+    line endings and columns. Block comments overlapping retained text are kept
+    whole to balance their delimiters. Retained text is unchanged. No macro
+    expansion or include processing is performed; reachable define/undef/include directives
     return an incomplete result because they may change subsequent macro state.
     Malformed conditionals raise the same structured ParseError as analyze_source.
     """
@@ -142,15 +143,19 @@ def preprocess_source(
         char if char in "\r\n" else " " for char in line
     ) for line, keep in zip(physical, retained))
     # A block comment can start on a removed directive and end beside retained
-    # code (or vice versa). Keep complete block comments so masking never leaves
-    # unmatched delimiters. Quoted literals and line comments are skipped.
+    # code (or vice versa). Restore only comments overlapping retained text so
+    # delimiters stay balanced without leaking wholly discarded comments.
+    # Quoted literals and line comments are skipped.
     tokens = re.finditer(
         r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|//[^\r\n]*|/\*.*?\*/',
         source, re.DOTALL,
     )
     characters = list(output)
+    char_kept = bytearray()
+    for line, keep in zip(physical, retained):
+        char_kept.extend(bytes([keep]) * len(line))
     for token in tokens:
-        if token.group().startswith("/*"):
+        if token.group().startswith("/*") and any(char_kept[token.start():token.end()]):
             characters[token.start():token.end()] = token.group()
     return PreprocessResult("".join(characters), filename)
 
