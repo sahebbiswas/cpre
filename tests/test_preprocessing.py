@@ -129,7 +129,7 @@ def test_error_and_warning_directives_do_not_write_stderr(capsys):
 
 def test_null_directive_is_masked_without_blocking_completion():
     output = selected('#\nint value;\n')
-    assert output.splitlines() == ['', 'int value;']
+    assert output.splitlines() == [' ', 'int value;']
 
 
 @pytest.mark.parametrize('name', ['__LINE__', '__FILE__', '__DATE__', '__TIME__', '__STDC__'])
