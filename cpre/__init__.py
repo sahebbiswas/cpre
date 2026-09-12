@@ -24,9 +24,9 @@ from .api import (
 
 from .expansion import SourceMapping
 from .macros import MacroDefinition, MacroEnvironment, MacroState
-from .preprocessing import PreprocessDiagnostic, PreprocessResult, preprocess_source
+from .preprocessing import PreprocessDiagnostic, PreprocessResult, compact, preprocess_source
 
-__version__ = "0.10.5"
+__version__ = "0.10.6"
 
 __all__ = [
     "AnalysisError",
@@ -49,6 +49,7 @@ __all__ = [
     "ParseError",
     "PreprocessDiagnostic",
     "PreprocessResult",
+    "compact",
     "preprocess_source",
     "SourceLocation",
     "SourceMapping",
