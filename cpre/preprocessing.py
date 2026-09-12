@@ -276,6 +276,7 @@ def preprocess_source(
                                     _condition_environment(environment),
                                     expansion,
                                     budget,
+                                    unsupported_identifiers=_PREDEFINED_MACROS,
                                 )
                             except NumericConditionError as error:
                                 diagnostics.append(PreprocessDiagnostic(
