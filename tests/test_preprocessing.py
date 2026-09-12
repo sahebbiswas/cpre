@@ -221,7 +221,7 @@ def test_compact_leaves_expanded_retained_output_unchanged():
     result = preprocess_source(source)
     assert result.complete
     assert result.removed_lines == frozenset({1})
-    assert compact(result) == '\nint value = 123;\n'
+    assert compact(result) == ''.join(result.source.splitlines(keepends=True)[1:])
 
 
 def test_canonical_and_compact_forms_have_equivalent_nonblank_content():
