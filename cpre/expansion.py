@@ -253,21 +253,29 @@ class Expansion:
 
     def _paste(self, left: list[Token], right: list[Token], definition: MacroDefinition,
                start: int, end: int) -> list[Token]:
-        """Paste the boundary tokens, treating empty arguments as placemarkers."""
-        left = [token for token in left if token.kind != 'empty']
-        right = [token for token in right if token.kind != 'empty']
+        """Paste boundary tokens while preserving placemarkers until rescanning."""
         if not left:
             return right
         if not right:
             return left
-        text = left[-1].text + right[0].text
+        left_token = left[-1]
+        right_token = right[0]
+        if left_token.kind == 'empty' and right_token.kind == 'empty':
+            marker = Token('', 'empty', start, end,
+                           left_token.hidden | right_token.hidden, True)
+            return left[:-1] + [marker] + right[1:]
+        if left_token.kind == 'empty':
+            return left[:-1] + right
+        if right_token.kind == 'empty':
+            return left + right[1:]
+        text = left_token.text + right_token.text
         tokens = [token for token in tokenize(text) if token.kind not in {'space', 'comment'}]
         if len(tokens) != 1 or tokens[0].text != text:
             raise ExpansionError(
-                f'invalid token paste in {definition.name}: {left[-1].text!r} ## {right[0].text!r}'
+                f'invalid token paste in {definition.name}: {left_token.text!r} ## {right_token.text!r}'
             )
         merged = Token(text, tokens[0].kind, start, end,
-                       left[-1].hidden | right[0].hidden, True)
+                       left_token.hidden | right_token.hidden, True)
         return left[:-1] + [merged] + right[1:]
 
     def _substitute(self, body: list[Token], definition: MacroDefinition,
@@ -313,7 +321,10 @@ class Expansion:
             if part.kind in {'identifier', _VA_OPT_KIND} and part.text in parameters:
                 adjacent_paste = ((index > 0 and self._paste_operator(body[index - 1])) or
                                   (index + 1 < len(body) and self._paste_operator(body[index + 1])))
-                elements.append(list(raw[part.text] if adjacent_paste else expanded[part.text]))
+                value = list(raw[part.text] if adjacent_paste else expanded[part.text])
+                if adjacent_paste and not value:
+                    value = [Token('', 'empty', start, end, generated=True)]
+                elements.append(value)
             else:
                 elements.append([part])
             index += 1
@@ -368,6 +379,10 @@ class Expansion:
             token = pending.popleft()
             self.current_offset = token.start
             self.budget.consume()
+            if token.kind == 'identifier' and token.text == '__VA_OPT__':
+                raise ExpansionError(
+                    '__VA_OPT__ is only valid in a variadic macro replacement list'
+                )
             state = environment.get(token.text) if token.kind == 'identifier' else None
             definition = state.definition if state is not None else None
             if state is not None and definition is None and state.defined is not False and (
