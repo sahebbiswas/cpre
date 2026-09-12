@@ -2,7 +2,7 @@ import pytest
 
 from cpre import (
     AnalysisError, AnalysisOptions, ErrorCode, MacroAssumptions, ParseError,
-    PreprocessResult, SourceLocation, preprocess_source,
+    PreprocessResult, SourceLocation, compact, preprocess_source,
 )
 
 
@@ -159,3 +159,74 @@ def test_line_comment_does_not_hide_directives_after_carriage_return():
     assert 'dead' not in output
     assert '#if' not in output
     assert output.endswith('int kept;')
+
+
+def test_removed_lines_are_immutable_and_only_mark_wholly_masked_lines():
+    source = '#if 0\ndead\n#else\nkept\n#endif\n'
+    result = preprocess_source(source)
+    assert result.complete
+    assert result.removed_lines == frozenset({1, 2, 3, 5})
+    assert isinstance(result.removed_lines, frozenset)
+
+
+def test_compact_is_explicit_and_preserves_retained_blank_lines():
+    source = '#if 0\ndead\n#endif\n\nkept\n'
+    result = preprocess_source(source)
+    assert result.complete
+    assert result.source == '     \n    \n      \n\nkept\n'
+    assert compact(result) == '\nkept\n'
+    assert compact(result, max_consecutive_blank_lines=1) == '\n\nkept\n'
+
+
+def test_retained_blank_line_breaks_removed_line_collapse_run():
+    source = '#if 0\ndead\n#endif\n\n#if 0\ndead2\n#endif\nkept\n'
+    result = preprocess_source(source)
+    assert result.complete
+    assert compact(result, max_consecutive_blank_lines=1) == '\n\n\nkept\n'
+
+
+@pytest.mark.parametrize('ending', ['\n', '\r\n', '\r'])
+def test_compact_preserves_kept_line_endings_and_no_final_newline(ending):
+    source = ending.join(['#if 0', 'dead', '#endif', 'kept'])
+    result = preprocess_source(source)
+    assert result.complete
+    assert compact(result) == 'kept'
+    assert compact(result, max_consecutive_blank_lines=1) == ending + 'kept'
+
+
+def test_compact_rejects_negative_limit_and_incomplete_result():
+    result = preprocess_source('#if 0\ndead\n#endif\nkept\n')
+    with pytest.raises(ValueError, match='non-negative'):
+        compact(result, max_consecutive_blank_lines=-1)
+
+    incomplete = preprocess_source('#if UNKNOWN\nmaybe\n#endif\n')
+    assert not incomplete.complete
+    assert incomplete.removed_lines is None
+    with pytest.raises(ValueError, match='complete PreprocessResult'):
+        compact(incomplete)
+
+
+def test_restored_block_comment_lines_are_not_reported_as_removed():
+    source = '#if 1 /* explanation\ncontinued */ int kept;\n#endif\n'
+    result = preprocess_source(source)
+    assert result.complete
+    assert 1 not in result.removed_lines
+    assert 2 not in result.removed_lines
+    assert 3 in result.removed_lines
+    assert compact(result) == '/* explanation\ncontinued */ int kept;\n'
+
+
+def test_compact_leaves_expanded_retained_output_unchanged():
+    source = '#define VALUE 123\n\nint value = VALUE;\n'
+    result = preprocess_source(source)
+    assert result.complete
+    assert result.removed_lines == frozenset({1})
+    assert compact(result) == '\nint value = 123;\n'
+
+
+def test_canonical_and_compact_forms_have_equivalent_nonblank_content():
+    source = '#if 0\ndead\n#else\nkept\n#endif\n\nnext\n'
+    result = preprocess_source(source)
+    canonical = [line for line in result.source.splitlines() if line.strip()]
+    compacted = [line for line in compact(result).splitlines() if line.strip()]
+    assert canonical == compacted == ['kept', 'next']
