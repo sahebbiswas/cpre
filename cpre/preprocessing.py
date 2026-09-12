@@ -187,6 +187,12 @@ def preprocess_source(
                                     str(error), SourceLocation(current_line),
                                 ))
                                 break
+                            except ExpansionError as error:
+                                diagnostics.append(PreprocessDiagnostic(
+                                    ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
+                                    str(error), SourceLocation(current_line),
+                                ))
+                                break
                         if ambiguous and selected is None:
                             diagnostics.append(PreprocessDiagnostic(
                                 ErrorCode.UNRESOLVED_CONDITION,
@@ -232,7 +238,7 @@ def preprocess_source(
     except ExpansionError as error:
         diagnostics.append(PreprocessDiagnostic(
             ErrorCode.UNSUPPORTED_MACRO_EXPANSION, str(error),
-            SourceLocation(current_line) if current_line is not None else SourceLocation(1),
+            expansion.location(expansion.current_offset),
         ))
     except AnalysisLimitExceeded as error:
         limit_line = error.line if error.line is not None else current_line
