@@ -19,6 +19,23 @@ The compatibility suite in `tests/test_downstream_contract.py` is the executable
 
 `SuggestedEdit` is intentionally optional. Exact condition rewrites may be used as context-independent mechanical fixes. Contextual rewrites are valid only under the branch context and should be treated as lower-confidence suggestions. Dead/redundant classification and macro-form directives do not imply a mechanical edit unless `cpre` explicitly returns one.
 
+## pcpp replacement compatibility gate
+
+Before a downstream consumer removes an existing `pcpp` preprocessing path in favor of `cpre.preprocess_source`, the corpus in `tests/compatibility/fixtures` must pass `tests/test_pcpp_differential.py` for every supported fixture/configuration relevant to that consumer.
+
+The gate requires:
+
+- equivalent macro-expanded preprocessing token streams after normalizing only comments, whitespace, and line-marker formatting
+- equivalent physical token line positions when pcpp line directives are disabled, so source-coordinate-sensitive analysis does not silently drift
+- parse-ready output from both preprocessors through `pycparser`
+- deterministic repeated output
+- explicit `KNOWN_DIFFERENCES` entries, with reasons, for every corpus fixture not covered by the equivalence set
+- explicit coverage of the C-GULL-oriented `offsetof`/container recovery shape
+
+A new mismatch must either be fixed or deliberately added to `KNOWN_DIFFERENCES` with reviewable rationale; the harness must not be weakened merely to make a migration pass. Unsupported cpre constructs continue to fail atomically rather than exposing partial output.
+
+`pcpp` is a development/test dependency used only as the differential oracle. It is not part of cpre's runtime dependency surface.
+
 ## Compatibility and versioning
 
 During the current `0.x` phase, `cpre` treats the documented public API as compatibility-sensitive even though semantic versioning traditionally permits breaking changes before `1.0`.
