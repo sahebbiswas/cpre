@@ -21,6 +21,7 @@ python -m pip install -e ".[dev]"
 ## Documentation
 
 - [Python API integration guide](docs/api.md) — developer-focused guidance for embedding cpre in tools, linters, and scripts.
+- [Concrete macro configuration](docs/concrete-configuration.md) — explicit external macro definitions and open/closed unknown-name policy for concrete preprocessing.
 - [SARIF output](docs/sarif.md) — SARIF 2.1.0 format, rule mapping, fixes, and code-scanning integration.
 - [Downstream compatibility contract](docs/downstream-compatibility.md) — supported API and preprocessing guarantees.
 - [C-GULL replacement readiness](docs/pcpp-readiness.md) — measured corpus, migration blockers, and release gate.
@@ -92,7 +93,7 @@ else:
 
 Downstream tools should check `result.complete` before treating an empty findings tuple as a clean analysis. Bounded ROBDD exhaustion returns a structured incomplete result and never exposes findings derived from partial proofs.
 
-The supported API includes structured findings, exact and contextual simplifications, source edits, macro assumptions, deterministic analysis limits, and stable error codes. See the [Python API integration guide](docs/api.md) for the full integration contract and examples.
+The supported API includes structured findings, exact and contextual simplifications, source edits, macro assumptions, concrete macro configuration, deterministic analysis limits, and stable error codes. See the [Python API integration guide](docs/api.md) for the full integration contract and examples.
 
 Consumers should import supported symbols from `cpre` rather than internal modules such as `cpre.robdd`, `cpre.parser`, or compatibility-facade internals.
 
@@ -185,17 +186,20 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
 
 ### Select a concrete configuration
 
-Use `cpre.preprocess_source(source, assumptions={"FEATURE": True})` to select
-conditional branches and expand object-like and function-like macros with source mappings. Check `result.complete`
-before consuming `result.source`: unknown reachable conditions and unsupported
-include directives return structured incomplete diagnostics. Active `#define` and
-`#undef` update state in source order, with the final state available as
-`result.macros`. Macros expand in active ordinary source, including nested calls
-and standard `__VA_ARGS__` substitution;
-`result.source_map` maps output back to physical invocation ranges. Unsupported
-expansion forms such as `__VA_OPT__` return incomplete diagnostics. Standard
-stringification (`#`) and token pasting (`##`) are supported. See the
-[concrete selection API](docs/api.md#concrete-conditional-selection) for the contract.
+`preprocess_source()` keeps its existing open-world `assumptions=` contract for callers that only know Boolean state. For build-equivalent external macro definitions, use `MacroConfiguration` instead:
+
+```python
+config = cpre.MacroConfiguration(
+    presence={"FEATURE"},
+    integers={"FEATURE_VALUE": 42},
+    unknown_names=cpre.UnknownNamePolicy.UNDEFINED,
+)
+result = cpre.preprocess_source(source, configuration=config)
+```
+
+`UnknownNamePolicy.UNDEFINED` is opt-in and gives concrete condition evaluation the pcpp/C-preprocessor behavior where otherwise-unmentioned names are undefined/zero. The default remains open-world; symbolic analysis behavior does not change. `MacroConfiguration` can also carry explicit undefined names and arbitrary `MacroDefinition` replacement text/function-like macros. Active source `#define` and `#undef` directives override configured state in source order.
+
+Always check `result.complete` before consuming `result.source`. Unknown reachable conditions under open-world mode and unsupported include directives return structured incomplete diagnostics. Macros expand in active ordinary source, including nested calls and standard `__VA_ARGS__` substitution; `result.source_map` maps expanded output back to physical invocation ranges. Unsupported expansion forms such as `__VA_OPT__` return incomplete diagnostics. Standard stringification (`#`) and token pasting (`##`) are supported. See the [concrete selection API](docs/api.md#concrete-conditional-selection) and [concrete configuration guide](docs/concrete-configuration.md) for the contract.
 
 The [pcpp replacement gate](docs/pcpp-readiness.md) is currently **blocked**.
 `complete=True` certifies the documented cpre operations; it does not yet certify
