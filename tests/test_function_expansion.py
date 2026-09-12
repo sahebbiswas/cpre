@@ -172,7 +172,7 @@ def test_invalid_va_opt_definitions_are_atomic_without_invocation(definition, me
     assert result.source is result.source_map is result.macros is None
     diagnostic, = result.incomplete
     assert diagnostic.code is ErrorCode.UNSUPPORTED_MACRO_EXPANSION
-    assert diagnostic.location == SourceLocation(1)
+    assert diagnostic.location == SourceLocation(1, 1)
     assert message in diagnostic.message
 
     inactive = preprocess_source('#if 0\n' + definition + '\n#endif\nint ok;')
@@ -210,7 +210,7 @@ def test_multiline_invocation_mapping_and_untouched_comments(ending):
     result = preprocess_source(source, filename='mapped.c')
     assert result.complete
     span, = [span for span in result.source_map if span.expanded]
-    assert source[span.source_start:span.source_end] == ('F /*arg*/ (\n 3\n)').replace('\n', ending)
+    assert source[span.source_start:span.source_end] == ('F /*arg*/ (\n 3\n').replace('\n', ending)
     assert span.start == SourceLocation(3, 7)
     assert span.end == SourceLocation(5, 2)
     assert '// before' in result.source and '// after' in result.source
