@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "downstream": {
+    "repository": "sahebbiswas/cgull",
+    "commit": "c61b27520624c074661afa0a615160944b31ab3d"
+  },
+  "boundary": {
+    "resolved_project_headers": "expanded_before_cpre",
+    "unresolved_includes": "mask_active_directive_lines_preserve_line_endings",
+    "raw_reachable_includes_supported": false,
+    "typedef_prelude_stage": "after_cpre",
+    "configuration_owner": "cgull",
+    "configuration_api": "MacroConfiguration",
+    "unknown_name_policy": "closed",
+    "source_definitions_override_configuration": true
+  },
+  "exclusions": {
+    "__VA_OPT__": {
+      "supported": false,
+      "occurrences_in_pinned_downstream_corpus": 0,
+      "diagnostic": "unsupported_macro_expansion"
+    },
+    "raw_reachable_include": {
+      "supported": false,
+      "diagnostic": "unsupported_preprocessing_directive"
+    }
+  },
+  "evidence": {
+    "include_expander": "cgull/includes.py",
+    "project_pipeline": "cgull/project_analysis.py",
+    "include_regression": "tests/test_includes.py::test_tu_include_expansion_integration_with_scanner",
+    "current_pcpp_boundary": "cgull/ast_analyzer/visitor.py::_try_pcpp_preprocess"
+  }
+}
