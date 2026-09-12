@@ -29,14 +29,23 @@ def _assert_atomic_diagnostic(source: str, code: ErrorCode, line: int) -> None:
     assert diagnostic.location.line == line
 
 
-def test_cgull_profile_is_pinned_and_keeps_boundary_narrow():
+def test_cgull_profile_is_pinned_and_declares_bounded_readiness():
     profile = _profile()
 
-    assert profile["schema_version"] == 1
+    assert profile["schema_version"] == 2
     assert profile["downstream"] == {
         "repository": "sahebbiswas/cgull",
         "commit": "c61b27520624c074661afa0a615160944b31ab3d",
     }
+
+    readiness = profile["readiness"]
+    assert readiness["status"] == "ready"
+    assert readiness["scope"] == "bounded_cgull_pcpp_replacement"
+    assert readiness["supported_case_divergences"] == 0
+    assert readiness["complete_but_divergent_cases"] == 0
+    assert readiness["exclusions_have_reviewed_nonimpact_evidence"] is True
+    assert readiness["revalidate_on_downstream_revision_change"] is True
+
     assert profile["boundary"]["resolved_project_headers"] == "expanded_before_cpre"
     assert profile["boundary"]["unresolved_includes"] == (
         "mask_active_directive_lines_preserve_line_endings"
@@ -51,10 +60,14 @@ def test_cgull_profile_is_pinned_and_keeps_boundary_narrow():
     assert va_opt["supported"] is False
     assert va_opt["occurrences_in_pinned_downstream_corpus"] == 0
     assert va_opt["diagnostic"] == ErrorCode.UNSUPPORTED_MACRO_EXPANSION.value
+    assert va_opt["nonimpact_evidence"] == "absent_from_pinned_downstream_corpus"
 
     include = profile["exclusions"]["raw_reachable_include"]
     assert include["supported"] is False
     assert include["diagnostic"] == ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE.value
+    assert include["nonimpact_evidence"] == (
+        "handled_at_prepared_translation_unit_boundary"
+    )
 
 
 def test_prepared_cgull_translation_unit_is_supported_and_parseable():
