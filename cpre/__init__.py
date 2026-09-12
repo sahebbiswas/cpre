@@ -26,7 +26,7 @@ from .expansion import SourceMapping
 from .macros import MacroDefinition, MacroEnvironment, MacroState
 from .preprocessing import PreprocessDiagnostic, PreprocessResult, compact, preprocess_source
 
-__version__ = "0.10.6"
+__version__ = "0.10.7"
 
 __all__ = [
     "AnalysisError",
