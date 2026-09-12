@@ -16,7 +16,10 @@ from cpre.expansion import tokenize
 
 FIXTURES = Path(__file__).parent / "compatibility" / "fixtures"
 _LINE_MARKER = re.compile(
-    r'(?m)^[ \t]*#[ \t]*(?:line[ \t]+)?\d+[^\r\n]*(?:\r\n|\r|\n|$)'
+    r'(?m)^[ \t]*#[ \t]*(?:line[ \t]+)?(?P<line>\d+)[^\r\n]*(?:\r\n|\r|\n|$)'
+)
+_LINE_MARKER_LINE = re.compile(
+    r'^[ \t]*#[ \t]*(?:line[ \t]+)?(?P<line>\d+)[^\r\n]*(?:\r\n|\r|\n)?$'
 )
 
 
@@ -76,7 +79,9 @@ def _run_cpre(case: DifferentialCase, source: str) -> str:
 
 def _run_pcpp(case: DifferentialCase, source: str) -> str:
     preprocessor = Preprocessor()
-    preprocessor.line_directive = None
+    # Keep source-coordinate information in-band so the harness can compare
+    # logical source lines even though pcpp compacts removed directives.
+    preprocessor.line_directive = "#line"
     for name, value in case.assumptions:
         preprocessor.define(f"{name} {1 if value else 0}")
     preprocessor.parse(source, source=case.fixture)
@@ -85,8 +90,12 @@ def _run_pcpp(case: DifferentialCase, source: str) -> str:
     return output.getvalue()
 
 
+def _without_line_markers(source: str) -> str:
+    return _LINE_MARKER.sub(lambda match: "\n" if match.group(0).endswith("\n") else "", source)
+
+
 def _semantic_tokens(source: str) -> tuple[str, ...]:
-    normalized = _LINE_MARKER.sub("", source)
+    normalized = _without_line_markers(source)
     return tuple(
         token.text for token in tokenize(normalized)
         if token.kind not in {"space", "comment"}
@@ -100,6 +109,35 @@ def _semantic_positions(source: str) -> tuple[tuple[str, int], ...]:
             continue
         line = source.count("\n", 0, token.start) + 1
         positions.append((token.text, line))
+    return tuple(positions)
+
+
+def _pcpp_semantic_positions(source: str) -> tuple[tuple[str, int], ...]:
+    """Resolve pcpp #line directives to original physical source lines."""
+    logical_by_physical: dict[int, int | None] = {}
+    masked_lines: list[str] = []
+    logical_line = 1
+
+    for physical_line, line in enumerate(source.splitlines(keepends=True), 1):
+        marker = _LINE_MARKER_LINE.match(line)
+        if marker:
+            logical_line = int(marker.group("line"))
+            logical_by_physical[physical_line] = None
+            masked_lines.append("".join(char if char in "\r\n" else " " for char in line))
+            continue
+        logical_by_physical[physical_line] = logical_line
+        masked_lines.append(line)
+        logical_line += 1
+
+    normalized = "".join(masked_lines)
+    positions = []
+    for token in tokenize(normalized):
+        if token.kind in {"space", "comment"}:
+            continue
+        physical_line = normalized.count("\n", 0, token.start) + 1
+        logical = logical_by_physical[physical_line]
+        assert logical is not None
+        positions.append((token.text, logical))
     return tuple(positions)
 
 
@@ -138,10 +176,10 @@ def test_cpre_matches_pcpp_preprocessing_tokens_and_coordinates(case):
         f"{_token_diff(cpre_tokens, pcpp_tokens)}"
     )
 
-    # pcpp line directives are disabled above, so physical token lines are a
-    # meaningful cross-check that cpre preserves downstream source coordinates.
+    # cpre preserves physical source lines directly; pcpp represents the same
+    # coordinates through #line directives around its compacted output.
     cpre_positions = _semantic_positions(cpre_output)
-    pcpp_positions = _semantic_positions(pcpp_output)
+    pcpp_positions = _pcpp_semantic_positions(pcpp_output)
     assert cpre_positions == pcpp_positions, (
         f"{case.id}: token source lines differ from pcpp\n"
         f"cpre={cpre_positions!r}\npcpp={pcpp_positions!r}"
@@ -161,7 +199,7 @@ def test_differential_outputs_are_parseable_and_deterministic(case):
 
     parser = c_parser.CParser()
     parser.parse(first_cpre, filename=f"cpre:{case.fixture}")
-    parser.parse(first_pcpp, filename=f"pcpp:{case.fixture}")
+    parser.parse(_without_line_markers(first_pcpp), filename=f"pcpp:{case.fixture}")
 
 
 def test_offsetof_container_semantics_match_pcpp():
