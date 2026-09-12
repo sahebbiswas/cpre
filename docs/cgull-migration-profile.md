@@ -2,7 +2,7 @@
 
 This document defines the reviewed input boundary for replacing C-GULL's `pcpp` preprocessing tier with `cpre.preprocess_source`. It resolves the scope question in issue #39 and is the bounded downstream profile used to satisfy readiness issue #28. It does **not** claim general compiler-preprocessor compatibility.
 
-The downstream evidence is pinned to [C-GULL `c61b275`](https://github.com/sahebbiswas/cgull/tree/c61b27520624c074661afa0a615160944b31ab3d). During final #28 validation on 2026-09-12, that commit remained C-GULL `main`, and a fresh repository search still found zero `__VA_OPT__` occurrences. The profile is therefore **ready for migration at this pinned revision**. A migration against any newer C-GULL revision must re-run the inventory below and review any new preprocessing constructs before relying on this verdict.
+The downstream evidence is pinned to [C-GULL `c61b275`](https://github.com/sahebbiswas/cgull/tree/c61b27520624c074661afa0a615160944b31ab3d). During final #28 validation on 2026-09-12, that commit remained C-GULL `main`. The profile is therefore **ready for migration at this pinned revision**. A migration against any newer C-GULL revision must re-run the inventory below and review any new preprocessing constructs before relying on this verdict.
 
 The machine-readable profile is [`tests/compatibility/cgull-profile.json`](../tests/compatibility/cgull-profile.json); its readiness section is part of the executable gate.
 
@@ -29,17 +29,11 @@ The cpre regression suite models both sides explicitly: a prepared TU with resol
 
 This is a caller policy, not evidence that headers are irrelevant. If C-GULL later expects raw reachable includes to reach cpre, include resolution becomes a new required capability and this readiness profile must be re-reviewed.
 
-## `__VA_OPT__` exclusion: reviewed non-impact evidence
+## Standard variadic macro surface
 
-At pinned C-GULL commit `c61b275`, including the final #28 revalidation, repository-wide search returns **zero `__VA_OPT__` occurrences**. The agreed migration corpus therefore does not require C++20/C23 `__VA_OPT__` semantics. Standard `__VA_ARGS__` behavior remains inside the supported cpre surface.
+Standard trailing variadics, `__VA_ARGS__`, and `__VA_OPT__` are supported by cpre's concrete macro expander. `__VA_OPT__` was absent from the pinned C-GULL corpus used for the original #28 readiness decision, so adding support in cpre #49 broadens the supported language surface without changing the reviewed C-GULL boundary or its earlier non-impact conclusion.
 
-The exclusion stays narrow:
-
-- active `__VA_OPT__` returns atomic `unsupported_macro_expansion`;
-- the compatibility fixture remains explicitly non-complete so the gap cannot silently disappear;
-- any future C-GULL occurrence is outside this profile until separately supported or reviewed.
-
-The non-impact evidence is the downstream inventory plus explicit atomic failure, not pcpp's feature set.
+The support remains standards-oriented rather than compiler-emulation oriented. GNU named variadic parameters and GNU `, ## __VA_ARGS__` comma deletion are still outside cpre's documented compatibility contract. Any future C-GULL dependency on those extensions requires separate review.
 
 ## Final readiness statement
 
@@ -57,14 +51,14 @@ git grep -nE '^[[:space:]]*#[[:space:]]*(include|include_next|import)\b' -- \
   '*.c' '*.h' '*.cc' '*.cpp' '*.cxx' '*.hpp'
 ```
 
-Then confirm that project headers still pass through the include expander before cpre, unresolved include directives are masked without changing physical line count, the typedef prelude is still injected after cpre, the configuration adapter matches the reviewed inputs, and no newly unsupported predefined macro/directive is being silently relied on.
+Then confirm that project headers still pass through the include expander before cpre, unresolved include directives are masked without changing physical line count, the typedef prelude is still injected after cpre, the configuration adapter matches the reviewed inputs, and no newly unsupported predefined macro/directive or implementation-specific variadic extension is being silently relied on.
 
 ## Out-of-profile behavior
 
 Inputs outside this profile remain explicit rather than best-effort:
 
 - reachable raw includes: `unsupported_preprocessing_directive`;
-- active `__VA_OPT__`: `unsupported_macro_expansion`;
+- GNU named variadics and GNU comma-swallowing: outside the supported concrete macro contract;
 - unmodeled predefined macro value uses: `unsupported_macro_expansion`;
 - unsupported reachable nonconditional directives: `unsupported_preprocessing_directive`;
 - any other unsupported or unresolved construct: the corresponding structured incomplete diagnostic, with no partial `source`, `source_map`, or macro snapshot.
