@@ -25,7 +25,8 @@ Before a downstream consumer removes an existing `pcpp` preprocessing path in fa
 
 **Current verdict: blocked.** See the [versioned compatibility report](pcpp-readiness.md)
 for measurements and tracked blockers. A passing test suite verifies both supported
-behavior and known gaps; allowlisting a gap is not proof of downstream non-impact.
+behavior and known gaps; an explicit non-complete case is not proof of downstream
+non-impact.
 
 The gate requires:
 
@@ -33,10 +34,10 @@ The gate requires:
 - equivalent original token line positions after resolving pcpp's `#line` directives, so source-coordinate-sensitive analysis does not silently drift
 - parse-ready output from both preprocessors through `pycparser`
 - deterministic repeated output
-- explicit `KNOWN_DIFFERENCES` entries, with reasons, for every corpus fixture not covered by the equivalence set
+- explicit `EXPLICIT_NONCOMPLETE_CASES` entries, with reasons, for every corpus fixture not covered by the equivalence set
 - explicit coverage of the C-GULL-oriented `offsetof`/container recovery shape
 
-A new mismatch must either be fixed or deliberately added to `KNOWN_DIFFERENCES` with a linked issue and reviewable rationale; the harness must not be weakened merely to make a migration pass. Every exclusion blocks migration until fixed or accompanied by reviewed evidence of non-impact on the agreed downstream input profile. Constructs detected as unsupported fail atomically. Known complete-but-divergent cases are explicitly tested and also block migration; they must not be mistaken for supported equivalence.
+A new mismatch must either be fixed or deliberately added to `EXPLICIT_NONCOMPLETE_CASES` with a linked issue and reviewable rationale; the harness must not be weakened merely to make a migration pass. Every exclusion blocks migration until fixed or accompanied by reviewed evidence of non-impact on the agreed downstream input profile. Constructs detected as unsupported fail atomically: no source, source map, or macro snapshot is exposed. The gate does not permit known complete-but-semantically-divergent output to be treated as an accepted difference.
 
 `pcpp` is a development/test dependency used only as the differential oracle. It is not part of cpre's runtime dependency surface.
 

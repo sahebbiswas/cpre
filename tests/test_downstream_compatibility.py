@@ -49,8 +49,14 @@ CASES = (
         "incomplete_unknown_condition.c", "incomplete",
         ErrorCode.UNRESOLVED_CONDITION, 1,
     ),
-    CompatibilityCase("divergent_builtin_line.c", "divergent"),
-    CompatibilityCase("divergent_pragma.c", "divergent"),
+    CompatibilityCase(
+        "divergent_builtin_line.c", "unsupported",
+        ErrorCode.UNSUPPORTED_MACRO_EXPANSION, 1,
+    ),
+    CompatibilityCase(
+        "divergent_pragma.c", "unsupported",
+        ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE, 1,
+    ),
 )
 
 
@@ -68,7 +74,7 @@ def test_compatibility_corpus_has_explicit_stable_classification(case):
     first = preprocess(case, source)
     second = preprocess(case, source)
 
-    if case.status in {"supported", "divergent"}:
+    if case.status == "supported":
         assert first.complete and second.complete
         assert first.source == second.source
         assert first.source_map == second.source_map

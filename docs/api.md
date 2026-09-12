@@ -308,31 +308,44 @@ mapping for an empty environment; it is `None` on incomplete results. This API d
 not currently expose point-in-source snapshots. Directive parsing and Boolean
 resolution remain internal; the symbolic `analyze_source` API is unchanged.
 
-Active `#include`, `#include_next`, and `#import` directives still produce
+Active `#include`, `#include_next`, and `#import` directives produce
 `unsupported_preprocessing_directive`. Malformed or unsupported active macro
-definitions produce the same diagnostic. Directives in discarded branches do not
-block selection. Other nonconditional directives are retained verbatim. Include
-processing remains unsupported; standard stringification and token pasting are
-supported as described below.
-`complete` certifies the supported selection and expansion operations, not that
-the output is ready for every AST parser. Existing directive-parser syntax and
-Boolean-model limitations still apply. `AnalysisOptions` supplies the same
-resource limits as analysis; limit exhaustion returns no source or macro snapshot.
+definitions produce the same diagnostic. Reachable nonconditional directives outside
+the supported conditional/definition set, including `#line`, `#pragma`, `#error`,
+`#warning`, and implementation-specific directives, also produce
+`unsupported_preprocessing_directive`. A null `#` directive is harmless and masked.
+Directives in discarded branches do not block selection. `#error` and `#warning`
+are represented only by the returned structured diagnostic; the library does not
+write them directly to stderr. Include processing remains unsupported; standard
+stringification and token pasting are supported as described below.
 
-In particular, predefined macros such as `__LINE__`/`__FILE__` are not supplied
-automatically, and retained directives such as `#pragma` are not diagnosed as
-incomplete. These can produce `complete=True` output that differs from pcpp.
-Numeric conditional expressions and unmentioned configuration names can instead
-produce `unresolved_condition`. These limitations currently block the
-[C-GULL replacement gate](pcpp-readiness.md). Callers must validate their input
-profile; `complete` alone does not certify general compiler preprocessing.
+Known predefined macros whose values cpre does not model deterministically, including
+`__LINE__`, `__FILE__`, `__DATE__`, `__TIME__`, `__COUNTER__`, and standard `__STDC*`
+names, produce `unsupported_macro_expansion` when they are reachable without an
+explicit concrete replacement definition. This applies in ordinary source, reachable
+conditional expressions, and when another macro expands to one of these names.
+Ordinary unknown C identifiers remain valid and unchanged; matching spellings inside
+comments or string/character literals are not treated as macro uses. A concrete
+`MacroConfiguration` definition may supply replacement text for an environment macro;
+Boolean assumptions alone do not invent replacement text.
+
+All of these unsupported cases are atomic. `source`, `source_map`, and `macros` are
+`None`, so callers cannot accidentally consume a partially transformed translation
+unit or a fabricated mapping for semantics cpre did not perform. `complete=True`
+therefore certifies the documented supported selection/expansion surface and no known
+#38 built-in/directive blocker, but it still does not certify general GCC/Clang
+preprocessing equivalence or arbitrary implementation-specific extensions.
+`AnalysisOptions` supplies the same resource limits as analysis; limit exhaustion
+also returns no source or macro snapshot. The bounded migration status is tracked by
+the [C-GULL replacement gate](pcpp-readiness.md).
 
 
 ### Object-like macro expansion (0.10.0)
 
 Active ordinary-source identifiers expand recursively using the current macro
 environment. Redefinitions affect subsequent uses; discarded branches do not
-change expansion. Undefined and unmentioned identifiers remain unchanged. Comments,
+change expansion. Ordinary undefined and unmentioned identifiers remain unchanged;
+known unmodeled predefined macro names are diagnosed as described above. Comments,
 quoted literals (including encoding prefixes and raw strings), and preprocessing
 numbers are protected. Replacement-token separators prevent accidental identifier,
 operator, or comment formation; whitespace is not intended to match compiler `-E`
