@@ -23,9 +23,9 @@ _UINT_MASK = (1 << _INT_BITS) - 1
 _SIGNED_MIN = -(1 << (_INT_BITS - 1))
 _SIGNED_MAX = (1 << (_INT_BITS - 1)) - 1
 _MAX_SHIFT = _INT_BITS - 1
-# A parenthesized subexpression re-enters the full precedence stack, so keep
-# this comfortably below Python's own recursion limit rather than relying on it.
-_MAX_DEPTH = 48
+# A parenthesized subexpression re-enters the full precedence stack. Keep this
+# well below Python's recursion limit so our structured bound fires first.
+_MAX_DEPTH = 24
 
 
 @dataclass(frozen=True)
@@ -275,6 +275,8 @@ def evaluate_numeric_condition(text: str, environment: MacroEnvironment,
     significant = [token for token in expanded if token.kind != "empty"]
     try:
         return _Parser(significant, budget).parse().truth()
+    except RecursionError as error:
+        raise NumericConditionError("expression nesting exceeds concrete-evaluation bound") from error
     except NumericConditionError as error:
         if str(error).startswith("unresolved identifier"):
             return None
