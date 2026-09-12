@@ -72,7 +72,9 @@ def test_unsupported_numeric_operation_is_structured():
 
 
 def test_deep_numeric_nesting_is_structured_instead_of_recursing():
-    condition = "(" * 60 + "1" + ")" * 60
+    # Arithmetic forces the concrete numeric fallback; a bare constant is
+    # resolved by the symbolic Boolean layer before the numeric parser runs.
+    condition = "(" * 60 + "1 + 0" + ")" * 60
     result = preprocess_source(f"#if {condition}\nyes\n#endif\n")
     assert not result.complete
     assert result.incomplete[0].code is ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION
@@ -80,7 +82,9 @@ def test_deep_numeric_nesting_is_structured_instead_of_recursing():
 
 
 def test_deep_unary_nesting_is_structured_instead_of_recursing():
-    result = preprocess_source("#if " + "!" * 60 + "0\nyes\n#endif\n")
+    # Keep an arithmetic leaf so the expression reaches the numeric fallback
+    # instead of being solved entirely by Boolean simplification.
+    result = preprocess_source("#if " + "!" * 60 + "(1 + 0)\nyes\n#endif\n")
     assert not result.complete
     assert result.incomplete[0].code is ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION
     assert "nesting" in result.incomplete[0].message
