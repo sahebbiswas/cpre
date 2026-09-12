@@ -88,7 +88,7 @@ def test_supported_expansion_matches_gcc(definitions, invocation, expected):
     ('#define F(x) x', 'F((1)'),
     ('#define F(...) __VA_OPT__(,) __VA_ARGS__', 'F(1)'),
     ('#define F(x,...) x', 'F(1)'),
-    ('#define F(x) x\n#define BAD(a) #a', 'F(BAD(1))'),
+    ('#define F(x) x\n#define BAD(a) __VA_OPT__(a)', 'F(BAD(1))'),
     ('#define F(x) x\n#define PAIR 1,2\n#define G(x) F(x)', 'G(PAIR)'),
     ('#define F(x) x', 'F(\n#define A 1\n1)'),
     ('#define F(x) x', 'F\n#if 1\n(1)\n#endif'),
