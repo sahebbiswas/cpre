@@ -11,6 +11,9 @@ from .api import (
     AnalysisIncomplete, AnalysisOptions, MacroAssumptions,
     _normalize_assumptions, _translate_parse_error,
 )
+from .configuration import (
+    MacroConfiguration, _condition_environment, _configured_environment,
+)
 from .errors import AnalysisError, ErrorCode, SourceLocation
 from .expansion import Expansion, ExpansionError, SourceMapping
 from .expressions import conjunction, expression_atoms_in_order, negate
@@ -88,24 +91,42 @@ def preprocess_source(
     *,
     filename: str | None = None,
     assumptions: MacroAssumptions | Mapping[str, bool] | None = None,
+    configuration: MacroConfiguration | None = None,
     options: AnalysisOptions | None = None,
 ) -> PreprocessResult:
-    """Select conditional branches under explicit Boolean macro assumptions.
+    """Select conditional branches under an explicit concrete macro state.
 
-    Unmentioned macros remain unknown. Reachable integer expressions are macro
-    expanded and evaluated concretely when Boolean reasoning alone cannot choose
-    a branch. A still-undecidable condition returns an incomplete result with
-    ``source=None``. Inactive text and conditional directives become spaces,
-    preserving physical line endings. Unexpanded spans map one-to-one. Block
-    comments overlapping retained text are kept whole to balance delimiters.
-    Macros in retained text expand with invocation provenance in source_map.
-    Active define/undef directives update macro state and are masked; includes
-    return an incomplete result. Successful results expose a detached, read-only
-    final macro-state snapshot and immutable provenance for physical lines wholly
-    removed by preprocessing. Malformed conditionals raise the same structured
-    ParseError as analyze_source.
+    ``assumptions`` preserves the existing open-world Boolean contract: unmentioned
+    macros remain unknown and assumed values do not provide replacement text.
+    ``configuration`` instead seeds concrete external macro definitions and may
+    opt into closed-world unknown-name handling. The two inputs are mutually
+    exclusive so Boolean constraints cannot silently disagree with replacement
+    definitions.
+
+    Reachable integer expressions are macro expanded and evaluated concretely when
+    Boolean reasoning alone cannot choose a branch. A still-undecidable condition
+    returns an incomplete result with ``source=None``. Inactive text and
+    conditional directives become spaces, preserving physical line endings.
+    Unexpanded spans map one-to-one. Block comments overlapping retained text are
+    kept whole to balance delimiters. Macros in retained text expand with invocation
+    provenance in source_map. Active define/undef directives update macro state and
+    override externally configured state in source order; they are masked in the
+    output. Includes return an incomplete result. Successful results expose a
+    detached, read-only final macro-state snapshot and immutable provenance for
+    physical lines wholly removed by preprocessing. Malformed conditionals raise
+    the same structured ParseError as analyze_source.
     """
     normalized = _normalize_assumptions(assumptions)
+    if configuration is not None and normalized is not None:
+        raise AnalysisError(
+            "assumptions and configuration are mutually exclusive",
+            code=ErrorCode.INVALID_CONFIGURATION,
+        )
+    environment = (
+        _configured_environment(configuration)
+        if configuration is not None
+        else MacroEnvironment(normalized)
+    )
     resolved_options = options if options is not None else AnalysisOptions()
     if not isinstance(resolved_options, AnalysisOptions):
         raise AnalysisError("options must be an AnalysisOptions instance",
@@ -115,7 +136,6 @@ def preprocess_source(
     except ConditionError as error:
         raise _translate_parse_error(error, filename) from error
 
-    environment = MacroEnvironment(normalized)
     physical = source.splitlines(keepends=True)
     logical = list(logical_lines(source))
     ends = {line.start_line: (logical[index + 1].start_line - 1
@@ -179,7 +199,10 @@ def preprocess_source(
                         if ambiguous and branch.expression_text is not None:
                             try:
                                 selected = evaluate_numeric_condition(
-                                    branch.expression_text, environment, expansion, budget
+                                    branch.expression_text,
+                                    _condition_environment(environment),
+                                    expansion,
+                                    budget,
                                 )
                             except NumericConditionError as error:
                                 diagnostics.append(PreprocessDiagnostic(
