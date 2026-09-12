@@ -10,7 +10,7 @@ import pytest
 from pcpp import Preprocessor
 from pycparser import c_ast, c_parser
 
-from cpre import preprocess_source
+from cpre import ErrorCode, preprocess_source
 from cpre.expansion import tokenize
 
 
@@ -47,7 +47,7 @@ SUPPORTED_CASES = (
     DifferentialCase("configured_conditional.c", (("FEATURE", False),)),
 )
 
-KNOWN_DIFFERENCES = {
+EXPLICIT_NONCOMPLETE_CASES = {
     "unsupported_include.c": (
         "cpre intentionally rejects raw reachable includes; C-GULL resolves project "
         "headers first and masks remaining unresolved include directives under the "
@@ -61,8 +61,14 @@ KNOWN_DIFFERENCES = {
         "open-world preprocessing requires explicit configuration; the C-GULL "
         "migration uses the reviewed closed MacroConfiguration policy (#37)"
     ),
-    "divergent_builtin_line.c": "__LINE__ remains unexpanded with complete=True (#38)",
-    "divergent_pragma.c": "#pragma once remains in complete output (#38)",
+    "divergent_builtin_line.c": (
+        "cpre returns atomic unsupported_macro_expansion for unmodeled predefined "
+        "macros instead of certifying semantically divergent output (#38)"
+    ),
+    "divergent_pragma.c": (
+        "cpre returns atomic unsupported_preprocessing_directive for reachable "
+        "nonconditional directives instead of retaining them in complete output (#38)"
+    ),
 }
 
 
@@ -152,17 +158,17 @@ def _token_diff(left: tuple[str, ...], right: tuple[str, ...]) -> str:
     ))
 
 
-def test_every_compatibility_fixture_is_gated_or_explicitly_allowlisted():
+def test_every_compatibility_fixture_is_gated_or_explicitly_noncomplete():
     corpus = {path.name for path in FIXTURES.glob("*.c")}
     supported = {case.fixture for case in SUPPORTED_CASES}
-    known = set(KNOWN_DIFFERENCES)
+    noncomplete = set(EXPLICIT_NONCOMPLETE_CASES)
 
-    assert supported.isdisjoint(known)
-    assert corpus == supported | known, (
+    assert supported.isdisjoint(noncomplete)
+    assert corpus == supported | noncomplete, (
         "Every compatibility fixture must participate in the pcpp differential gate "
-        "or have an explicit KNOWN_DIFFERENCES reason"
+        "or have an explicit non-complete contract"
     )
-    assert all(reason.strip() for reason in KNOWN_DIFFERENCES.values())
+    assert all(reason.strip() for reason in EXPLICIT_NONCOMPLETE_CASES.values())
 
 
 def test_classifications_and_differential_configurations_agree():
@@ -172,7 +178,7 @@ def test_classifications_and_differential_configurations_agree():
                   if case.status == "supported"}
     gated = {(case.fixture, case.assumptions) for case in SUPPORTED_CASES}
     assert classified == gated
-    assert {case.name for case in CASES if case.status != "supported"} == set(KNOWN_DIFFERENCES)
+    assert {case.name for case in CASES if case.status != "supported"} == set(EXPLICIT_NONCOMPLETE_CASES)
 
 
 @pytest.mark.parametrize("case", SUPPORTED_CASES, ids=lambda case: case.id)
@@ -257,16 +263,28 @@ def test_unknown_condition_has_concrete_pcpp_outcome_but_remains_incomplete():
     c_parser.CParser().parse(_without_line_markers(output))
 
 
-@pytest.mark.parametrize("fixture,expected", [
-    ("divergent_builtin_line.c", ("int", "physical_line", "=", "1", ";")),
-    ("divergent_pragma.c", ("int", "value", ";")),
+@pytest.mark.parametrize("fixture,code,expected", [
+    (
+        "divergent_builtin_line.c",
+        ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
+        ("int", "physical_line", "=", "1", ";"),
+    ),
+    (
+        "divergent_pragma.c",
+        ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
+        ("int", "value", ";"),
+    ),
 ])
-def test_complete_but_divergent_output_is_an_explicit_migration_blocker(fixture, expected):
+def test_completion_blockers_are_atomic_instead_of_complete_but_divergent(fixture, code, expected):
     case = DifferentialCase(fixture)
     source = _load(fixture)
-    output = _run_cpre(case, source)
+    result = preprocess_source(source, filename=fixture)
+    assert not result.complete
+    assert result.source is result.source_map is result.macros is None
+    diagnostic, = result.incomplete
+    assert diagnostic.code is code
+    assert diagnostic.location.line == 1
+
     reference = _run_pcpp(case, source)
-    assert output == source
     assert _semantic_tokens(reference) == expected
-    assert _semantic_tokens(output) != _semantic_tokens(reference)
     c_parser.CParser().parse(_without_line_markers(reference))
