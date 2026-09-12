@@ -42,12 +42,11 @@ SUPPORTED_CASES = (
     DifferentialCase("source_order.c"),
     DifferentialCase("multiline_nested_macros.c"),
     DifferentialCase("general_macro_operators.c"),
+    DifferentialCase("incomplete_numeric_condition.c"),
     DifferentialCase("configured_conditional.c", (("FEATURE", True),)),
     DifferentialCase("configured_conditional.c", (("FEATURE", False),)),
 )
 
-# These are migration blockers, not accepted output differences. Passing this
-# suite records the gaps; it does not authorize pcpp removal (see readiness report).
 KNOWN_DIFFERENCES = {
     "unsupported_include.c": (
         "cpre intentionally rejects reachable #include processing instead of "
@@ -59,7 +58,6 @@ KNOWN_DIFFERENCES = {
     "incomplete_unknown_condition.c": (
         "cpre requires explicit configuration; pcpp defaults unknown names to zero (#37)"
     ),
-    "incomplete_numeric_condition.c": "numeric comparisons remain unresolved (#36)",
     "divergent_builtin_line.c": "__LINE__ remains unexpanded with complete=True (#38)",
     "divergent_pragma.c": "#pragma once remains in complete output (#38)",
 }
@@ -82,8 +80,6 @@ def _run_cpre(case: DifferentialCase, source: str) -> str:
 
 def _run_pcpp(case: DifferentialCase, source: str) -> str:
     preprocessor = Preprocessor()
-    # Keep source-coordinate information in-band so the harness can compare
-    # logical source lines even though pcpp compacts removed directives.
     preprocessor.line_directive = "#line"
     for name, value in case.assumptions:
         preprocessor.define(f"{name} {1 if value else 0}")
@@ -117,7 +113,6 @@ def _semantic_positions(source: str) -> tuple[tuple[str, int], ...]:
 
 
 def _pcpp_semantic_positions(source: str) -> tuple[tuple[str, int], ...]:
-    """Resolve pcpp #line directives to original physical source lines."""
     logical_by_physical: dict[int, int | None] = {}
     masked_lines: list[str] = []
     logical_line = 1
@@ -190,8 +185,6 @@ def test_cpre_matches_pcpp_preprocessing_tokens_and_coordinates(case):
         f"{_token_diff(cpre_tokens, pcpp_tokens)}"
     )
 
-    # cpre preserves physical source lines directly; pcpp represents the same
-    # coordinates through #line directives around its compacted output.
     cpre_positions = _semantic_positions(cpre_output)
     pcpp_positions = _pcpp_semantic_positions(pcpp_output)
     assert cpre_positions == pcpp_positions, (
@@ -229,8 +222,6 @@ def test_offsetof_container_semantics_match_pcpp():
         assert ("struct", "item") in tuple(zip(tokens, tokens[1:]))
         assert "->" in tokens
 
-        # Verify the actual recovery expression consumed by AST/layout rules,
-        # beyond parseability or the mere presence of a member-access token.
         tree = c_parser.CParser().parse(_without_line_markers(output))
         function = next(node for node in tree.ext if isinstance(node, c_ast.FuncDef))
         recovery = function.body.block_items[0].expr
@@ -251,18 +242,15 @@ def test_offsetof_container_semantics_match_pcpp():
         assert access.name.expr.value == "0"
 
 
-@pytest.mark.parametrize("fixture,expected", [
-    ("incomplete_numeric_condition.c", ("int", "selected", "=", "1", ";")),
-    ("incomplete_unknown_condition.c", ()),
-])
-def test_incomplete_conditions_have_concrete_pcpp_outcomes(fixture, expected):
+def test_unknown_condition_has_concrete_pcpp_outcome_but_remains_incomplete():
+    fixture = "incomplete_unknown_condition.c"
     case = DifferentialCase(fixture)
     source = _load(fixture)
     result = preprocess_source(source, filename=fixture)
     assert not result.complete
     assert result.source is result.source_map is result.macros is None
     output = _run_pcpp(case, source)
-    assert _semantic_tokens(output) == expected
+    assert _semantic_tokens(output) == ()
     c_parser.CParser().parse(_without_line_markers(output))
 
 

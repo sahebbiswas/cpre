@@ -61,13 +61,19 @@ def test_function_macros_empty_macros_and_object_whitespace():
     assert result.macros['EMPTY'].definition.replacement == ''
 
 
-@pytest.mark.parametrize('replacement', ['OTHER', '1 + 2', '', '"text"'])
+@pytest.mark.parametrize('replacement', ['OTHER', '', '"text"'])
 def test_unsupported_replacement_values_remain_unknown(replacement):
     result = preprocess_source(f'#define X {replacement}\n#if X\nx\n#endif')
     assert not result.complete
     assert result.source is None and result.macros is None
     assert result.incomplete[0].location == SourceLocation(2)
     assert run(f'#define X {replacement}\n#ifdef X\ny\n#endif').complete
+
+
+def test_compound_integer_replacement_is_evaluated_in_conditions():
+    result = run('#define X 1 + 2\n#if X == 3\nx\n#endif')
+    assert 'x' in result.source
+    assert result.macros['X'].definition.numeric_value is None
 
 
 @pytest.mark.parametrize('directive', ['#define', '#undef X extra', '#define 1X', '#define F(x,x) x', '#define F(x', '#define F(,x) x'])

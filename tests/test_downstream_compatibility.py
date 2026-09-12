@@ -28,6 +28,7 @@ CASES = (
     CompatibilityCase("source_order.c", "supported", expanded_lines=(2, 5)),
     CompatibilityCase("multiline_nested_macros.c", "supported", expanded_lines=(8,)),
     CompatibilityCase("general_macro_operators.c", "supported"),
+    CompatibilityCase("incomplete_numeric_condition.c", "supported"),
     CompatibilityCase(
         "configured_conditional.c", "supported",
         assumptions=(("FEATURE", True),),
@@ -37,29 +38,17 @@ CASES = (
         assumptions=(("FEATURE", False),),
     ),
     CompatibilityCase(
-        "unsupported_include.c",
-        "unsupported",
-        ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
-        1,
+        "unsupported_include.c", "unsupported",
+        ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE, 1,
     ),
     CompatibilityCase(
-        "unsupported_va_opt.c",
-        "unsupported",
-        ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
-        2,
+        "unsupported_va_opt.c", "unsupported",
+        ErrorCode.UNSUPPORTED_MACRO_EXPANSION, 2,
     ),
     CompatibilityCase(
-        "incomplete_unknown_condition.c",
-        "incomplete",
-        ErrorCode.UNRESOLVED_CONDITION,
-        1,
+        "incomplete_unknown_condition.c", "incomplete",
+        ErrorCode.UNRESOLVED_CONDITION, 1,
     ),
-    CompatibilityCase(
-        "incomplete_numeric_condition.c", "incomplete",
-        ErrorCode.UNRESOLVED_CONDITION, 2,
-    ),
-    # Complete output does not imply pcpp equivalence. These fixtures must stay
-    # outside the supported gate until issue #38 is resolved.
     CompatibilityCase("divergent_builtin_line.c", "divergent"),
     CompatibilityCase("divergent_pragma.c", "divergent"),
 )
@@ -70,11 +59,7 @@ def load(case: CompatibilityCase) -> str:
 
 
 def preprocess(case: CompatibilityCase, source: str):
-    return preprocess_source(
-        source,
-        filename=case.name,
-        assumptions=dict(case.assumptions),
-    )
+    return preprocess_source(source, filename=case.name, assumptions=dict(case.assumptions))
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case.name)
@@ -101,8 +86,7 @@ def test_compatibility_corpus_has_explicit_stable_classification(case):
 
 
 @pytest.mark.parametrize(
-    "case",
-    [case for case in CASES if case.status == "supported"],
+    "case", [case for case in CASES if case.status == "supported"],
     ids=lambda case: case.name,
 )
 def test_supported_corpus_remains_parseable_by_pycparser(case):
@@ -113,8 +97,7 @@ def test_supported_corpus_remains_parseable_by_pycparser(case):
 
 
 @pytest.mark.parametrize(
-    "case",
-    [case for case in CASES if case.expanded_lines],
+    "case", [case for case in CASES if case.expanded_lines],
     ids=lambda case: case.name,
 )
 def test_expanded_source_maps_recover_physical_invocation_lines(case):

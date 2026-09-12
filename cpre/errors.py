@@ -27,6 +27,7 @@ class ErrorCode(str, Enum):
     ANALYSIS_LIMIT_EXCEEDED = "analysis_limit_exceeded"
     ANALYSIS_FAILURE = "analysis_failure"
     UNRESOLVED_CONDITION = "unresolved_condition"
+    UNSUPPORTED_CONDITION_EXPRESSION = "unsupported_condition_expression"
     UNSUPPORTED_PREPROCESSING_DIRECTIVE = "unsupported_preprocessing_directive"
     UNSUPPORTED_MACRO_EXPANSION = "unsupported_macro_expansion"
     SOURCE_READ_ERROR = "source_read_error"
@@ -41,14 +42,9 @@ class CpreError(ValueError):
     separate from the rendered message.
     """
 
-    def __init__(
-        self,
-        message: str,
-        *,
-        code: ErrorCode,
-        location: SourceLocation | None = None,
-        filename: str | None = None,
-    ) -> None:
+    def __init__(self, message: str, *, code: ErrorCode,
+                 location: SourceLocation | None = None,
+                 filename: str | None = None) -> None:
         self.message = message
         self.code = code
         self.location = location
@@ -64,10 +60,4 @@ class AnalysisError(CpreError):
     """Raised for supported failures after parsing has completed."""
 
 
-__all__ = [
-    "AnalysisError",
-    "CpreError",
-    "ErrorCode",
-    "ParseError",
-    "SourceLocation",
-]
+__all__ = ["AnalysisError", "CpreError", "ErrorCode", "ParseError", "SourceLocation"]
