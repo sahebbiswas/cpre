@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 from .expansion import Expansion, Token, tokenize
 from .macros import MacroEnvironment
@@ -17,8 +18,40 @@ _INTEGER = re.compile(
     r"(?P<body>0[xX][0-9a-fA-F']+|0[bB][01']+|0[0-7']*|[1-9][0-9']*|0)"
     r"(?P<suffix>(?:[uU](?:ll|LL|[lL])?|(?:ll|LL|[lL])[uU]?|[zZ][uU]?|[uU][zZ]?))?\Z"
 )
-_MAX_BITS = 4096
-_MAX_SHIFT = 4096
+_INT_BITS = 64
+_UINT_MASK = (1 << _INT_BITS) - 1
+_SIGNED_MIN = -(1 << (_INT_BITS - 1))
+_SIGNED_MAX = (1 << (_INT_BITS - 1)) - 1
+_MAX_SHIFT = _INT_BITS - 1
+# A parenthesized subexpression re-enters the full precedence stack, so keep
+# this comfortably below Python's own recursion limit rather than relying on it.
+_MAX_DEPTH = 48
+
+
+@dataclass(frozen=True)
+class _Value:
+    value: int
+    unsigned: bool = False
+
+    def truth(self) -> bool:
+        return self.value != 0
+
+
+def _signed(value: int) -> _Value:
+    if value < _SIGNED_MIN or value > _SIGNED_MAX:
+        raise NumericConditionError("signed integer expression exceeds concrete-evaluation range")
+    return _Value(value)
+
+
+def _unsigned(value: int) -> _Value:
+    return _Value(value & _UINT_MASK, True)
+
+
+def _convert(left: _Value, right: _Value) -> tuple[_Value, _Value, bool]:
+    """Apply #if's intmax_t/uintmax_t usual arithmetic conversion."""
+    if left.unsigned or right.unsigned:
+        return _unsigned(left.value), _unsigned(right.value), True
+    return left, right, False
 
 
 def _resolve_defined(tokens: list[Token], environment: MacroEnvironment) -> list[Token] | None:
@@ -44,24 +77,27 @@ def _resolve_defined(tokens: list[Token], environment: MacroEnvironment) -> list
     return result
 
 
-def _integer(text: str) -> int:
+def _integer(text: str) -> _Value:
     match = _INTEGER.fullmatch(text)
     if match is None:
         raise NumericConditionError(f"unsupported integer constant {text!r}")
     body = match.group("body").replace("'", "")
+    suffix = (match.group("suffix") or "").lower()
     base = (16 if body.lower().startswith("0x") else
             2 if body.lower().startswith("0b") else
             8 if len(body) > 1 and body.startswith("0") else 10)
     value = int(body, base)
-    if value.bit_length() > _MAX_BITS:
-        raise NumericConditionError("integer constant exceeds concrete-evaluation bound")
-    return value
-
-
-def _bounded(value: int) -> int:
-    if value.bit_length() > _MAX_BITS:
-        raise NumericConditionError("integer expression exceeds concrete-evaluation bound")
-    return value
+    if value > _UINT_MASK:
+        raise NumericConditionError("integer constant exceeds concrete-evaluation range")
+    if "u" in suffix:
+        return _unsigned(value)
+    if value <= _SIGNED_MAX:
+        return _signed(value)
+    # For non-decimal constants the preprocessor may select uintmax_t when the
+    # value is not representable by intmax_t. Decimal overflow is kept explicit.
+    if base != 10:
+        return _unsigned(value)
+    raise NumericConditionError("decimal integer constant exceeds signed concrete-evaluation range")
 
 
 def _divide(left: int, right: int) -> int:
@@ -73,7 +109,7 @@ def _divide(left: int, right: int) -> int:
 
 class _Parser:
     def __init__(self, tokens: list[Token], budget: AnalysisBudget) -> None:
-        self.tokens, self.budget, self.index = tokens, budget, 0
+        self.tokens, self.budget, self.index, self.depth = tokens, budget, 0, 0
 
     def peek(self, text: str | None = None) -> Token | None:
         if self.index >= len(self.tokens):
@@ -88,15 +124,27 @@ class _Parser:
             self.budget.consume()
         return token
 
-    def parse(self) -> int:
+    def _enter(self) -> None:
+        self.depth += 1
+        if self.depth > _MAX_DEPTH:
+            raise NumericConditionError("expression nesting exceeds concrete-evaluation bound")
+
+    def _leave(self) -> None:
+        self.depth -= 1
+
+    def parse(self) -> _Value:
         value = self.logical_or(True)
         if self.peek() is not None:
             raise NumericConditionError(f"unsupported token {self.peek().text!r} in concrete condition")
         return value
 
-    def primary(self, evaluate: bool) -> int:
+    def primary(self, evaluate: bool) -> _Value:
         if self.take("(") is not None:
-            value = self.logical_or(evaluate)
+            self._enter()
+            try:
+                value = self.logical_or(evaluate)
+            finally:
+                self._leave()
             if self.take(")") is None:
                 raise NumericConditionError("expected ')' in concrete condition")
             return value
@@ -104,22 +152,31 @@ class _Parser:
         if token is None:
             raise NumericConditionError("expected operand in concrete condition")
         if token.kind == "number":
-            return _integer(token.text) if evaluate else 0
+            return _integer(token.text) if evaluate else _Value(0)
         if token.kind == "identifier":
             raise NumericConditionError(f"unresolved identifier {token.text!r}")
         raise NumericConditionError(f"unsupported token {token.text!r} in concrete condition")
 
-    def unary(self, evaluate: bool) -> int:
+    def unary(self, evaluate: bool) -> _Value:
         if self.peek() is not None and self.peek().text in {"+", "-", "!", "~"}:
             op = self.take().text
-            value = self.unary(evaluate)
+            self._enter()
+            try:
+                value = self.unary(evaluate)
+            finally:
+                self._leave()
             if not evaluate:
-                return 0
-            return {"+": lambda: value, "-": lambda: _bounded(-value),
-                    "!": lambda: int(not value), "~": lambda: _bounded(~value)}[op]()
+                return _Value(0)
+            if op == "+":
+                return value
+            if op == "!":
+                return _Value(int(not value.truth()))
+            if op == "-":
+                return _unsigned(-value.value) if value.unsigned else _signed(-value.value)
+            return _unsigned(~value.value) if value.unsigned else _signed(~value.value)
         return self.primary(evaluate)
 
-    def binary(self, operand, operators: set[str], evaluate: bool, apply) -> int:
+    def binary(self, operand, operators: set[str], evaluate: bool, apply) -> _Value:
         value = operand(evaluate)
         while self.peek() is not None and self.peek().text in operators:
             op = self.take().text
@@ -128,55 +185,82 @@ class _Parser:
                 value = apply(op, value, right)
         return value
 
-    def multiplicative(self, evaluate: bool) -> int:
-        def apply(op, left, right):
-            if op == "*": return _bounded(left * right)
-            quotient = _divide(left, right)
-            return _bounded(quotient if op == "/" else left - quotient * right)
+    def multiplicative(self, evaluate: bool) -> _Value:
+        def apply(op: str, left: _Value, right: _Value) -> _Value:
+            left, right, unsigned = _convert(left, right)
+            if op == "*":
+                result = left.value * right.value
+            elif unsigned:
+                if right.value == 0:
+                    raise NumericConditionError("division by zero in concrete condition")
+                result = left.value // right.value if op == "/" else left.value % right.value
+            else:
+                quotient = _divide(left.value, right.value)
+                result = quotient if op == "/" else left.value - quotient * right.value
+            return _unsigned(result) if unsigned else _signed(result)
         return self.binary(self.unary, {"*", "/", "%"}, evaluate, apply)
 
-    def additive(self, evaluate: bool) -> int:
-        return self.binary(self.multiplicative, {"+", "-"}, evaluate,
-                           lambda op, l, r: _bounded(l + r if op == "+" else l - r))
+    def additive(self, evaluate: bool) -> _Value:
+        def apply(op: str, left: _Value, right: _Value) -> _Value:
+            left, right, unsigned = _convert(left, right)
+            result = left.value + right.value if op == "+" else left.value - right.value
+            return _unsigned(result) if unsigned else _signed(result)
+        return self.binary(self.multiplicative, {"+", "-"}, evaluate, apply)
 
-    def shift(self, evaluate: bool) -> int:
-        def apply(op, left, right):
-            if right < 0 or right > _MAX_SHIFT:
+    def shift(self, evaluate: bool) -> _Value:
+        def apply(op: str, left: _Value, right: _Value) -> _Value:
+            if right.value < 0 or right.value > _MAX_SHIFT:
                 raise NumericConditionError("shift count exceeds concrete-evaluation bound")
-            return _bounded(left << right) if op == "<<" else left >> right
+            if op == "<<":
+                result = left.value << right.value
+                return _unsigned(result) if left.unsigned else _signed(result)
+            return _unsigned(left.value >> right.value) if left.unsigned else _signed(left.value >> right.value)
         return self.binary(self.additive, {"<<", ">>"}, evaluate, apply)
 
-    def relational(self, evaluate: bool) -> int:
-        def apply(op, left, right):
-            return int({"<": left < right, "<=": left <= right,
-                        ">": left > right, ">=": left >= right}[op])
+    def relational(self, evaluate: bool) -> _Value:
+        def apply(op: str, left: _Value, right: _Value) -> _Value:
+            left, right, _ = _convert(left, right)
+            return _Value(int({"<": left.value < right.value, "<=": left.value <= right.value,
+                               ">": left.value > right.value, ">=": left.value >= right.value}[op]))
         return self.binary(self.shift, {"<", "<=", ">", ">="}, evaluate, apply)
 
-    def equality(self, evaluate: bool) -> int:
-        return self.binary(self.relational, {"==", "!="}, evaluate,
-                           lambda op, l, r: int((l == r) if op == "==" else (l != r)))
+    def equality(self, evaluate: bool) -> _Value:
+        def apply(op: str, left: _Value, right: _Value) -> _Value:
+            left, right, _ = _convert(left, right)
+            return _Value(int((left.value == right.value) if op == "==" else (left.value != right.value)))
+        return self.binary(self.relational, {"==", "!="}, evaluate, apply)
 
-    def bitand(self, evaluate: bool) -> int:
-        return self.binary(self.equality, {"&"}, evaluate, lambda _o, l, r: _bounded(l & r))
+    def bitand(self, evaluate: bool) -> _Value:
+        return self.binary(self.equality, {"&"}, evaluate, self._bitwise)
 
-    def bitxor(self, evaluate: bool) -> int:
-        return self.binary(self.bitand, {"^"}, evaluate, lambda _o, l, r: _bounded(l ^ r))
+    def bitxor(self, evaluate: bool) -> _Value:
+        return self.binary(self.bitand, {"^"}, evaluate, self._bitwise)
 
-    def bitor(self, evaluate: bool) -> int:
-        return self.binary(self.bitxor, {"|"}, evaluate, lambda _o, l, r: _bounded(l | r))
+    def bitor(self, evaluate: bool) -> _Value:
+        return self.binary(self.bitxor, {"|"}, evaluate, self._bitwise)
 
-    def logical_and(self, evaluate: bool) -> int:
+    @staticmethod
+    def _bitwise(op: str, left: _Value, right: _Value) -> _Value:
+        left, right, unsigned = _convert(left, right)
+        result = {"&": left.value & right.value,
+                  "^": left.value ^ right.value,
+                  "|": left.value | right.value}[op]
+        return _unsigned(result) if unsigned else _signed(result)
+
+    def logical_and(self, evaluate: bool) -> _Value:
         value = self.bitor(evaluate)
         while self.take("&&") is not None:
-            right = self.bitor(evaluate and bool(value))
-            if evaluate: value = int(bool(value) and bool(right))
+            right = self.bitor(evaluate and value.truth())
+            if evaluate:
+                value = _Value(int(value.truth() and right.truth()))
         return value
 
-    def logical_or(self, evaluate: bool) -> int:
+    def logical_or(self, evaluate: bool) -> _Value:
         value = self.logical_and(evaluate)
         while self.take("||") is not None:
-            right = self.logical_and(evaluate and not bool(value))
-            if evaluate: value = int(bool(value) or bool(right))
+            right = self.logical_and(evaluate and not value.truth())
+            if evaluate:
+                value = _Value(int(value.truth() or right.truth()))
         return value
 
 
@@ -190,7 +274,7 @@ def evaluate_numeric_condition(text: str, environment: MacroEnvironment,
     expanded = expansion._expand(resolved, environment)
     significant = [token for token in expanded if token.kind != "empty"]
     try:
-        return bool(_Parser(significant, budget).parse())
+        return _Parser(significant, budget).parse().truth()
     except NumericConditionError as error:
         if str(error).startswith("unresolved identifier"):
             return None
