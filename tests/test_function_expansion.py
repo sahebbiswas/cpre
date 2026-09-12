@@ -128,7 +128,6 @@ def test_va_opt_matches_standard_compilers(compiler_name, definitions, invocatio
     ('#define F(x) x', 'F('),
     ('#define F(x) x', 'F((1)'),
     ('#define F(x,...) x', 'F(1)'),
-    ('#define F(x) x\n#define BAD(a) __VA_OPT__(a)', 'F(BAD(1))'),
     ('#define F(x) x\n#define PAIR 1,2\n#define G(x) F(x)', 'G(PAIR)'),
     ('#define F(x) x', 'F(\n#define A 1\n1)'),
     ('#define F(x) x', 'F\n#if 1\n(1)\n#endif'),
@@ -148,7 +147,7 @@ def test_unsupported_and_malformed_calls_are_atomic(definition, use):
     ('#define F(...) __VA_OPT__(__VA_OPT__(x))', 'F(1)', 'nested __VA_OPT__'),
     ('#define F(...) __VA_OPT__(##)', 'F(1)', 'cannot appear at an edge'),
     ('#define F(...) a ## __VA_OPT__(+)', 'F(1)', 'invalid token paste'),
-    ('#define __VA_OPT__ 1', '__VA_OPT__', 'only valid in a variadic macro'),
+    ('#define __VA_OPT__ 1', '__VA_OPT__', 'cannot be used as a macro name'),
     ('#define F(x) x', '__VA_OPT__(x)', 'only valid in a variadic macro'),
 ])
 def test_invalid_va_opt_forms_are_structured_incomplete(definition, use, message):
@@ -157,6 +156,27 @@ def test_invalid_va_opt_forms_are_structured_incomplete(definition, use, message
     diagnostic, = result.incomplete
     assert diagnostic.code is ErrorCode.UNSUPPORTED_MACRO_EXPANSION
     assert message in diagnostic.message
+
+
+@pytest.mark.parametrize('definition, message', [
+    ('#define F(x) __VA_OPT__(x)', 'requires a variadic'),
+    ('#define F(...) __VA_OPT__ x', 'must be followed'),
+    ('#define F(...) __VA_OPT__((x)', 'unterminated __VA_OPT__'),
+    ('#define F(...) __VA_OPT__(__VA_OPT__(x))', 'nested __VA_OPT__'),
+    ('#define F(...) __VA_OPT__(##)', 'cannot appear at an edge'),
+    ('#define __VA_OPT__ 1', 'cannot be used as a macro name'),
+    ('#define F(__VA_OPT__,...) x', 'cannot be a named parameter'),
+])
+def test_invalid_va_opt_definitions_are_atomic_without_invocation(definition, message):
+    result = preprocess_source(definition + '\nint ok;')
+    assert result.source is result.source_map is result.macros is None
+    diagnostic, = result.incomplete
+    assert diagnostic.code is ErrorCode.UNSUPPORTED_MACRO_EXPANSION
+    assert diagnostic.location == SourceLocation(1)
+    assert message in diagnostic.message
+
+    inactive = preprocess_source('#if 0\n' + definition + '\n#endif\nint ok;')
+    assert inactive.complete, inactive.incomplete
 
 
 @pytest.mark.parametrize('definition, use, message', [
