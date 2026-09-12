@@ -23,10 +23,7 @@ The compatibility suite in `tests/test_downstream_contract.py` is the executable
 
 Before a downstream consumer removes an existing `pcpp` preprocessing path in favor of `cpre.preprocess_source`, the corpus in `tests/compatibility/fixtures` must pass `tests/test_pcpp_differential.py` for every supported fixture/configuration relevant to that consumer.
 
-**Current verdict: blocked.** See the [versioned compatibility report](pcpp-readiness.md)
-for measurements and tracked blockers. A passing test suite verifies both supported
-behavior and known gaps; an explicit non-complete case is not proof of downstream
-non-impact.
+**Current C-GULL verdict: ready for the bounded profile pinned by issue #28.** See the [versioned readiness report](pcpp-readiness.md) and [C-GULL migration profile](cgull-migration-profile.md). This readiness result is profile-specific: a newer downstream revision must revalidate the inventory and adapter boundary before relying on it.
 
 The gate requires:
 
@@ -36,8 +33,9 @@ The gate requires:
 - deterministic repeated output
 - explicit `EXPLICIT_NONCOMPLETE_CASES` entries, with reasons, for every corpus fixture not covered by the equivalence set
 - explicit coverage of the C-GULL-oriented `offsetof`/container recovery shape
+- reviewed downstream non-impact evidence for every explicit non-complete case that remains outside the migration profile
 
-A new mismatch must either be fixed or deliberately added to `EXPLICIT_NONCOMPLETE_CASES` with a linked issue and reviewable rationale; the harness must not be weakened merely to make a migration pass. Every exclusion blocks migration until fixed or accompanied by reviewed evidence of non-impact on the agreed downstream input profile. Constructs detected as unsupported fail atomically: no source, source map, or macro snapshot is exposed. The gate does not permit known complete-but-semantically-divergent output to be treated as an accepted difference.
+A new mismatch must either be fixed or deliberately added to `EXPLICIT_NONCOMPLETE_CASES` with a linked issue and reviewable rationale; the harness must not be weakened merely to make a migration pass. Every exclusion blocks a new or changed migration profile until fixed or accompanied by reviewed evidence of non-impact. Constructs detected as unsupported fail atomically: no source, source map, or macro snapshot is exposed. The gate does not permit known complete-but-semantically-divergent output to be treated as an accepted difference.
 
 `pcpp` is a development/test dependency used only as the differential oracle. It is not part of cpre's runtime dependency surface.
 

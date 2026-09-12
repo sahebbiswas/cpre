@@ -1,8 +1,17 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "downstream": {
     "repository": "sahebbiswas/cgull",
     "commit": "c61b27520624c074661afa0a615160944b31ab3d"
+  },
+  "readiness": {
+    "status": "ready",
+    "scope": "bounded_cgull_pcpp_replacement",
+    "validated_on": "2026-09-12",
+    "supported_case_divergences": 0,
+    "complete_but_divergent_cases": 0,
+    "exclusions_have_reviewed_nonimpact_evidence": true,
+    "revalidate_on_downstream_revision_change": true
   },
   "boundary": {
     "resolved_project_headers": "expanded_before_cpre",
@@ -18,17 +27,20 @@
     "__VA_OPT__": {
       "supported": false,
       "occurrences_in_pinned_downstream_corpus": 0,
-      "diagnostic": "unsupported_macro_expansion"
+      "diagnostic": "unsupported_macro_expansion",
+      "nonimpact_evidence": "absent_from_pinned_downstream_corpus"
     },
     "raw_reachable_include": {
       "supported": false,
-      "diagnostic": "unsupported_preprocessing_directive"
+      "diagnostic": "unsupported_preprocessing_directive",
+      "nonimpact_evidence": "handled_at_prepared_translation_unit_boundary"
     }
   },
   "evidence": {
     "include_expander": "cgull/includes.py",
     "project_pipeline": "cgull/project_analysis.py",
     "include_regression": "tests/test_includes.py::test_tu_include_expansion_integration_with_scanner",
-    "current_pcpp_boundary": "cgull/ast_analyzer/visitor.py::_try_pcpp_preprocess"
+    "current_pcpp_boundary": "cgull/ast_analyzer/visitor.py::_try_pcpp_preprocess",
+    "readiness_issue": "sahebbiswas/cpre#28"
   }
 }
