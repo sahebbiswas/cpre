@@ -1,4 +1,4 @@
-"""Concrete conditional selection and object-like macro expansion."""
+"""Concrete conditional selection and macro expansion."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from .api import (
     _normalize_assumptions, _translate_parse_error,
 )
 from .errors import AnalysisError, ErrorCode, SourceLocation
-from .expansion import Expansion, SourceMapping
+from .expansion import Expansion, ExpansionError, SourceMapping
 from .expressions import conjunction, expression_atoms_in_order, negate
 from .model import ConditionError, ConditionalGroup, DefinedVariable, Variable, TRUE
 from .macros import MacroEnvironment, MacroState, _apply_macro_directive
@@ -58,7 +58,7 @@ def preprocess_source(
     undecidable condition returns an incomplete result with ``source=None``.
     Inactive text and conditional directives become spaces, preserving physical
     line endings. Unexpanded spans map one-to-one. Block comments overlapping
-    retained text are kept whole to balance their delimiters. Object macros in
+    retained text are kept whole to balance their delimiters. Macros in
     retained text expand with invocation provenance in source_map. Active
     define/undef directives update macro state and are masked; includes return
     an incomplete result.
@@ -116,6 +116,8 @@ def preprocess_source(
         active = True
         for line in logical:
             current_line = line.start_line
+            if re.match(r"^\s*#", line.text):
+                expansion.flush(environment)
             branch = branches.get(current_line)
             if branch is not None:
                 if current_line in starts:
@@ -172,19 +174,20 @@ def preprocess_source(
                     break
                 blank(current_line, ends[current_line])
             elif not re.match(r"^\s*#", line.text):
-                try:
-                    expansion.line(offsets[current_line - 1], offsets[ends[current_line]], environment)
-                except ValueError as error:
-                    diagnostics.append(PreprocessDiagnostic(
-                        ErrorCode.UNSUPPORTED_MACRO_EXPANSION, str(error),
-                        SourceLocation(current_line),
-                    ))
-                    break
+                expansion.line(offsets[current_line - 1], offsets[ends[current_line]])
+        if not diagnostics:
+            expansion.flush(environment)
+    except ExpansionError as error:
+        diagnostics.append(PreprocessDiagnostic(
+            ErrorCode.UNSUPPORTED_MACRO_EXPANSION, str(error),
+            expansion.location(expansion.current_offset),
+        ))
     except AnalysisLimitExceeded as error:
+        limit_line = error.line if error.line is not None else current_line
         diagnostics.append(AnalysisIncomplete(
             ErrorCode.ANALYSIS_LIMIT_EXCEEDED, error.resource, error.limit,
             error.observed, str(error),
-            SourceLocation(current_line) if current_line is not None else None,
+            SourceLocation(limit_line) if limit_line is not None else None,
         ))
 
     if diagnostics:

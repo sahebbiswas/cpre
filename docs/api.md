@@ -253,7 +253,7 @@ On success, conditional directives (including all continuation lines) and inacti
 text become spaces. Block comments overlapping retained text are kept whole to
 balance delimiters across selected lines; comments wholly in discarded regions
 stay masked. Physical line endings and the presence or absence of a final newline
-are preserved. Object macro expansion changes text length and columns; use
+are preserved. Macro expansion changes text length and columns; use
 `source_map` for physical source coordinates. Unexpanded spans retain their text
 and map one-to-one. Nested `#if`, `#ifdef`, `#ifndef`,
 `#elif`, `#elifdef`, `#elifndef`, `#else`, and `#endif` are supported.
@@ -311,7 +311,7 @@ Active `#include`, `#include_next`, and `#import` directives still produce
 `unsupported_preprocessing_directive`. Malformed or unsupported active macro
 definitions produce the same diagnostic. Directives in discarded branches do not
 block selection. Other nonconditional directives are retained verbatim. Include processing, token
-pasting, stringification, and function-like macro expansion remain unsupported.
+pasting and stringification remain unsupported.
 `complete` certifies the supported selection and expansion operations, not that
 the output is ready for every AST parser. Existing directive-parser syntax and
 Boolean-model limitations still apply. `AnalysisOptions` supplies the same
@@ -332,7 +332,7 @@ A macro is disabled while its replacement is rescanned: `A -> A` and `A -> B -> 
 terminate with the suppressed identifier retained, matching C recursion suppression.
 The implementation uses an explicit stack and the shared `max_work` budget, including
 emitted replacement characters. Limit exhaustion returns no source, map, or macro
-snapshot. Reachable function-like invocations, `#`/`##` replacement operations
+snapshot. Reachable `#`/`##` replacement operations
 (including digraph spellings), and assumption-only macros without replacement text
 return `unsupported_macro_expansion`. Bare function-like names can remain in output;
 unused unsupported definitions and inactive uses do not block preprocessing.
@@ -361,3 +361,54 @@ cover several physical lines; their line endings are retained after the replacem
 This deliberately changes the 0.9.x guarantee of unchanged retained text and
 columns. Consumers of expanded output must use the map rather than equating output
 columns with original columns. The symbolic `analyze_source` API is unchanged.
+
+
+### Function-like macro expansion (0.10.1)
+
+Function-like macros expand when their identifier is followed by a `(`
+preprocessing token; comments, spaces, and physical newlines may intervene.
+Arguments are collected **before expansion**: only commas at parenthesis depth
+zero separate arguments. Parentheses inside literals and comments do not count.
+Braces, brackets, and C++ template angle brackets do not protect commas; callers
+must add parentheses where needed. A bare function-like macro name remains text.
+Expanding a later token into `(` does not retroactively invoke an earlier name.
+
+Each used argument is fully macro-expanded before substitution, then the
+substituted replacement is rescanned together with following source tokens.
+Unused arguments are not expanded. For example, `F(F(1))` expands its inner call
+before substituting into the outer call. Recursion suppression stays attached to
+tokens, so direct and mutual recursion terminate and suppressed names are not
+incorrectly reenabled by argument substitution. Both argument prescan and body
+rescan use an explicit stack with the shared deterministic work budget.
+
+```python
+source = "#define ADD(a,b) ((a)+(b))\nint n = ADD(1, ADD(2,3));\n"
+result = preprocess_source(source)
+assert result.complete
+span, = [span for span in result.source_map if span.expanded]
+assert source[span.source_start:span.source_end] == "ADD(1, ADD(2,3))"
+```
+
+Zero-parameter macros (`F()`), empty positional arguments (`F(,x)`), multiline
+replacement definitions, and multiline invocations are supported. Standard
+trailing `...` parameters substitute their comma-separated tokens through
+`__VA_ARGS__`. A variadic-only `V()` supplies empty variadic tokens. For a macro
+with named parameters plus `...`, supply the separating comma even when the
+variadic part is empty: `V(x,)`. Omitted variadic arguments, `__VA_OPT__`, GNU named
+variadic parameters, stringification, and token pasting remain unsupported.
+
+Arity mismatches, unterminated calls, unsupported replacement operations, and
+invocations interrupted by preprocessing directives return structured incomplete
+results without partial source, macro snapshots, or source maps. A call may span
+ordinary physical lines, but directives between its name and closing parenthesis
+are not supported. Definitions in inactive branches still have no effect, and
+ordinary redefinitions affect only following uses. Expansion is not added to
+`#if`/`#elif` expressions by this release.
+
+Expanded map ranges cover the complete physical invocation, including its closing
+parenthesis. Nested expansions map to the enclosing invocation; aliases which
+consume following source arguments extend the mapped range to include them.
+Physical line endings consumed by a multiline invocation are retained after its
+replacement, keeping later physical lines aligned. Comments outside consumed
+invocations remain unchanged; comments inside arguments are preprocessing
+whitespace and disappear with the invocation.
