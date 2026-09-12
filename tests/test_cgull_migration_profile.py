@@ -56,11 +56,7 @@ def test_cgull_profile_is_pinned_and_declares_bounded_readiness():
     assert profile["boundary"]["unknown_name_policy"] == "closed"
     assert profile["boundary"]["source_definitions_override_configuration"] is True
 
-    va_opt = profile["exclusions"]["__VA_OPT__"]
-    assert va_opt["supported"] is False
-    assert va_opt["occurrences_in_pinned_downstream_corpus"] == 0
-    assert va_opt["diagnostic"] == ErrorCode.UNSUPPORTED_MACRO_EXPANSION.value
-    assert va_opt["nonimpact_evidence"] == "absent_from_pinned_downstream_corpus"
+    assert "__VA_OPT__" not in profile["exclusions"]
 
     include = profile["exclusions"]["raw_reachable_include"]
     assert include["supported"] is False
@@ -97,13 +93,4 @@ def test_raw_reachable_include_remains_atomic_outside_profile():
         source,
         ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
         line=1,
-    )
-
-
-def test_va_opt_remains_atomic_outside_profile():
-    source = (FIXTURES / "unsupported_va_opt.c").read_text(encoding="utf-8")
-    _assert_atomic_diagnostic(
-        source,
-        ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
-        line=2,
     )
