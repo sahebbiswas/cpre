@@ -103,23 +103,24 @@ class Expansion:
         text = definition.replacement
         if text not in self.cache:
             tokens = [t for t in tokenize(text) if t.kind not in {'space', 'comment'}]
-            if any(t.kind == 'other' and t.text in {'#', '##', '%:', '%:%:'} for t in tokens):
-                raise ExpansionError(f'stringification/token pasting is unsupported in {definition.name}')
             if any(t.kind == 'identifier' and t.text == '__VA_OPT__' for t in tokens):
                 raise ExpansionError(f'__VA_OPT__ is unsupported in {definition.name}')
             self.cache[text] = tokens
         return self.cache[text]
 
-    def _arguments(self, pending: deque[Token], name: str) -> tuple[list[list[Token]], Token]:
+    def _arguments(self, pending: deque[Token], name: str
+                   ) -> tuple[list[list[Token]], list[Token], Token]:
         pending.popleft()  # opening parenthesis
         arguments = [[]]
+        separators = []
         depth = 0
         while pending:
             token = pending.popleft()
             self.budget.consume()
             if token.text == ')' and depth == 0:
-                return arguments, token
+                return arguments, separators, token
             if token.text == ',' and depth == 0:
+                separators.append(token)
                 arguments.append([])
                 continue
             if token.text == '(':
@@ -129,13 +130,112 @@ class Expansion:
             arguments[-1].append(token)
         raise ExpansionError(f'unterminated invocation of {name} (possibly interrupted by a directive)')
 
+    @staticmethod
+    def _paste_operator(token: Token) -> bool:
+        return token.kind == 'other' and token.text in {'##', '%:%:'}
+
+    @staticmethod
+    def _stringify_operator(token: Token) -> bool:
+        return token.kind == 'other' and token.text in {'#', '%:'}
+
+    def _stringify(self, tokens: list[Token], start: int, end: int) -> Token:
+        """Stringify an unexpanded argument using its invocation spelling."""
+        pieces: list[str] = []
+        previous: Token | None = None
+        for token in tokens:
+            if previous is not None:
+                gap = ''
+                if not previous.generated and not token.generated and previous.end <= token.start:
+                    gap = _SPLICE.sub('', self.source[previous.end:token.start])
+                if gap and (re.search(r'\s', gap) or '/*' in gap or '//' in gap):
+                    pieces.append(' ')
+            pieces.append(token.text)
+            previous = token
+        spelling = ''.join(pieces).strip()
+        spelling = spelling.replace('\\', '\\\\').replace('"', '\\"')
+        return Token(f'"{spelling}"', 'literal', start, end, generated=True)
+
+    def _paste(self, left: list[Token], right: list[Token], definition: MacroDefinition,
+               start: int, end: int) -> list[Token]:
+        """Paste the boundary tokens, treating empty arguments as placemarkers."""
+        if not left:
+            return right
+        if not right:
+            return left
+        text = left[-1].text + right[0].text
+        tokens = [token for token in tokenize(text) if token.kind not in {'space', 'comment'}]
+        if len(tokens) != 1 or tokens[0].text != text:
+            raise ExpansionError(
+                f'invalid token paste in {definition.name}: {left[-1].text!r} ## {right[0].text!r}'
+            )
+        merged = Token(text, tokens[0].kind, start, end,
+                       left[-1].hidden | right[0].hidden, True)
+        return left[:-1] + [merged] + right[1:]
+
+    def _substitute(self, body: list[Token], definition: MacroDefinition,
+                    raw: dict[str, list[Token]], expanded: dict[str, list[Token]],
+                    start: int, end: int) -> list[Token]:
+        """Apply #/## and parameter substitution before the replacement rescan."""
+        parameters = set(raw)
+        elements: list[list[Token] | str] = []
+        index = 0
+        while index < len(body):
+            part = body[index]
+            if self._stringify_operator(part) and definition.parameters is not None:
+                if index + 1 >= len(body):
+                    raise ExpansionError(
+                        f'stringification operator in {definition.name} is not followed by a parameter'
+                    )
+                operand = body[index + 1]
+                if operand.kind != 'identifier' or operand.text not in parameters:
+                    raise ExpansionError(
+                        f'stringification operator in {definition.name} is not followed by a parameter'
+                    )
+                elements.append([self._stringify(raw[operand.text], start, end)])
+                index += 2
+                continue
+            if self._paste_operator(part):
+                elements.append('##')
+                index += 1
+                continue
+            if part.kind == 'identifier' and part.text in parameters:
+                adjacent_paste = ((index > 0 and self._paste_operator(body[index - 1])) or
+                                  (index + 1 < len(body) and self._paste_operator(body[index + 1])))
+                elements.append(list(raw[part.text] if adjacent_paste else expanded[part.text]))
+            else:
+                elements.append([part])
+            index += 1
+
+        if not elements:
+            return []
+        if elements[0] == '##' or elements[-1] == '##':
+            raise ExpansionError(f'token paste operator cannot appear at an edge of {definition.name}')
+        result = elements[0]
+        if not isinstance(result, list):
+            raise ExpansionError(f'invalid token paste placement in {definition.name}')
+        index = 1
+        while index < len(elements):
+            item = elements[index]
+            if item == '##':
+                if index + 1 >= len(elements) or elements[index + 1] == '##':
+                    raise ExpansionError(f'invalid token paste placement in {definition.name}')
+                right = elements[index + 1]
+                assert isinstance(right, list)
+                result = self._paste(result, right, definition, start, end)
+                index += 2
+            else:
+                assert isinstance(item, list)
+                result.extend(item)
+                index += 1
+        return result
+
     def _rescan(self, tokens: list[Token], environment: MacroEnvironment
                 ) -> Generator[list[Token], list[Token], list[Token]]:
         """Yield argument prescans to an explicit trampoline, never Python recursion.
 
-        Per-token suppression survives argument substitution. Function replacement
-        suppression uses the intersection at the invocation's name and closing
-        parenthesis, so aliases can form calls with following source tokens.
+        Parameters used by # or ## retain their raw spelling; ordinary uses are
+        prescanned. Per-token suppression survives both paths and the result is
+        rescanned with following source tokens.
         """
         pending = deque(tokens)
         emitted = []
@@ -160,9 +260,10 @@ class Expansion:
             body = self._replacement(definition)
             end = token.end
             hidden = token.hidden | {token.text}
-            bindings = {}
+            raw_bindings: dict[str, list[Token]] = {}
+            expanded_bindings: dict[str, list[Token]] = {}
             if definition.parameters is not None:
-                arguments, closing = self._arguments(pending, definition.name)
+                arguments, separators, closing = self._arguments(pending, definition.name)
                 end = max(end, closing.end)
                 hidden = (token.hidden & closing.hidden) | {token.text}
                 parameters = definition.parameters
@@ -170,35 +271,52 @@ class Expansion:
                     arguments = []
                 if definition.variadic:
                     # Require the separating comma for named + variadic macros.
-                    # Omitted variadic arguments are a separate language-version
+                    # Omitted variadic arguments remain a separate language-version
                     # feature; explicitly empty variadic arguments are supported.
                     if len(arguments) < len(parameters) + 1:
-                        raise ExpansionError(f'variadic invocation {definition.name} requires a variadic argument (which may be empty)')
+                        raise ExpansionError(
+                            f'variadic invocation {definition.name} requires a variadic argument (which may be empty)'
+                        )
                     extra = []
-                    for index, argument in enumerate(arguments[len(parameters):]):
-                        if index:
-                            extra.append(Token(',', 'other', token.start, end))
+                    variadic_arguments = arguments[len(parameters):]
+                    for argument_index, argument in enumerate(variadic_arguments):
+                        if argument_index:
+                            extra.append(separators[len(parameters) + argument_index - 1])
                         extra.extend(argument)
                     arguments = arguments[:len(parameters)] + [extra]
                     parameters = (*parameters, '__VA_ARGS__')
                 elif len(arguments) != len(parameters):
                     raise ExpansionError(f'{definition.name} expects {len(parameters)} arguments, got {len(arguments)}')
-                used = {part.text for part in body if part.kind == 'identifier'}
-                for parameter, argument in zip(parameters, arguments):
-                    if parameter in used:
-                        bindings[parameter] = yield argument
+                raw_bindings = dict(zip(parameters, arguments))
+                for parameter, argument in raw_bindings.items():
+                    needs_expansion = False
+                    for index, part in enumerate(body):
+                        if part.kind != 'identifier' or part.text != parameter:
+                            continue
+                        if index > 0 and self._stringify_operator(body[index - 1]):
+                            continue
+                        if index > 0 and self._paste_operator(body[index - 1]):
+                            continue
+                        if index + 1 < len(body) and self._paste_operator(body[index + 1]):
+                            continue
+                        needs_expansion = True
+                        break
+                    expanded_bindings[parameter] = (yield argument) if needs_expansion else argument
                 self.current_offset = token.start
 
-            replacement = []
-            for part in body:
-                values = bindings.get(part.text, [part]) if part.kind == 'identifier' else [part]
-                for value in values:
-                    self.budget.consume()
-                    if value.kind != 'empty':
-                        replacement.append(replace(value, start=token.start, end=end,
-                                                   hidden=value.hidden | hidden, generated=True))
-            if replacement:
-                pending.extendleft(reversed(replacement))
+            replacement = self._substitute(
+                body, definition, raw_bindings, expanded_bindings, token.start, end
+            )
+            generated_replacement = []
+            for value in replacement:
+                self.budget.consume()
+                if value.kind != 'empty':
+                    generated_replacement.append(replace(
+                        value, start=token.start, end=end,
+                        hidden=value.hidden | hidden, generated=True,
+                    ))
+            if generated_replacement:
+                pending.extendleft(reversed(generated_replacement))
             else:
                 emitted.append(Token('', 'empty', token.start, end, hidden, True))
         return emitted

@@ -75,16 +75,13 @@ def test_line_comment_splicing_does_not_expand_hidden_identifier():
     assert output('#define X 7\n// comment \\\nX\nX').endswith('// comment \\\nX\n 7 ')
 
 
-@pytest.mark.parametrize('definition, use', [
-    ('#define A x ## y', 'A'),
-    ('#define A #x', 'A'),
-    ('#define A x %:%: y', 'A'),
+@pytest.mark.parametrize('definition, use, expected', [
+    ('#define A x ## y', 'A', 'xy'),
+    ('#define A #x', 'A', '# x'),
+    ('#define A x %:%: y', 'A', 'xy'),
 ])
-def test_unsupported_expansion_is_atomic(definition, use):
-    result = preprocess_source(definition + '\n' + use)
-    assert not result.complete
-    assert result.source is result.source_map is result.macros is None
-    assert result.incomplete[0].code is ErrorCode.UNSUPPORTED_MACRO_EXPANSION
+def test_object_macro_operator_tokens_expand(definition, use, expected):
+    assert output(definition + '\n' + use).strip() == expected
     assert output(definition + '\n#if 0\n' + use + '\n#endif').strip() == ''
 
 
