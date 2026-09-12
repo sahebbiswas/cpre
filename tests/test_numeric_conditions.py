@@ -35,8 +35,11 @@ def test_integer_operator_precedence_and_short_circuit(condition, expected):
     assert chosen(condition) is expected
 
 
-def test_integer_suffixes_and_bases():
+def test_integer_suffixes_bases_and_unsigned_conversion():
     assert chosen("0x10UL == 020 && 0b100u == 4")
+    assert chosen("-1 > 0u")
+    assert chosen("0xffffffffffffffffu + 1u == 0u")
+    assert chosen("~0u == 0xffffffffffffffffu")
 
 
 def test_object_aliases_expand_before_evaluation():
@@ -66,6 +69,21 @@ def test_unsupported_numeric_operation_is_structured():
     assert not result.complete
     assert result.incomplete[0].code is ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION
     assert result.incomplete[0].location.line == 1
+
+
+def test_deep_numeric_nesting_is_structured_instead_of_recursing():
+    condition = "(" * 60 + "1" + ")" * 60
+    result = preprocess_source(f"#if {condition}\nyes\n#endif\n")
+    assert not result.complete
+    assert result.incomplete[0].code is ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION
+    assert "nesting" in result.incomplete[0].message
+
+
+def test_deep_unary_nesting_is_structured_instead_of_recursing():
+    result = preprocess_source("#if " + "!" * 60 + "0\nyes\n#endif\n")
+    assert not result.complete
+    assert result.incomplete[0].code is ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION
+    assert "nesting" in result.incomplete[0].message
 
 
 def test_numeric_work_uses_analysis_budget():
