@@ -498,6 +498,15 @@ class Expansion:
         last = bisect_right(self.starts, self.pending_end - 1)
         original = [t for t in self.tokens[first:last] if t.kind not in {'space', 'comment'}]
         self.pending_start = None
+        reserved = next((
+            token for token in original
+            if token.kind == 'identifier' and token.text == '__VA_OPT__'
+        ), None)
+        if reserved is not None:
+            self.current_offset = reserved.start
+            raise ExpansionError(
+                '__VA_OPT__ is only valid in a variadic macro replacement list'
+            )
         try:
             expanded = self._expand(original, environment)
         except AnalysisLimitExceeded as error:
