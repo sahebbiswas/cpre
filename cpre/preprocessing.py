@@ -27,7 +27,7 @@ from .robdd import AnalysisBudget, AnalysisLimitExceeded, BDD
 # These names have implementation-provided semantics in common C/C++ preprocessors.
 # cpre must never silently certify them as ordinary identifiers. Explicit concrete
 # definitions may model environment macros such as __STDC__; otherwise a reachable
-# use is reported as unsupported until cpre implements deterministic semantics.
+# value use is reported as unsupported until cpre implements deterministic semantics.
 _PREDEFINED_MACROS = frozenset({
     "__BASE_FILE__",
     "__COUNTER__",
@@ -51,6 +51,7 @@ _PREDEFINED_MACROS = frozenset({
     "__TIMESTAMP__",
     "__cplusplus",
 })
+_DEFINEDNESS_DIRECTIVES = frozenset({"ifdef", "ifndef", "elifdef", "elifndef"})
 
 
 @dataclass(frozen=True)
@@ -80,8 +81,21 @@ class PreprocessResult:
 
 
 def _unconfigured_predefined_macro(text: str, environment: MacroEnvironment) -> str | None:
-    """Return the first predefined macro lacking explicit concrete replacement text."""
-    for token in tokenize(text):
+    """Return the first predefined macro whose replacement value is required."""
+    tokens = [token for token in tokenize(text) if token.kind not in {"space", "comment"}]
+    defined_operands: set[int] = set()
+    for index, token in enumerate(tokens):
+        if token.kind != "identifier" or token.text != "defined":
+            continue
+        candidate = index + 1
+        if candidate < len(tokens) and tokens[candidate].text == "(":
+            candidate += 1
+        if candidate < len(tokens) and tokens[candidate].kind == "identifier":
+            defined_operands.add(candidate)
+
+    for index, token in enumerate(tokens):
+        if index in defined_operands:
+            continue
         if token.kind != "identifier" or token.text not in _PREDEFINED_MACROS:
             continue
         if environment.get(token.text).definition is None:
@@ -171,8 +185,9 @@ def preprocess_source(
     provenance in source_map. Active define/undef directives update macro state and
     override externally configured state in source order; they are masked in the
     output. Includes, reachable unsupported nonconditional directives, and reachable
-    predefined macros without explicit concrete replacement semantics return atomic
-    incomplete results. Successful results expose a detached, read-only final
+    predefined macro value uses without explicit concrete replacement semantics
+    return atomic incomplete results. Definedness-only checks remain ordinary
+    conditional reasoning. Successful results expose a detached, read-only final
     macro-state snapshot and immutable provenance for physical lines wholly removed
     by preprocessing. Malformed conditionals raise the same structured ParseError
     as analyze_source.
@@ -248,7 +263,9 @@ def preprocess_source(
                 if frame[0] and not frame[1]:
                     builtin = (
                         _unconfigured_predefined_macro(branch.expression_text, environment)
-                        if branch.expression_text is not None else None
+                        if branch.expression_text is not None
+                        and branch.directive not in _DEFINEDNESS_DIRECTIVES
+                        else None
                     )
                     if builtin is not None:
                         diagnostics.append(PreprocessDiagnostic(
@@ -269,7 +286,8 @@ def preprocess_source(
                     if bdd.satisfiable(conjunction(context, condition)):
                         ambiguous = bdd.satisfiable(conjunction(context, negate(condition)))
                         selected: bool | None = None
-                        if ambiguous and branch.expression_text is not None:
+                        if (ambiguous and branch.expression_text is not None
+                                and branch.directive not in _DEFINEDNESS_DIRECTIVES):
                             try:
                                 selected = evaluate_numeric_condition(
                                     branch.expression_text,
