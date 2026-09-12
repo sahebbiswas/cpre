@@ -223,8 +223,9 @@ The CLI JSON format is a structural conditional-tree report and should not be us
 
 ## Concrete conditional selection
 
-`preprocess_source` selects one configuration without expanding macros or reading
-headers. Always check `complete` before passing its output to a downstream parser:
+`preprocess_source` selects one configuration and expands supported object-like
+and function-like macros without reading headers. Always check `complete` before
+passing its output to a downstream parser:
 
 ```python
 from cpre import MacroAssumptions, preprocess_source
@@ -310,12 +311,21 @@ resolution remain internal; the symbolic `analyze_source` API is unchanged.
 Active `#include`, `#include_next`, and `#import` directives still produce
 `unsupported_preprocessing_directive`. Malformed or unsupported active macro
 definitions produce the same diagnostic. Directives in discarded branches do not
-block selection. Other nonconditional directives are retained verbatim. Include processing, token
-pasting and stringification remain unsupported.
+block selection. Other nonconditional directives are retained verbatim. Include
+processing remains unsupported; standard stringification and token pasting are
+supported as described below.
 `complete` certifies the supported selection and expansion operations, not that
 the output is ready for every AST parser. Existing directive-parser syntax and
 Boolean-model limitations still apply. `AnalysisOptions` supplies the same
 resource limits as analysis; limit exhaustion returns no source or macro snapshot.
+
+In particular, predefined macros such as `__LINE__`/`__FILE__` are not supplied
+automatically, and retained directives such as `#pragma` are not diagnosed as
+incomplete. These can produce `complete=True` output that differs from pcpp.
+Numeric conditional expressions and unmentioned configuration names can instead
+produce `unresolved_condition`. These limitations currently block the
+[C-GULL replacement gate](pcpp-readiness.md). Callers must validate their input
+profile; `complete` alone does not certify general compiler preprocessing.
 
 
 ### Object-like macro expansion (0.10.0)
@@ -332,9 +342,9 @@ A macro is disabled while its replacement is rescanned: `A -> A` and `A -> B -> 
 terminate with the suppressed identifier retained, matching C recursion suppression.
 The implementation uses an explicit stack and the shared `max_work` budget, including
 emitted replacement characters. Limit exhaustion returns no source, map, or macro
-snapshot. Reachable `#`/`##` replacement operations
-(including digraph spellings), and assumption-only macros without replacement text
-return `unsupported_macro_expansion`. Bare function-like names can remain in output;
+snapshot. Invalid replacement operations and assumption-only macros without
+replacement text return `unsupported_macro_expansion`. Standard `#`/`##`
+operations, including digraph spellings, are described below. Bare function-like names can remain in output;
 unused unsupported definitions and inactive uses do not block preprocessing.
 Boolean assumptions are not guessed to mean literal `0` or `1` replacement text.
 
@@ -394,8 +404,9 @@ replacement definitions, and multiline invocations are supported. Standard
 trailing `...` parameters substitute their comma-separated tokens through
 `__VA_ARGS__`. A variadic-only `V()` supplies empty variadic tokens. For a macro
 with named parameters plus `...`, supply the separating comma even when the
-variadic part is empty: `V(x,)`. Omitted variadic arguments, `__VA_OPT__`, GNU named
-variadic parameters, stringification, and token pasting remain unsupported.
+variadic part is empty: `V(x,)`. Omitted variadic arguments, `__VA_OPT__`, and GNU
+named variadic parameters remain unsupported. Standard stringification and token
+pasting are supported as described below.
 
 Arity mismatches, unterminated calls, unsupported replacement operations, and
 invocations interrupted by preprocessing directives return structured incomplete
@@ -412,3 +423,20 @@ Physical line endings consumed by a multiline invocation are retained after its
 replacement, keeping later physical lines aligned. Comments outside consumed
 invocations remain unchanged; comments inside arguments are preprocessing
 whitespace and disappear with the invocation.
+
+### Stringification and token pasting (0.10.2)
+
+`#parameter` stringifies the unexpanded argument, trims leading/trailing whitespace,
+collapses internal preprocessing whitespace, and escapes quotes and backslashes
+inside string/character literals. `##` substitutes adjacent arguments without
+prescan, joins the bordering tokens, validates that the result is one preprocessing
+token, and rescans it. Empty arguments use placemarker behavior. The digraphs `%:`
+and `%:%:` have the same operator roles. Normal parameter uses still expand before
+substitution; two-level wrapper macros can therefore request expansion before
+stringification or pasting.
+
+Standard `__VA_ARGS__` works with these operators. GNU comma swallowing and
+`__VA_OPT__` are outside the supported contract. Invalid pastes and malformed
+operator placement return `unsupported_macro_expansion` atomically when used.
+The compatibility corpus checks representative operator output against pcpp;
+it does not claim full GCC/Clang compatibility.
