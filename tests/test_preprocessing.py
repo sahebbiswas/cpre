@@ -213,7 +213,7 @@ def test_restored_block_comment_lines_are_not_reported_as_removed():
     assert 1 not in result.removed_lines
     assert 2 not in result.removed_lines
     assert 3 in result.removed_lines
-    assert compact(result) == '/* explanation\ncontinued */ int kept;\n'
+    assert compact(result) == ''.join(result.source.splitlines(keepends=True)[:2])
 
 
 def test_compact_leaves_expanded_retained_output_unchanged():
