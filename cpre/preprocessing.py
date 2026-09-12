@@ -1,4 +1,4 @@
-"""Concrete conditional selection without macro expansion or include processing."""
+"""Concrete conditional selection and object-like macro expansion."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from .api import (
     _normalize_assumptions, _translate_parse_error,
 )
 from .errors import AnalysisError, ErrorCode, SourceLocation
+from .expansion import Expansion, SourceMapping
 from .expressions import conjunction, expression_atoms_in_order, negate
 from .model import ConditionError, ConditionalGroup, DefinedVariable, Variable, TRUE
 from .macros import MacroEnvironment, MacroState, _apply_macro_directive
@@ -21,7 +22,7 @@ from .robdd import AnalysisBudget, AnalysisLimitExceeded, BDD
 
 @dataclass(frozen=True)
 class PreprocessDiagnostic:
-    """A reachable construct that prevents concrete conditional selection."""
+    """A reachable construct that prevents supported concrete preprocessing."""
 
     code: ErrorCode
     message: str
@@ -37,6 +38,7 @@ class PreprocessResult:
     incomplete: tuple[PreprocessDiagnostic | AnalysisIncomplete, ...] = ()
 
     macros: Mapping[str, MacroState] | None = None
+    source_map: tuple[SourceMapping, ...] | None = None
 
     @property
     def complete(self) -> bool:
@@ -55,10 +57,11 @@ def preprocess_source(
     Unmentioned macros and opaque predicates remain unknown. A reachable
     undecidable condition returns an incomplete result with ``source=None``.
     Inactive text and conditional directives become spaces, preserving physical
-    line endings and columns. Block comments overlapping retained text are kept
-    whole to balance their delimiters. Retained text is unchanged. No macro
-    expansion or include processing is performed. Active define/undef directives
-    update macro state and are masked; includes return an incomplete result.
+    line endings. Unexpanded spans map one-to-one. Block comments overlapping
+    retained text are kept whole to balance their delimiters. Object macros in
+    retained text expand with invocation provenance in source_map. Active
+    define/undef directives update macro state and are masked; includes return
+    an incomplete result.
     Successful results expose a detached, read-only final macro-state snapshot.
     Malformed conditionals raise the same structured ParseError as analyze_source.
     """
@@ -86,12 +89,17 @@ def preprocess_source(
         retained[start - 1:end] = [False] * (end - start + 1)
 
     limits = resolved_options._resource_limits()
+    budget = AnalysisBudget(limits.max_work)
+    expansion = Expansion(source, budget)
+    offsets = [0]
+    for physical_line in physical:
+        offsets.append(offsets[-1] + len(physical_line))
     current_line = None
     try:
         semantics = _macro_semantics(tree, legacy_symbolic=False)
         atoms = [atom for expression in (*tree_expressions(tree.groups), semantics)
                  for atom in expression_atoms_in_order(expression)]
-        bdd = BDD(atoms, limits=limits, budget=AnalysisBudget(limits.max_work))
+        bdd = BDD(atoms, limits=limits, budget=budget)
         names = sorted({atom.name for atom in atoms if isinstance(atom, Variable)})
         starts = {group.line: group for group in tree.groups}
 
@@ -151,7 +159,11 @@ def preprocess_source(
                 try:
                     if kind not in {'define', 'undef'}:
                         raise ValueError('include processing is not supported')
-                    _apply_macro_directive(environment, kind, match[2], SourceLocation(current_line))
+                    concrete = expansion.directive_text(offsets[current_line - 1], offsets[ends[current_line]])
+                    definition_match = re.fullmatch(r"#\s*(define|undef)\b(.*)", concrete, re.DOTALL)
+                    if definition_match is None or definition_match[1] != kind:
+                        raise ValueError('ambiguous directive after physical line splicing')
+                    _apply_macro_directive(environment, kind, definition_match[2], SourceLocation(current_line))
                 except ValueError as error:
                     diagnostics.append(PreprocessDiagnostic(
                         ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE, str(error),
@@ -159,6 +171,15 @@ def preprocess_source(
                     ))
                     break
                 blank(current_line, ends[current_line])
+            elif not re.match(r"^\s*#", line.text):
+                try:
+                    expansion.line(offsets[current_line - 1], offsets[ends[current_line]], environment)
+                except ValueError as error:
+                    diagnostics.append(PreprocessDiagnostic(
+                        ErrorCode.UNSUPPORTED_MACRO_EXPANSION, str(error),
+                        SourceLocation(current_line),
+                    ))
+                    break
     except AnalysisLimitExceeded as error:
         diagnostics.append(AnalysisIncomplete(
             ErrorCode.ANALYSIS_LIMIT_EXCEEDED, error.resource, error.limit,
@@ -176,18 +197,15 @@ def preprocess_source(
     # code (or vice versa). Restore only comments overlapping retained text so
     # delimiters stay balanced without leaking wholly discarded comments.
     # Quoted literals and line comments are skipped.
-    tokens = re.finditer(
-        r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|//[^\r\n]*|/\*.*?\*/',
-        source, re.DOTALL,
-    )
     characters = list(output)
     char_kept = bytearray()
     for line, keep in zip(physical, retained):
         char_kept.extend(bytes([keep]) * len(line))
-    for token in tokens:
-        if token.group().startswith("/*") and any(char_kept[token.start():token.end()]):
-            characters[token.start():token.end()] = token.group()
-    return PreprocessResult("".join(characters), filename, macros=environment.snapshot())
+    for token in expansion.tokens:
+        if token.kind == "comment" and token.text.startswith("/*") and any(char_kept[token.start:token.end]):
+            characters[token.start:token.end] = source[token.start:token.end]
+    output, source_map = expansion.render("".join(characters))
+    return PreprocessResult(output, filename, macros=environment.snapshot(), source_map=source_map)
 
 
 __all__ = ["PreprocessDiagnostic", "PreprocessResult", "preprocess_source"]

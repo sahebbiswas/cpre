@@ -147,3 +147,18 @@ def test_source_order_macro_state_installed_contract():
     env = cpre.MacroEnvironment({'X': True})
     env.undef('X')
     assert env.snapshot()['X'].defined is False
+
+
+
+def test_object_expansion_and_source_map_installed_contract():
+    source = '#define N 12345\nint a[N];\n'
+    result = cpre.preprocess_source(source)
+    assert result.complete
+    span, = [span for span in result.source_map if span.expanded]
+    assert isinstance(span, cpre.SourceMapping)
+    assert source[span.source_start:span.source_end] == 'N'
+    assert result.source[span.output_start:span.output_end].strip() == '12345'
+    assert span.start == cpre.SourceLocation(2, 7)
+    unsupported = cpre.preprocess_source('#define F(x) x\nF(1)')
+    assert unsupported.source is unsupported.source_map is unsupported.macros is None
+    assert unsupported.incomplete[0].code is cpre.ErrorCode.UNSUPPORTED_MACRO_EXPANSION

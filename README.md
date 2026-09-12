@@ -184,9 +184,11 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
 ### Select a concrete configuration
 
 Use `cpre.preprocess_source(source, assumptions={"FEATURE": True})` to select
-conditional branches while preserving source coordinates. Check `result.complete`
+conditional branches and expand object-like macros with source mappings. Check `result.complete`
 before consuming `result.source`: unknown reachable conditions and unsupported
 include directives return structured incomplete diagnostics. Active `#define` and
 `#undef` update state in source order, with the final state available as
-`result.macros`. Macro invocations in ordinary source are not expanded. See the
+`result.macros`. Object-like macros expand in active ordinary source;
+`result.source_map` maps output back to physical invocation ranges. Function-like
+invocations return incomplete diagnostics. See the
 [concrete selection API](docs/api.md#concrete-conditional-selection) for the contract.

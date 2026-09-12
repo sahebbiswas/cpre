@@ -22,10 +22,11 @@ from .api import (
     analyze_source,
 )
 
+from .expansion import SourceMapping
 from .macros import MacroDefinition, MacroEnvironment, MacroState
 from .preprocessing import PreprocessDiagnostic, PreprocessResult, preprocess_source
 
-__version__ = "0.9.0"
+__version__ = "0.10.0"
 
 __all__ = [
     "AnalysisError",
@@ -50,6 +51,7 @@ __all__ = [
     "PreprocessResult",
     "preprocess_source",
     "SourceLocation",
+    "SourceMapping",
     "SourceRange",
     "SuggestedEdit",
     "__version__",
