@@ -19,6 +19,7 @@ class CompatibilityCase:
     code: ErrorCode | None = None
     line: int | None = None
     expanded_lines: tuple[int, ...] = ()
+    assumptions: tuple[tuple[str, bool], ...] = ()
 
 
 CASES = (
@@ -26,6 +27,15 @@ CASES = (
     CompatibilityCase("nested_conditionals.c", "supported"),
     CompatibilityCase("source_order.c", "supported", expanded_lines=(2, 5)),
     CompatibilityCase("multiline_nested_macros.c", "supported", expanded_lines=(8,)),
+    CompatibilityCase("general_macro_operators.c", "supported"),
+    CompatibilityCase(
+        "configured_conditional.c", "supported",
+        assumptions=(("FEATURE", True),),
+    ),
+    CompatibilityCase(
+        "configured_conditional.c", "supported",
+        assumptions=(("FEATURE", False),),
+    ),
     CompatibilityCase(
         "unsupported_include.c",
         "unsupported",
@@ -51,11 +61,19 @@ def load(case: CompatibilityCase) -> str:
     return (FIXTURES / case.name).read_text(encoding="utf-8")
 
 
+def preprocess(case: CompatibilityCase, source: str):
+    return preprocess_source(
+        source,
+        filename=case.name,
+        assumptions=dict(case.assumptions),
+    )
+
+
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case.name)
 def test_compatibility_corpus_has_explicit_stable_classification(case):
     source = load(case)
-    first = preprocess_source(source, filename=case.name)
-    second = preprocess_source(source, filename=case.name)
+    first = preprocess(case, source)
+    second = preprocess(case, source)
 
     if case.status == "supported":
         assert first.complete and second.complete
@@ -81,7 +99,7 @@ def test_compatibility_corpus_has_explicit_stable_classification(case):
 )
 def test_supported_corpus_remains_parseable_by_pycparser(case):
     source = load(case)
-    result = preprocess_source(source, filename=case.name)
+    result = preprocess(case, source)
     assert result.complete, result.incomplete
     c_parser.CParser().parse(result.source, filename=case.name)
 
@@ -93,7 +111,7 @@ def test_supported_corpus_remains_parseable_by_pycparser(case):
 )
 def test_expanded_source_maps_recover_physical_invocation_lines(case):
     source = load(case)
-    result = preprocess_source(source, filename=case.name)
+    result = preprocess(case, source)
     assert result.complete, result.incomplete
 
     expanded = tuple(mapping for mapping in result.source_map if mapping.expanded)
