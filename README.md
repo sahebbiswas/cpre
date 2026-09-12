@@ -175,7 +175,7 @@ The package version is defined in `cpre/__init__.py` as `__version__` and is con
 
 `0.7.0` marks cpre's transition from Alpha to Beta. During the Beta series, the documented top-level API is intended for real downstream integrations and compatibility-sensitive changes should be deliberate and documented. The path to 1.0 will emphasize downstream integration experience and validation against larger real-world C/C++ codebases.
 
-Public API additions use a minor version bump, while backward-compatible fixes use patch releases. Changes that affect documented public behavior should update compatibility tests alongside the implementation.
+During beta, incremental features and fixes generally use patch releases. Reserve minor version bumps for deliberate compatibility changes. Changes that affect documented public behavior should update compatibility tests alongside the implementation.
 
 ## License
 
@@ -184,11 +184,12 @@ Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
 ### Select a concrete configuration
 
 Use `cpre.preprocess_source(source, assumptions={"FEATURE": True})` to select
-conditional branches and expand object-like macros with source mappings. Check `result.complete`
+conditional branches and expand object-like and function-like macros with source mappings. Check `result.complete`
 before consuming `result.source`: unknown reachable conditions and unsupported
 include directives return structured incomplete diagnostics. Active `#define` and
 `#undef` update state in source order, with the final state available as
-`result.macros`. Object-like macros expand in active ordinary source;
-`result.source_map` maps output back to physical invocation ranges. Function-like
-invocations return incomplete diagnostics. See the
+`result.macros`. Macros expand in active ordinary source, including nested calls
+and standard `__VA_ARGS__` substitution;
+`result.source_map` maps output back to physical invocation ranges. Unsupported
+stringification and token pasting return incomplete diagnostics. See the
 [concrete selection API](docs/api.md#concrete-conditional-selection) for the contract.

@@ -76,11 +76,6 @@ def test_line_comment_splicing_does_not_expand_hidden_identifier():
 
 
 @pytest.mark.parametrize('definition, use', [
-    ('#define F(x) x', 'F(1)'),
-    ('#define F(x) x', 'F /* comment */\n(1)'),
-    ('#define F(x) x\n#define A F', 'A(1)'),
-    ('#define F(x) x\n#define A F(1)', 'A'),
-    ('#define F(x) x\n#define OPEN (', 'F\nOPEN 1)'),
     ('#define A x ## y', 'A'),
     ('#define A #x', 'A'),
     ('#define A x %:%: y', 'A'),
