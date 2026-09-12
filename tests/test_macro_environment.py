@@ -49,8 +49,8 @@ def test_numeric_definitions_keep_numeric_value_and_boolean_truth(literal, numbe
 
 
 def test_function_macros_empty_macros_and_object_whitespace():
-    result = run('#define F(x, ...) x + __VA_ARGS__\n#define G() 1\n#define EMPTY\n#define OBJECT (x)\n#if defined(F) && defined(G) && defined(EMPTY) && !F\nF(1, 2);\n#endif')
-    assert 'F(1, 2);' in result.source
+    result = run('#define F(x, ...) x + __VA_ARGS__\n#define G() 1\n#define EMPTY\n#define OBJECT (x)\n#if defined(F) && defined(G) && defined(EMPTY) && !F\nF;\n#endif')
+    assert 'F;' in result.source
     definition = result.macros['F'].definition
     assert definition.parameters == ('x',)
     assert definition.variadic
@@ -99,10 +99,11 @@ def test_snapshots_are_detached_immutable_and_deterministically_ordered():
 @pytest.mark.parametrize('ending', ['\n', '\r\n', '\r'])
 def test_continued_definitions_comments_and_quoted_replacement(ending):
     source = '#define X \\\n  0x2 /* comment */\n#define URL "https://example.test/a/*b*/"\n#if X\nX;\n#endif'
-    result = run(source.replace('\n', ending))
+    result = preprocess_source(source.replace('\n', ending))
+    assert result.complete
     assert result.macros['X'].definition.numeric_value == 2
     assert result.macros['URL'].definition.replacement == '"https://example.test/a/*b*/"'
-    assert 'X;' in result.source
+    assert '0x2' in result.source
 
 
 def test_no_retroactive_change_and_no_state_leak_across_calls():

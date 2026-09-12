@@ -241,7 +241,8 @@ else:
         report(diagnostic.code, diagnostic.location, diagnostic.message)
 ```
 
-The public `PreprocessResult` contains `source`, `filename`, `incomplete`, and a
+The public `PreprocessResult` contains `source`, `filename`, `incomplete`, `macros`,
+`source_map`, and a
 `complete` property. `source` is `None` whenever selection is incomplete; partial
 selection is never exposed. Diagnostics are ordered by source line and use either
 `PreprocessDiagnostic` or the existing `AnalysisIncomplete` resource diagnostic.
@@ -251,8 +252,10 @@ codes, physical locations, and filename metadata as `analyze_source`.
 On success, conditional directives (including all continuation lines) and inactive
 text become spaces. Block comments overlapping retained text are kept whole to
 balance delimiters across selected lines; comments wholly in discarded regions
-stay masked. Retained text, columns, physical line endings, and the presence
-or absence of a final newline are preserved. Nested `#if`, `#ifdef`, `#ifndef`,
+stay masked. Physical line endings and the presence or absence of a final newline
+are preserved. Object macro expansion changes text length and columns; use
+`source_map` for physical source coordinates. Unexpanded spans retain their text
+and map one-to-one. Nested `#if`, `#ifdef`, `#ifndef`,
 `#elif`, `#elifdef`, `#elifndef`, `#else`, and `#endif` are supported.
 
 Assumptions accept the same `MacroAssumptions` or Boolean mapping as
@@ -283,20 +286,20 @@ The public `MacroDefinition`, `MacroState`, and `MacroEnvironment` types live in
 comment-stripped logical replacement text, physical definition location, parameter
 tuple, and variadic flag. `parameters=None` means object-like; `parameters=()` means
 a function-like macro with no named parameters. Standard trailing `...` is supported.
-Replacement text is retained without expansion (and is not a byte-for-byte copy of
-continued source). `MacroState.defined` and `.value` are independent optional
+Definitions retain unexpanded replacement text (not a byte-for-byte copy of
+continued source); ordinary active source uses the definitions current at each use. `MacroState.defined` and `.value` are independent optional
 Booleans: `None` means unknown. Assumption-only entries have no source definition.
 
 Object-like integer literals (decimal, octal, hexadecimal, with suffixes, optional
 sign and enclosing parentheses) expose `numeric_value` and determine Boolean
-truth. Empty replacements are known-defined but have unknown truth. Aliases,
-compound replacement expressions, and function invocations are not expanded;
-conditions requiring their values remain unresolved. A bare function-like macro
+truth. Empty replacements are known-defined but have unknown truth. Aliases and compound replacement expressions expand in ordinary source, but
+conditions requiring their values remain unresolved; expansion inside conditional
+expressions is not part of this API increment. A bare function-like macro
 name has false value because it is not invoked. Numeric comparisons remain opaque,
 even when the operand macro has a known integer value.
 
 `MacroEnvironment(assumptions)` provides `get(name)`, `define(MacroDefinition(...))`,
-`undef(name)`, and `snapshot()` for reuse by later expansion work. `get` returns an
+`undef(name)`, and `snapshot()` for reuse by downstream consumers. `get` returns an
 unknown state for unmentioned names. Snapshots contain only explicitly tracked
 names in sorted order and are detached read-only mappings of immutable entries.
 `PreprocessResult.macros` is the final snapshot on success, including an empty
@@ -307,9 +310,54 @@ resolution remain internal; the symbolic `analyze_source` API is unchanged.
 Active `#include`, `#include_next`, and `#import` directives still produce
 `unsupported_preprocessing_directive`. Malformed or unsupported active macro
 definitions produce the same diagnostic. Directives in discarded branches do not
-block selection. Other nonconditional directives and ordinary text are retained
-verbatim; no macro substitution, include processing, token pasting, or
-stringification occurs. `complete` certifies conditional selection only, not that
+block selection. Other nonconditional directives are retained verbatim. Include processing, token
+pasting, stringification, and function-like macro expansion remain unsupported.
+`complete` certifies the supported selection and expansion operations, not that
 the output is ready for every AST parser. Existing directive-parser syntax and
 Boolean-model limitations still apply. `AnalysisOptions` supplies the same
 resource limits as analysis; limit exhaustion returns no source or macro snapshot.
+
+
+### Object-like macro expansion (0.10.0)
+
+Active ordinary-source identifiers expand recursively using the current macro
+environment. Redefinitions affect subsequent uses; discarded branches do not
+change expansion. Undefined and unmentioned identifiers remain unchanged. Comments,
+quoted literals (including encoding prefixes and raw strings), and preprocessing
+numbers are protected. Replacement-token separators prevent accidental identifier,
+operator, or comment formation; whitespace is not intended to match compiler `-E`
+formatting. Empty macros produce separating whitespace.
+
+A macro is disabled while its replacement is rescanned: `A -> A` and `A -> B -> A`
+terminate with the suppressed identifier retained, matching C recursion suppression.
+The implementation uses an explicit stack and the shared `max_work` budget, including
+emitted replacement characters. Limit exhaustion returns no source, map, or macro
+snapshot. Reachable function-like invocations, `#`/`##` replacement operations
+(including digraph spellings), and assumption-only macros without replacement text
+return `unsupported_macro_expansion`. Bare function-like names can remain in output;
+unused unsupported definitions and inactive uses do not block preprocessing.
+Boolean assumptions are not guessed to mean literal `0` or `1` replacement text.
+
+```python
+result = preprocess_source("#define N 12345\nint a[N];\n", filename="example.c")
+assert result.complete
+for span in result.source_map:
+    if span.expanded:
+        assert result.source[span.output_start:span.output_end].strip() == "12345"
+        assert span.start.line == 2  # the invocation, not the definition
+```
+
+`SourceMapping` is a frozen public dataclass exported from `cpre`. Its
+`output_start`/`output_end` and `source_start`/`source_end` are zero-based,
+half-open Python character offsets, not byte offsets. `start`/`end` are one-based
+physical `SourceLocation` values, also end-exclusive. The ordered tuple covers
+all output characters. For `expanded=False`, map an output offset by adding its
+displacement within the span to `source_start`. For `expanded=True`, all characters
+(including separating whitespace) map to the original invocation's physical range.
+Nested replacements map to the outer source invocation. Spliced invocations can
+cover several physical lines; their line endings are retained after the replacement.
+`source_map` is `()` for empty input and `None` on incomplete results.
+
+This deliberately changes the 0.9.x guarantee of unchanged retained text and
+columns. Consumers of expanded output must use the map rather than equating output
+columns with original columns. The symbolic `analyze_source` API is unchanged.

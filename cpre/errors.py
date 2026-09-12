@@ -28,6 +28,7 @@ class ErrorCode(str, Enum):
     ANALYSIS_FAILURE = "analysis_failure"
     UNRESOLVED_CONDITION = "unresolved_condition"
     UNSUPPORTED_PREPROCESSING_DIRECTIVE = "unsupported_preprocessing_directive"
+    UNSUPPORTED_MACRO_EXPANSION = "unsupported_macro_expansion"
     SOURCE_READ_ERROR = "source_read_error"
 
 
