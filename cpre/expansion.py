@@ -108,16 +108,19 @@ class Expansion:
             self.cache[text] = tokens
         return self.cache[text]
 
-    def _arguments(self, pending: deque[Token], name: str) -> tuple[list[list[Token]], Token]:
+    def _arguments(self, pending: deque[Token], name: str
+                   ) -> tuple[list[list[Token]], list[Token], Token]:
         pending.popleft()  # opening parenthesis
         arguments = [[]]
+        separators = []
         depth = 0
         while pending:
             token = pending.popleft()
             self.budget.consume()
             if token.text == ')' and depth == 0:
-                return arguments, token
+                return arguments, separators, token
             if token.text == ',' and depth == 0:
+                separators.append(token)
                 arguments.append([])
                 continue
             if token.text == '(':
@@ -260,7 +263,7 @@ class Expansion:
             raw_bindings: dict[str, list[Token]] = {}
             expanded_bindings: dict[str, list[Token]] = {}
             if definition.parameters is not None:
-                arguments, closing = self._arguments(pending, definition.name)
+                arguments, separators, closing = self._arguments(pending, definition.name)
                 end = max(end, closing.end)
                 hidden = (token.hidden & closing.hidden) | {token.text}
                 parameters = definition.parameters
@@ -275,9 +278,10 @@ class Expansion:
                             f'variadic invocation {definition.name} requires a variadic argument (which may be empty)'
                         )
                     extra = []
-                    for argument_index, argument in enumerate(arguments[len(parameters):]):
+                    variadic_arguments = arguments[len(parameters):]
+                    for argument_index, argument in enumerate(variadic_arguments):
                         if argument_index:
-                            extra.append(Token(',', 'other', token.start, end))
+                            extra.append(separators[len(parameters) + argument_index - 1])
                         extra.extend(argument)
                     arguments = arguments[:len(parameters)] + [extra]
                     parameters = (*parameters, '__VA_ARGS__')
