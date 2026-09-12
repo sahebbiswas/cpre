@@ -20,7 +20,7 @@ class CompatibilityCase:
 
 
 CASES = (
-    CompatibilityCase("offsetof_container.c", "supported", expanded_lines=(13,)),
+    CompatibilityCase("offsetof_container.c", "supported", expanded_lines=(12,)),
     CompatibilityCase("nested_conditionals.c", "supported"),
     CompatibilityCase("source_order.c", "supported", expanded_lines=(2, 5)),
     CompatibilityCase("multiline_nested_macros.c", "supported", expanded_lines=(8,)),
