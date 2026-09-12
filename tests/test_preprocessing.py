@@ -100,8 +100,80 @@ def test_includes_are_explicitly_unsupported(directive):
     assert 'ok' in selected('#if 0\n' + directive + '\n#endif\nok')
 
 
+@pytest.mark.parametrize('directive', [
+    '#pragma once',
+    '#line 40 "mapped.c"',
+    '#error stop here',
+    '#warning review this',
+    '#ident "toolchain"',
+])
+def test_reachable_nonconditional_directives_are_atomic_and_located(directive):
+    result = preprocess_source('prefix\n' + directive + '\nint kept;\n', filename='x.c')
+    assert not result.complete
+    assert result.source is result.source_map is result.macros is None
+    diagnostic, = result.incomplete
+    assert diagnostic.code is ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE
+    assert diagnostic.location == SourceLocation(2)
+    assert 'ok' in selected('#if 0\n' + directive + '\n#endif\nok')
+
+
+def test_error_and_warning_directives_do_not_write_stderr(capsys):
+    for directive in ('#error stop here', '#warning review this'):
+        result = preprocess_source(directive + '\n')
+        assert not result.complete
+        assert result.incomplete[0].code is ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE
+    captured = capsys.readouterr()
+    assert captured.out == ''
+    assert captured.err == ''
+
+
+def test_null_directive_is_masked_without_blocking_completion():
+    output = selected('#\nint value;\n')
+    assert output.splitlines() == ['', 'int value;']
+
+
+@pytest.mark.parametrize('name', ['__LINE__', '__FILE__', '__DATE__', '__TIME__', '__STDC__'])
+def test_predefined_macros_are_explicitly_incomplete(name):
+    result = preprocess_source(f'prefix\nint value = {name};\n', filename='x.c')
+    assert not result.complete
+    assert result.source is result.source_map is result.macros is None
+    diagnostic, = result.incomplete
+    assert diagnostic.code is ErrorCode.UNSUPPORTED_MACRO_EXPANSION
+    assert diagnostic.location == SourceLocation(2, 13)
+    assert name in diagnostic.message
+
+
+def test_predefined_macro_in_reachable_condition_is_explicitly_incomplete():
+    result = preprocess_source('#if __LINE__ > 0\nint kept;\n#endif\n')
+    assert not result.complete
+    assert result.source is result.source_map is result.macros is None
+    diagnostic, = result.incomplete
+    assert diagnostic.code is ErrorCode.UNSUPPORTED_MACRO_EXPANSION
+    assert diagnostic.location == SourceLocation(1)
+
+
+def test_predefined_macro_in_unreachable_condition_does_not_block():
+    source = '#if 0\n#if __LINE__\nint dead;\n#endif\n#endif\nint kept;\n'
+    assert 'int kept;' in selected(source)
+
+
+def test_predefined_macro_from_replacement_is_located_at_invocation():
+    source = '#define HERE __LINE__\nint value = HERE;\n'
+    result = preprocess_source(source)
+    assert not result.complete
+    assert result.source is result.source_map is result.macros is None
+    diagnostic, = result.incomplete
+    assert diagnostic.code is ErrorCode.UNSUPPORTED_MACRO_EXPANSION
+    assert diagnostic.location == SourceLocation(2, 13)
+
+
+def test_predefined_spelling_in_literals_comments_and_other_identifiers_is_valid():
+    source = 'const char *name = "__LINE__"; // __FILE__\nint __ordinary_identifier__;\n'
+    assert selected(source) == source
+
+
 def test_other_text_is_unchanged_and_empty_input_is_complete():
-    for source in ['', 'int x;', '// comment\n#pragma once\nint x;\n']:
+    for source in ['', 'int x;', '// comment\nint x;\n']:
         assert selected(source) == source
 
 
