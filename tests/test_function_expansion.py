@@ -136,3 +136,29 @@ def test_diagnostics_point_to_invocations_when_flushed_by_later_directive():
     source = '#define F(x) x x\n' + 'F(' * 15 + '1' + ')' * 15 + '\n#define LATER 1'
     result = preprocess_source(source, options=AnalysisOptions(max_work=100))
     assert result.incomplete[0].location == SourceLocation(2)
+
+
+
+@pytest.mark.parametrize('middle', ['EMPTY', 'DROP(1)', 'ALIAS'])
+@pytest.mark.parametrize('separate_buffer', [False, True])
+def test_intervening_empty_expansion_clears_pending_invocation(middle, separate_buffer):
+    source = ('#define F(x) x\n#define EMPTY\n#define DROP(x)\n#define ALIAS EMPTY\n'
+              'F\n#if 1\n' + middle + ('\n#endif\n' if separate_buffer else '\n') + '(1)\n'
+              + ('' if separate_buffer else '#endif\n'))
+    result = preprocess_source(source)
+    assert result.complete, result.incomplete
+    assert spellings(result.source) == spellings('F(1)')
+
+
+@pytest.mark.parametrize('middle', ['', '/* comment */'])
+def test_whitespace_only_buffer_preserves_directive_invocation_guard(middle):
+    source = '#define F(x) x\nF\n#if 1\n' + middle + '\n#endif\n(1)\n'
+    result = preprocess_source(source)
+    assert result.source is None
+    assert result.incomplete[0].code is ErrorCode.UNSUPPORTED_MACRO_EXPANSION
+
+
+def test_generated_open_parenthesis_does_not_invoke_preceding_buffer():
+    result = preprocess_source('#define F(x) x\n#define OPEN (\nF\n#if 1\nOPEN 1)\n#endif')
+    assert result.complete, result.incomplete
+    assert spellings(result.source) == spellings('F(1)')

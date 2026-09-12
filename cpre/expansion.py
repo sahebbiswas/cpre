@@ -236,6 +236,11 @@ class Expansion:
         except AnalysisLimitExceeded as error:
             error.line = self.location(self.current_offset).line
             raise
+        # Invocation recognition happens before the next token is expanded.
+        # An intervening token breaks a pending call even if it expands away or
+        # becomes '('. Whitespace/comment-only buffers do not break adjacency.
+        if original and original[0].text != '(':
+            self.trailing_function = None
         significant = [t for t in expanded if t.kind != 'empty']
         if significant:
             if self.trailing_function is not None and significant[0].text == '(':
