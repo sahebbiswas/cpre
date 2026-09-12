@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .expansion import Expansion, Token, tokenize
+from .expansion import Expansion, ExpansionError, Token, tokenize
 from .macros import MacroEnvironment
 from .robdd import AnalysisBudget
 
@@ -264,14 +264,31 @@ class _Parser:
         return value
 
 
-def evaluate_numeric_condition(text: str, environment: MacroEnvironment,
-                               expansion: Expansion, budget: AnalysisBudget) -> bool | None:
-    """Evaluate a macro-expanded integer condition, or return None if still unknown."""
+def evaluate_numeric_condition(
+    text: str,
+    environment: MacroEnvironment,
+    expansion: Expansion,
+    budget: AnalysisBudget,
+    *,
+    unsupported_identifiers: frozenset[str] = frozenset(),
+) -> bool | None:
+    """Evaluate a macro-expanded integer condition, or return None if still unknown.
+
+    ``unsupported_identifiers`` is checked after standards-style macro expansion so
+    callers can distinguish an unmodeled predefined macro from an ordinary unresolved
+    identifier, including when another macro expands to the predefined name.
+    """
     original = [t for t in tokenize(text) if t.kind not in {"space", "comment"}]
     resolved = _resolve_defined(original, environment)
     if resolved is None:
         return None
     expanded = expansion._expand(resolved, environment)
+    for token in expanded:
+        if (token.kind == "identifier" and token.text in unsupported_identifiers
+                and environment.get(token.text).definition is None):
+            raise ExpansionError(
+                f"predefined macro {token.text} is not supported during concrete preprocessing"
+            )
     significant = [token for token in expanded if token.kind != "empty"]
     try:
         return _Parser(significant, budget).parse().truth()
