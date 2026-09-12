@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from pcpp import Preprocessor
-from pycparser import c_parser
+from pycparser import c_ast, c_parser
 
 from cpre import preprocess_source
 from cpre.expansion import tokenize
@@ -46,19 +46,22 @@ SUPPORTED_CASES = (
     DifferentialCase("configured_conditional.c", (("FEATURE", False),)),
 )
 
-# These are compatibility gaps, not accepted output differences. A fixture may
-# only be excluded from the pcpp equivalence gate when its reason is explicit.
+# These are migration blockers, not accepted output differences. Passing this
+# suite records the gaps; it does not authorize pcpp removal (see readiness report).
 KNOWN_DIFFERENCES = {
     "unsupported_include.c": (
         "cpre intentionally rejects reachable #include processing instead of "
-        "returning partial source"
+        "returning partial source; downstream non-impact is unproven (#39)"
     ),
     "unsupported_va_opt.c": (
-        "cpre intentionally rejects __VA_OPT__ until that expansion form is supported"
+        "cpre rejects __VA_OPT__; downstream non-impact is unproven (#39)"
     ),
     "incomplete_unknown_condition.c": (
-        "cpre requires an explicit macro configuration when branch selection is unknown"
+        "cpre requires explicit configuration; pcpp defaults unknown names to zero (#37)"
     ),
+    "incomplete_numeric_condition.c": "numeric comparisons remain unresolved (#36)",
+    "divergent_builtin_line.c": "__LINE__ remains unexpanded with complete=True (#38)",
+    "divergent_pragma.c": "#pragma once remains in complete output (#38)",
 }
 
 
@@ -87,6 +90,7 @@ def _run_pcpp(case: DifferentialCase, source: str) -> str:
     preprocessor.parse(source, source=case.fixture)
     output = io.StringIO()
     preprocessor.write(output)
+    assert preprocessor.return_code == 0, f"{case.id}: pcpp reported an error"
     return output.getvalue()
 
 
@@ -163,6 +167,16 @@ def test_every_compatibility_fixture_is_gated_or_explicitly_allowlisted():
     assert all(reason.strip() for reason in KNOWN_DIFFERENCES.values())
 
 
+def test_classifications_and_differential_configurations_agree():
+    from test_downstream_compatibility import CASES
+
+    classified = {(case.name, case.assumptions) for case in CASES
+                  if case.status == "supported"}
+    gated = {(case.fixture, case.assumptions) for case in SUPPORTED_CASES}
+    assert classified == gated
+    assert {case.name for case in CASES if case.status != "supported"} == set(KNOWN_DIFFERENCES)
+
+
 @pytest.mark.parametrize("case", SUPPORTED_CASES, ids=lambda case: case.id)
 def test_cpre_matches_pcpp_preprocessing_tokens_and_coordinates(case):
     source = _load(case.fixture)
@@ -214,3 +228,54 @@ def test_offsetof_container_semantics_match_pcpp():
         assert "container_of" not in tokens
         assert ("struct", "item") in tuple(zip(tokens, tokens[1:]))
         assert "->" in tokens
+
+        # Verify the actual recovery expression consumed by AST/layout rules,
+        # beyond parseability or the mere presence of a member-access token.
+        tree = c_parser.CParser().parse(_without_line_markers(output))
+        function = next(node for node in tree.ext if isinstance(node, c_ast.FuncDef))
+        recovery = function.body.block_items[0].expr
+        assert isinstance(recovery, c_ast.Cast)
+        assert recovery.to_type.type.type.type.name == "item"
+        subtraction = recovery.expr
+        assert isinstance(subtraction, c_ast.BinaryOp) and subtraction.op == "-"
+        assert subtraction.left.to_type.type.type.type.names == ["char"]
+        assert subtraction.left.expr.name == "member"
+        offset = subtraction.right
+        assert isinstance(offset, c_ast.Cast)
+        assert offset.to_type.type.type.names == ["size_t"]
+        assert isinstance(offset.expr, c_ast.UnaryOp) and offset.expr.op == "&"
+        access = offset.expr.expr
+        assert isinstance(access, c_ast.StructRef) and access.type == "->"
+        assert access.field.name == "value"
+        assert access.name.to_type.type.type.type.name == "item"
+        assert access.name.expr.value == "0"
+
+
+@pytest.mark.parametrize("fixture,expected", [
+    ("incomplete_numeric_condition.c", ("int", "selected", "=", "1", ";")),
+    ("incomplete_unknown_condition.c", ()),
+])
+def test_incomplete_conditions_have_concrete_pcpp_outcomes(fixture, expected):
+    case = DifferentialCase(fixture)
+    source = _load(fixture)
+    result = preprocess_source(source, filename=fixture)
+    assert not result.complete
+    assert result.source is result.source_map is result.macros is None
+    output = _run_pcpp(case, source)
+    assert _semantic_tokens(output) == expected
+    c_parser.CParser().parse(_without_line_markers(output))
+
+
+@pytest.mark.parametrize("fixture,expected", [
+    ("divergent_builtin_line.c", ("int", "physical_line", "=", "1", ";")),
+    ("divergent_pragma.c", ("int", "value", ";")),
+])
+def test_complete_but_divergent_output_is_an_explicit_migration_blocker(fixture, expected):
+    case = DifferentialCase(fixture)
+    source = _load(fixture)
+    output = _run_cpre(case, source)
+    reference = _run_pcpp(case, source)
+    assert output == source
+    assert _semantic_tokens(reference) == expected
+    assert _semantic_tokens(output) != _semantic_tokens(reference)
+    c_parser.CParser().parse(_without_line_markers(reference))

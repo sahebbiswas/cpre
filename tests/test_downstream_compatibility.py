@@ -54,6 +54,14 @@ CASES = (
         ErrorCode.UNRESOLVED_CONDITION,
         1,
     ),
+    CompatibilityCase(
+        "incomplete_numeric_condition.c", "incomplete",
+        ErrorCode.UNRESOLVED_CONDITION, 2,
+    ),
+    # Complete output does not imply pcpp equivalence. These fixtures must stay
+    # outside the supported gate until issue #38 is resolved.
+    CompatibilityCase("divergent_builtin_line.c", "divergent"),
+    CompatibilityCase("divergent_pragma.c", "divergent"),
 )
 
 
@@ -75,7 +83,7 @@ def test_compatibility_corpus_has_explicit_stable_classification(case):
     first = preprocess(case, source)
     second = preprocess(case, source)
 
-    if case.status == "supported":
+    if case.status in {"supported", "divergent"}:
         assert first.complete and second.complete
         assert first.source == second.source
         assert first.source_map == second.source_map

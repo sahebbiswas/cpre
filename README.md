@@ -22,6 +22,8 @@ python -m pip install -e ".[dev]"
 
 - [Python API integration guide](docs/api.md) — developer-focused guidance for embedding cpre in tools, linters, and scripts.
 - [SARIF output](docs/sarif.md) — SARIF 2.1.0 format, rule mapping, fixes, and code-scanning integration.
+- [Downstream compatibility contract](docs/downstream-compatibility.md) — supported API and preprocessing guarantees.
+- [C-GULL replacement readiness](docs/pcpp-readiness.md) — measured corpus, migration blockers, and release gate.
 
 ## Command-line usage
 
@@ -191,5 +193,10 @@ include directives return structured incomplete diagnostics. Active `#define` an
 `result.macros`. Macros expand in active ordinary source, including nested calls
 and standard `__VA_ARGS__` substitution;
 `result.source_map` maps output back to physical invocation ranges. Unsupported
-stringification and token pasting return incomplete diagnostics. See the
+expansion forms such as `__VA_OPT__` return incomplete diagnostics. Standard
+stringification (`#`) and token pasting (`##`) are supported. See the
 [concrete selection API](docs/api.md#concrete-conditional-selection) for the contract.
+
+The [pcpp replacement gate](docs/pcpp-readiness.md) is currently **blocked**.
+`complete=True` certifies the documented cpre operations; it does not yet certify
+general pcpp equivalence, including built-ins and retained directives.

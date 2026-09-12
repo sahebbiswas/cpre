@@ -23,16 +23,20 @@ The compatibility suite in `tests/test_downstream_contract.py` is the executable
 
 Before a downstream consumer removes an existing `pcpp` preprocessing path in favor of `cpre.preprocess_source`, the corpus in `tests/compatibility/fixtures` must pass `tests/test_pcpp_differential.py` for every supported fixture/configuration relevant to that consumer.
 
+**Current verdict: blocked.** See the [versioned compatibility report](pcpp-readiness.md)
+for measurements and tracked blockers. A passing test suite verifies both supported
+behavior and known gaps; allowlisting a gap is not proof of downstream non-impact.
+
 The gate requires:
 
 - equivalent macro-expanded preprocessing token streams after normalizing only comments, whitespace, and line-marker formatting
-- equivalent physical token line positions when pcpp line directives are disabled, so source-coordinate-sensitive analysis does not silently drift
+- equivalent original token line positions after resolving pcpp's `#line` directives, so source-coordinate-sensitive analysis does not silently drift
 - parse-ready output from both preprocessors through `pycparser`
 - deterministic repeated output
 - explicit `KNOWN_DIFFERENCES` entries, with reasons, for every corpus fixture not covered by the equivalence set
 - explicit coverage of the C-GULL-oriented `offsetof`/container recovery shape
 
-A new mismatch must either be fixed or deliberately added to `KNOWN_DIFFERENCES` with reviewable rationale; the harness must not be weakened merely to make a migration pass. Unsupported cpre constructs continue to fail atomically rather than exposing partial output.
+A new mismatch must either be fixed or deliberately added to `KNOWN_DIFFERENCES` with a linked issue and reviewable rationale; the harness must not be weakened merely to make a migration pass. Every exclusion blocks migration until fixed or accompanied by reviewed evidence of non-impact on the agreed downstream input profile. Constructs detected as unsupported fail atomically. Known complete-but-divergent cases are explicitly tested and also block migration; they must not be mistaken for supported equivalence.
 
 `pcpp` is a development/test dependency used only as the differential oracle. It is not part of cpre's runtime dependency surface.
 
