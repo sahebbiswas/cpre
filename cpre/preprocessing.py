@@ -16,6 +16,7 @@ from .expansion import Expansion, ExpansionError, SourceMapping
 from .expressions import conjunction, expression_atoms_in_order, negate
 from .model import ConditionError, ConditionalGroup, DefinedVariable, Variable, TRUE
 from .macros import MacroEnvironment, MacroState, _apply_macro_directive
+from .numeric_conditions import NumericConditionError, evaluate_numeric_condition
 from .parser import logical_lines, parse_source
 from .robdd import AnalysisBudget, AnalysisLimitExceeded, BDD
 
@@ -91,17 +92,18 @@ def preprocess_source(
 ) -> PreprocessResult:
     """Select conditional branches under explicit Boolean macro assumptions.
 
-    Unmentioned macros and opaque predicates remain unknown. A reachable
-    undecidable condition returns an incomplete result with ``source=None``.
-    Inactive text and conditional directives become spaces, preserving physical
-    line endings. Unexpanded spans map one-to-one. Block comments overlapping
-    retained text are kept whole to balance their delimiters. Macros in
-    retained text expand with invocation provenance in source_map. Active
-    define/undef directives update macro state and are masked; includes return
-    an incomplete result.
-    Successful results expose a detached, read-only final macro-state snapshot
-    and immutable provenance for physical lines wholly removed by preprocessing.
-    Malformed conditionals raise the same structured ParseError as analyze_source.
+    Unmentioned macros remain unknown. Reachable integer expressions are macro
+    expanded and evaluated concretely when Boolean reasoning alone cannot choose
+    a branch. A still-undecidable condition returns an incomplete result with
+    ``source=None``. Inactive text and conditional directives become spaces,
+    preserving physical line endings. Unexpanded spans map one-to-one. Block
+    comments overlapping retained text are kept whole to balance delimiters.
+    Macros in retained text expand with invocation provenance in source_map.
+    Active define/undef directives update macro state and are masked; includes
+    return an incomplete result. Successful results expose a detached, read-only
+    final macro-state snapshot and immutable provenance for physical lines wholly
+    removed by preprocessing. Malformed conditionals raise the same structured
+    ParseError as analyze_source.
     """
     normalized = _normalize_assumptions(assumptions)
     resolved_options = options if options is not None else AnalysisOptions()
@@ -116,7 +118,6 @@ def preprocess_source(
     environment = MacroEnvironment(normalized)
     physical = source.splitlines(keepends=True)
     logical = list(logical_lines(source))
-    # The next logical start captures even empty final continuation lines.
     ends = {line.start_line: (logical[index + 1].start_line - 1
                              if index + 1 < len(logical) else len(physical))
             for index, line in enumerate(logical)}
@@ -149,7 +150,6 @@ def preprocess_source(
 
         index_groups(tree.groups)
         branches = {branch.line: branch for group in starts.values() for branch in group.branches}
-        # Frames hold [parent-active, any-branch-selected, current-active].
         stack: list[list[bool]] = []
         active = True
         for line in logical:
@@ -174,15 +174,29 @@ def preprocess_source(
                     context = conjunction(*terms)
                     condition = branch.expression if branch.expression is not None else TRUE
                     if bdd.satisfiable(conjunction(context, condition)):
-                        if bdd.satisfiable(conjunction(context, negate(condition))):
+                        ambiguous = bdd.satisfiable(conjunction(context, negate(condition)))
+                        selected: bool | None = None
+                        if ambiguous and branch.expression_text is not None:
+                            try:
+                                selected = evaluate_numeric_condition(
+                                    branch.expression_text, environment, expansion, budget
+                                )
+                            except NumericConditionError as error:
+                                diagnostics.append(PreprocessDiagnostic(
+                                    ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION,
+                                    str(error), SourceLocation(current_line),
+                                ))
+                                break
+                        if ambiguous and selected is None:
                             diagnostics.append(PreprocessDiagnostic(
                                 ErrorCode.UNRESOLVED_CONDITION,
                                 "condition is not determined by the current macro state",
                                 SourceLocation(current_line),
                             ))
-                            break  # Subsequent state depends on this unknown choice.
-                        active = True
-                        frame[1] = True
+                            break
+                        if not ambiguous or selected:
+                            active = True
+                            frame[1] = True
                 frame[2] = active
                 continue
             match = re.match(r"^\s*#\s*(endif|define|undef|include|include_next|import)\b(.*)$", line.text)
@@ -218,7 +232,7 @@ def preprocess_source(
     except ExpansionError as error:
         diagnostics.append(PreprocessDiagnostic(
             ErrorCode.UNSUPPORTED_MACRO_EXPANSION, str(error),
-            expansion.location(expansion.current_offset),
+            SourceLocation(current_line) if current_line is not None else SourceLocation(1),
         ))
     except AnalysisLimitExceeded as error:
         limit_line = error.line if error.line is not None else current_line
@@ -234,10 +248,6 @@ def preprocess_source(
     output = "".join(line if keep else "".join(
         char if char in "\r\n" else " " for char in line
     ) for line, keep in zip(physical, retained))
-    # A block comment can start on a removed directive and end beside retained
-    # code (or vice versa). Restore only comments overlapping retained text so
-    # delimiters stay balanced without leaking wholly discarded comments.
-    # Quoted literals and line comments are skipped.
     characters = list(output)
     char_kept = bytearray()
     for line, keep in zip(physical, retained):
