@@ -15,13 +15,42 @@ from .configuration import (
     MacroConfiguration, _condition_environment, _configured_environment,
 )
 from .errors import AnalysisError, ErrorCode, SourceLocation
-from .expansion import Expansion, ExpansionError, SourceMapping
+from .expansion import Expansion, ExpansionError, SourceMapping, tokenize
 from .expressions import conjunction, expression_atoms_in_order, negate
 from .model import ConditionError, ConditionalGroup, DefinedVariable, Variable, TRUE
 from .macros import MacroEnvironment, MacroState, _apply_macro_directive
 from .numeric_conditions import NumericConditionError, evaluate_numeric_condition
 from .parser import logical_lines, parse_source
 from .robdd import AnalysisBudget, AnalysisLimitExceeded, BDD
+
+
+# These names have implementation-provided semantics in common C/C++ preprocessors.
+# cpre must never silently certify them as ordinary identifiers. Explicit concrete
+# definitions may model environment macros such as __STDC__; otherwise a reachable
+# use is reported as unsupported until cpre implements deterministic semantics.
+_PREDEFINED_MACROS = frozenset({
+    "__BASE_FILE__",
+    "__COUNTER__",
+    "__DATE__",
+    "__FILE__",
+    "__INCLUDE_LEVEL__",
+    "__LINE__",
+    "__STDC__",
+    "__STDC_HOSTED__",
+    "__STDC_IEC_559__",
+    "__STDC_IEC_559_COMPLEX__",
+    "__STDC_ISO_10646__",
+    "__STDC_LIB_EXT1__",
+    "__STDC_MB_MIGHT_NEQ_WC__",
+    "__STDC_NO_ATOMICS__",
+    "__STDC_NO_COMPLEX__",
+    "__STDC_NO_THREADS__",
+    "__STDC_NO_VLA__",
+    "__STDC_VERSION__",
+    "__TIME__",
+    "__TIMESTAMP__",
+    "__cplusplus",
+})
 
 
 @dataclass(frozen=True)
@@ -48,6 +77,36 @@ class PreprocessResult:
     @property
     def complete(self) -> bool:
         return self.source is not None and not self.incomplete
+
+
+def _unconfigured_predefined_macro(text: str, environment: MacroEnvironment) -> str | None:
+    """Return the first predefined macro lacking explicit concrete replacement text."""
+    for token in tokenize(text):
+        if token.kind != "identifier" or token.text not in _PREDEFINED_MACROS:
+            continue
+        if environment.get(token.text).definition is None:
+            return token.text
+    return None
+
+
+def _unexpanded_predefined_macro(
+    output: str,
+    source_map: tuple[SourceMapping, ...],
+    expansion: Expansion,
+) -> tuple[str, SourceLocation] | None:
+    """Find a predefined macro that survived supported expansion and map its origin."""
+    for token in tokenize(output):
+        if token.kind != "identifier" or token.text not in _PREDEFINED_MACROS:
+            continue
+        for mapping in source_map:
+            if not (mapping.output_start <= token.start < mapping.output_end):
+                continue
+            if mapping.expanded:
+                return token.text, mapping.start
+            source_offset = mapping.source_start + (token.start - mapping.output_start)
+            return token.text, expansion.location(source_offset)
+        return token.text, SourceLocation(1)
+    return None
 
 
 def compact(
@@ -111,10 +170,12 @@ def preprocess_source(
     kept whole to balance delimiters. Macros in retained text expand with invocation
     provenance in source_map. Active define/undef directives update macro state and
     override externally configured state in source order; they are masked in the
-    output. Includes return an incomplete result. Successful results expose a
-    detached, read-only final macro-state snapshot and immutable provenance for
-    physical lines wholly removed by preprocessing. Malformed conditionals raise
-    the same structured ParseError as analyze_source.
+    output. Includes, reachable unsupported nonconditional directives, and reachable
+    predefined macros without explicit concrete replacement semantics return atomic
+    incomplete results. Successful results expose a detached, read-only final
+    macro-state snapshot and immutable provenance for physical lines wholly removed
+    by preprocessing. Malformed conditionals raise the same structured ParseError
+    as analyze_source.
     """
     normalized = _normalize_assumptions(assumptions)
     if configuration is not None and normalized is not None:
@@ -174,7 +235,8 @@ def preprocess_source(
         active = True
         for line in logical:
             current_line = line.start_line
-            if re.match(r"^\s*#", line.text):
+            is_directive = re.match(r"^\s*#", line.text) is not None
+            if is_directive:
                 expansion.flush(environment)
             branch = branches.get(current_line)
             if branch is not None:
@@ -184,6 +246,17 @@ def preprocess_source(
                 active = False
                 blank(current_line, ends[current_line])
                 if frame[0] and not frame[1]:
+                    builtin = (
+                        _unconfigured_predefined_macro(branch.expression_text, environment)
+                        if branch.expression_text is not None else None
+                    )
+                    if builtin is not None:
+                        diagnostics.append(PreprocessDiagnostic(
+                            ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
+                            f"predefined macro {builtin} is not supported during concrete preprocessing",
+                            SourceLocation(current_line),
+                        ))
+                        break
                     terms = [semantics]
                     for name in names:
                         state = environment.get(name)
@@ -254,7 +327,28 @@ def preprocess_source(
                     ))
                     break
                 blank(current_line, ends[current_line])
-            elif not re.match(r"^\s*#", line.text):
+            elif is_directive:
+                concrete = expansion.directive_text(
+                    offsets[current_line - 1], offsets[ends[current_line]]
+                )
+                if re.fullmatch(r"#\s*", concrete, re.DOTALL):
+                    blank(current_line, ends[current_line])
+                    continue
+                directive_match = re.match(r"#\s*([A-Za-z_]\w*)\b", concrete)
+                if directive_match is not None:
+                    message = (
+                        f"#{directive_match[1]} preprocessing directive is not supported "
+                        "during concrete preprocessing"
+                    )
+                else:
+                    message = "nonconditional preprocessing directive is not supported"
+                diagnostics.append(PreprocessDiagnostic(
+                    ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
+                    message,
+                    SourceLocation(current_line),
+                ))
+                break
+            else:
                 expansion.line(offsets[current_line - 1], offsets[ends[current_line]])
         if not diagnostics:
             expansion.flush(environment)
@@ -292,6 +386,14 @@ def preprocess_source(
         if not keep and not line.rstrip("\r\n").strip()
     )
     output, source_map = expansion.render(restored)
+    builtin = _unexpanded_predefined_macro(output, source_map, expansion)
+    if builtin is not None:
+        name, location = builtin
+        return PreprocessResult(None, filename, (PreprocessDiagnostic(
+            ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
+            f"predefined macro {name} is not supported during concrete preprocessing",
+            location,
+        ),))
     return PreprocessResult(
         output,
         filename,
