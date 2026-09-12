@@ -24,12 +24,6 @@
     "source_definitions_override_configuration": true
   },
   "exclusions": {
-    "__VA_OPT__": {
-      "supported": false,
-      "occurrences_in_pinned_downstream_corpus": 0,
-      "diagnostic": "unsupported_macro_expansion",
-      "nonimpact_evidence": "absent_from_pinned_downstream_corpus"
-    },
     "raw_reachable_include": {
       "supported": false,
       "diagnostic": "unsupported_preprocessing_directive",

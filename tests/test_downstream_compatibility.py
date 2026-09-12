@@ -42,10 +42,6 @@ CASES = (
         ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE, 1,
     ),
     CompatibilityCase(
-        "unsupported_va_opt.c", "unsupported",
-        ErrorCode.UNSUPPORTED_MACRO_EXPANSION, 2,
-    ),
-    CompatibilityCase(
         "incomplete_unknown_condition.c", "incomplete",
         ErrorCode.UNRESOLVED_CONDITION, 1,
     ),

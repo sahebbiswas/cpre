@@ -331,6 +331,7 @@ def preprocess_source(
                 continue
             if match:
                 kind = match[1]
+                definition = None
                 try:
                     if kind not in {'define', 'undef'}:
                         raise ValueError('include processing is not supported')
@@ -338,13 +339,21 @@ def preprocess_source(
                     definition_match = re.fullmatch(r"#\s*(define|undef)\b(.*)", concrete, re.DOTALL)
                     if definition_match is None or definition_match[1] != kind:
                         raise ValueError('ambiguous directive after physical line splicing')
-                    _apply_macro_directive(environment, kind, definition_match[2], SourceLocation(current_line))
+                    remainder = definition_match[2]
+                    _apply_macro_directive(environment, kind, remainder, SourceLocation(current_line))
+                    if kind == 'define':
+                        name_match = re.match(r"\s*([A-Za-z_]\w*)", remainder)
+                        assert name_match is not None
+                        definition = environment.get(name_match[1]).definition
                 except ValueError as error:
                     diagnostics.append(PreprocessDiagnostic(
                         ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE, str(error),
                         SourceLocation(current_line),
                     ))
                     break
+                if definition is not None:
+                    expansion.current_offset = offsets[current_line - 1]
+                    expansion.validate_definition(definition)
                 blank(current_line, ends[current_line])
             elif is_directive:
                 concrete = expansion.directive_text(

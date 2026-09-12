@@ -417,9 +417,10 @@ replacement definitions, and multiline invocations are supported. Standard
 trailing `...` parameters substitute their comma-separated tokens through
 `__VA_ARGS__`. A variadic-only `V()` supplies empty variadic tokens. For a macro
 with named parameters plus `...`, supply the separating comma even when the
-variadic part is empty: `V(x,)`. Omitted variadic arguments, `__VA_OPT__`, and GNU
-named variadic parameters remain unsupported. Standard stringification and token
-pasting are supported as described below.
+variadic part is empty: `V(x,)`. Omitted variadic arguments and GNU named variadic
+parameters remain outside the supported contract. Standard `__VA_OPT__` support is
+described below; stringification and token pasting are supported as described in
+the following section.
 
 Arity mismatches, unterminated calls, unsupported replacement operations, and
 invocations interrupted by preprocessing directives return structured incomplete
@@ -437,6 +438,43 @@ replacement, keeping later physical lines aligned. Comments outside consumed
 invocations remain unchanged; comments inside arguments are preprocessing
 whitespace and disappear with the invocation.
 
+### Standard `__VA_OPT__` variadic expansion (0.10.12)
+
+Inside a variadic function-like replacement list, `__VA_OPT__(tokens)` is treated
+like a parameter. The contained tokens participate when the hypothetical ordinary
+substitution of `__VA_ARGS__` contains preprocessing tokens after macro expansion;
+otherwise the construct contributes a placemarker that disappears before the final
+rescan. This means an argument whose macro expansion is empty also makes
+`__VA_OPT__` empty.
+
+```python
+source = """\
+#define EMPTY
+#define LOG(fmt, ...) log(fmt __VA_OPT__(,) __VA_ARGS__)
+LOG("plain", )
+LOG("empty", EMPTY)
+LOG("value=%d", n)
+"""
+result = preprocess_source(source)
+assert result.complete
+```
+
+The contained token sequence may use named parameters, `__VA_ARGS__`, nested
+parentheses, stringification, and token pasting when it is valid as the replacement
+list of the current macro. `__VA_OPT__` itself also participates in surrounding
+`#`/`##` processing as a parameter. Placemarkers are retained through these
+operations until standard paste/stringification processing is complete; this is
+important for cases where an empty parameter inside active `__VA_OPT__` is adjacent
+to an outer `##`.
+
+Nested `__VA_OPT__`, missing or unbalanced parentheses, use outside a variadic
+replacement list, invalid `#`/`##` placement, and invalid paste results produce an
+atomic `unsupported_macro_expansion` result when reached. Ordinary source uses of
+the reserved `__VA_OPT__` identifier are likewise rejected. GNU named variadics and
+GNU `, ## __VA_ARGS__` comma deletion are intentionally not added by this feature.
+The existing explicit-separating-comma rule for named-plus-variadic cpre invocations
+also remains unchanged.
+
 ### Stringification and token pasting (0.10.2)
 
 `#parameter` stringifies the unexpanded argument, trims leading/trailing whitespace,
@@ -448,8 +486,10 @@ and `%:%:` have the same operator roles. Normal parameter uses still expand befo
 substitution; two-level wrapper macros can therefore request expansion before
 stringification or pasting.
 
-Standard `__VA_ARGS__` works with these operators. GNU comma swallowing and
-`__VA_OPT__` are outside the supported contract. Invalid pastes and malformed
+Standard `__VA_ARGS__` and `__VA_OPT__` work with these operators. GNU comma
+swallowing remains outside the supported contract. Invalid pastes and malformed
 operator placement return `unsupported_macro_expansion` atomically when used.
-The compatibility corpus checks representative operator output against pcpp;
-it does not claim full GCC/Clang compatibility.
+The compatibility corpus checks representative legacy operator output against pcpp;
+standards-valid `__VA_OPT__` cases are checked separately against available GCC and
+Clang preprocessors at the preprocessing-token level. This does not claim full
+GCC/Clang compatibility.

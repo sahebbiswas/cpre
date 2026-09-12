@@ -53,10 +53,6 @@ EXPLICIT_NONCOMPLETE_CASES = {
         "headers first and masks remaining unresolved include directives under the "
         "reviewed migration profile (#39)"
     ),
-    "unsupported_va_opt.c": (
-        "cpre rejects __VA_OPT__; the pinned C-GULL migration corpus contains zero "
-        "occurrences and keeps this construct outside the reviewed profile (#39)"
-    ),
     "incomplete_unknown_condition.c": (
         "open-world preprocessing requires explicit configuration; the C-GULL "
         "migration uses the reviewed closed MacroConfiguration policy (#37)"
