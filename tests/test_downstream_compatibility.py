@@ -111,4 +111,4 @@ def test_container_fixture_exercises_offsetof_recovery_shape():
     assert "offsetof" not in result.source
     assert "container_of" not in result.source
     assert "struct item" in result.source
-    assert "(( size_t ) &" in " ".join(result.source.split())
+    assert "( ( size_t ) &" in " ".join(result.source.split())
