@@ -1,6 +1,6 @@
 import pytest
 
-from cpre import ErrorCode, preprocess_source
+from cpre import AnalysisOptions, ErrorCode, preprocess_source
 
 
 def chosen(condition, definitions=""):
@@ -22,9 +22,9 @@ def test_defined_integer_macro_drives_comparison():
         ("(1 + 2) * 3 == 9", True),
         ("8 >> 2 == 2", True),
         ("1 << 3 == 8", True),
-        ("6 & 3 == 2", True),
-        ("1 | 2 == 3", True),
-        ("7 ^ 3 == 4", True),
+        ("(6 & 3) == 2", True),
+        ("(1 | 2) == 3", True),
+        ("(7 ^ 3) == 4", True),
         ("-7 / 3 == -2", True),
         ("-7 % 3 == -1", True),
         ("0 && (1 / 0)", False),
@@ -41,8 +41,8 @@ def test_integer_suffixes_and_bases():
 
 def test_object_aliases_expand_before_evaluation():
     definitions = "#define BASE 2\n#define VALUE BASE + 3\n"
-    assert chosen("VALUE * 2 == 8", definitions) is False
-    assert chosen("VALUE * 2 == 8", "#define BASE 1\n#define VALUE (BASE + 3)\n")
+    assert not chosen("VALUE * 2 == 10", definitions)
+    assert chosen("VALUE * 2 == 10", "#define BASE 2\n#define VALUE (BASE + 3)\n")
 
 
 def test_function_macro_invocation_expands_in_condition():
@@ -52,13 +52,13 @@ def test_function_macro_invocation_expands_in_condition():
 
 def test_defined_operator_mixes_with_numeric_expression():
     assert chosen("defined(FOO) && FOO == 3", "#define FOO 3\n")
-    assert not chosen("defined(FOO) && FOO == 3")
 
 
-def test_unknown_identifier_remains_unresolved():
-    result = preprocess_source("#if VERSION >= 4\nyes\n#endif\n")
-    assert not result.complete
-    assert result.incomplete[0].code is ErrorCode.UNRESOLVED_CONDITION
+def test_unknown_identifiers_and_definedness_remain_unresolved():
+    for condition in ("VERSION >= 4", "defined(FOO) && FOO == 3"):
+        result = preprocess_source(f"#if {condition}\nyes\n#endif\n")
+        assert not result.complete
+        assert result.incomplete[0].code is ErrorCode.UNRESOLVED_CONDITION
 
 
 def test_unsupported_numeric_operation_is_structured():
@@ -69,8 +69,6 @@ def test_unsupported_numeric_operation_is_structured():
 
 
 def test_numeric_work_uses_analysis_budget():
-    from cpre import AnalysisOptions
-
     result = preprocess_source(
         "#define FOO 3\n#if FOO + FOO + FOO + FOO > 2\nyes\n#endif\n",
         options=AnalysisOptions(max_work=10),
