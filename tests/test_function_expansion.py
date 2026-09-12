@@ -46,6 +46,17 @@ CASES = [
     ('#define F(x,...) call(x,__VA_ARGS__)', 'F(1,)', 'call(1,)'),
     ('#define F(x,...) call(x,__VA_ARGS__)\n#define N 2', 'F(1,N,3)', 'call(1,2,3)'),
     ('#define F(a,b) ((a) + \\\n (b))', 'F(1,\n2)', '((1)+(2))'),
+    ('#define S(x) #x', 'S(hello   world)', '"hello world"'),
+    ('#define S(x) %: x', 'S(a+b)', '"a+b"'),
+    ('#define CAT(a,b) a ## b', 'CAT(pre,fix)', 'prefix'),
+    ('#define CAT(a,b) a %:%: b', 'CAT(+,=)', '+='),
+    ('#define CAT(a,b) a ## b', 'CAT(,tail) CAT(head,)', 'tail head'),
+    ('#define AB a ## b', 'AB', 'ab'),
+    ('#define X 7\n#define CAT(a,b) a##b\n#define X7 9', 'CAT(X,7)', '9'),
+    ('#define X 7\n#define CAT(a,b) a##b\n#define XCAT(a,b) CAT(a,b)', 'XCAT(X,7)', '77'),
+    ('#define S(x) #x\n#define X 7\n#define XS(x) S(x)', 'S(X) XS(X)', '"X" "7"'),
+    ('#define V(...) #__VA_ARGS__', 'V(a,b,c)', '"a,b,c"'),
+    ('#define V(prefix,...) prefix ## __VA_ARGS__', 'V(foo,bar) V(foo,)', 'foobar foo'),
 ]
 
 
@@ -75,9 +86,6 @@ def test_supported_expansion_matches_gcc(definitions, invocation, expected):
     ('#define F(x) x', 'F(1,2)'),
     ('#define F(x) x', 'F('),
     ('#define F(x) x', 'F((1)'),
-    ('#define F(x) #x', 'F(1)'),
-    ('#define F(x,y) x ## y', 'F(a,b)'),
-    ('#define F(x,y) x %:%: y', 'F(a,b)'),
     ('#define F(...) __VA_OPT__(,) __VA_ARGS__', 'F(1)'),
     ('#define F(x,...) x', 'F(1)'),
     ('#define F(x) x\n#define BAD(a) #a', 'F(BAD(1))'),
@@ -91,6 +99,24 @@ def test_unsupported_and_malformed_calls_are_atomic(definition, use):
     assert result.incomplete[0].code is ErrorCode.UNSUPPORTED_MACRO_EXPANSION
     inactive = preprocess_source(definition + '\n#if 0\n' + use + '\n#endif')
     assert inactive.complete, inactive.incomplete
+
+
+@pytest.mark.parametrize('definition, use, message', [
+    ('#define CAT(a,b) a ## b', 'CAT(x,+)', 'invalid token paste'),
+    ('#define CAT(a,b) ## a b', 'CAT(x,y)', 'cannot appear at an edge'),
+    ('#define BAD(x) # 1', 'BAD(x)', 'not followed by a parameter'),
+])
+def test_invalid_macro_operators_are_structured_incomplete(definition, use, message):
+    result = preprocess_source(definition + '\n' + use)
+    assert result.source is result.source_map is result.macros is None
+    assert result.incomplete[0].code is ErrorCode.UNSUPPORTED_MACRO_EXPANSION
+    assert message in result.incomplete[0].message
+
+
+def test_stringification_escapes_quotes_and_backslashes():
+    result = preprocess_source(r'#define S(x) #x' + '\n' + r'S("a\\b")')
+    assert result.complete, result.incomplete
+    assert spellings(result.source) == [r'"\"a\\\\b\""']
 
 
 def test_source_order_redefinition_and_undef():
@@ -131,12 +157,11 @@ def test_recursion_depth_and_work_limits_are_explicit():
 
 
 def test_diagnostics_point_to_invocations_when_flushed_by_later_directive():
-    result = preprocess_source('#define F(x) #x\nint n=F(1);\n#define LATER 1')
+    result = preprocess_source('#define F(x) # 1\nint n=F(1);\n#define LATER 1')
     assert result.incomplete[0].location == SourceLocation(2, 7)
     source = '#define F(x) x x\n' + 'F(' * 15 + '1' + ')' * 15 + '\n#define LATER 1'
     result = preprocess_source(source, options=AnalysisOptions(max_work=100))
     assert result.incomplete[0].location == SourceLocation(2)
-
 
 
 @pytest.mark.parametrize('middle', ['EMPTY', 'DROP(1)', 'ALIAS'])
