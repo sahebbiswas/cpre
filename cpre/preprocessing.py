@@ -39,10 +39,47 @@ class PreprocessResult:
 
     macros: Mapping[str, MacroState] | None = None
     source_map: tuple[SourceMapping, ...] | None = None
+    removed_lines: frozenset[int] | None = None
 
     @property
     def complete(self) -> bool:
         return self.source is not None and not self.incomplete
+
+
+def compact(
+    result: PreprocessResult,
+    *,
+    max_consecutive_blank_lines: int = 0,
+) -> str:
+    """Return an explicitly requested compact view of a completed result.
+
+    Only physical lines recorded in ``result.removed_lines`` are eligible for
+    removal or collapse. Retained lines, including intentional blank lines, are
+    emitted byte-for-byte as represented in ``result.source``. ``source_map``
+    continues to describe only the canonical coordinate-preserving source.
+    """
+    if max_consecutive_blank_lines < 0:
+        raise ValueError("max_consecutive_blank_lines must be non-negative")
+    if not result.complete or result.source is None or result.removed_lines is None:
+        raise ValueError("compact() requires a complete PreprocessResult")
+
+    output: list[str] = []
+    removed_run = 0
+    for line_number, line in enumerate(result.source.splitlines(keepends=True), 1):
+        if line_number not in result.removed_lines:
+            output.append(line)
+            removed_run = 0
+            continue
+
+        if removed_run < max_consecutive_blank_lines:
+            if line.endswith("\r\n"):
+                output.append("\r\n")
+            elif line.endswith("\n"):
+                output.append("\n")
+            elif line.endswith("\r"):
+                output.append("\r")
+        removed_run += 1
+    return "".join(output)
 
 
 def preprocess_source(
@@ -62,7 +99,8 @@ def preprocess_source(
     retained text expand with invocation provenance in source_map. Active
     define/undef directives update macro state and are masked; includes return
     an incomplete result.
-    Successful results expose a detached, read-only final macro-state snapshot.
+    Successful results expose a detached, read-only final macro-state snapshot
+    and immutable provenance for physical lines wholly removed by preprocessing.
     Malformed conditionals raise the same structured ParseError as analyze_source.
     """
     normalized = _normalize_assumptions(assumptions)
@@ -207,8 +245,21 @@ def preprocess_source(
     for token in expansion.tokens:
         if token.kind == "comment" and token.text.startswith("/*") and any(char_kept[token.start:token.end]):
             characters[token.start:token.end] = source[token.start:token.end]
-    output, source_map = expansion.render("".join(characters))
-    return PreprocessResult(output, filename, macros=environment.snapshot(), source_map=source_map)
+    restored = "".join(characters)
+    restored_lines = restored.splitlines(keepends=True)
+    removed_lines = frozenset(
+        line_number
+        for line_number, (line, keep) in enumerate(zip(restored_lines, retained), 1)
+        if not keep and not line.rstrip("\r\n").strip()
+    )
+    output, source_map = expansion.render(restored)
+    return PreprocessResult(
+        output,
+        filename,
+        macros=environment.snapshot(),
+        source_map=source_map,
+        removed_lines=removed_lines,
+    )
 
 
-__all__ = ["PreprocessDiagnostic", "PreprocessResult", "preprocess_source"]
+__all__ = ["PreprocessDiagnostic", "PreprocessResult", "compact", "preprocess_source"]
