@@ -22,11 +22,12 @@ from .api import (
     analyze_source,
 )
 
+from .configuration import MacroConfiguration, UnknownNamePolicy
 from .expansion import SourceMapping
 from .macros import MacroDefinition, MacroEnvironment, MacroState
 from .preprocessing import PreprocessDiagnostic, PreprocessResult, compact, preprocess_source
 
-__version__ = "0.10.7"
+__version__ = "0.10.8"
 
 __all__ = [
     "AnalysisError",
@@ -43,12 +44,14 @@ __all__ = [
     "FindingKind",
     "FixConfidence",
     "MacroAssumptions",
+    "MacroConfiguration",
     "MacroDefinition",
     "MacroEnvironment",
     "MacroState",
     "ParseError",
     "PreprocessDiagnostic",
     "PreprocessResult",
+    "UnknownNamePolicy",
     "compact",
     "preprocess_source",
     "SourceLocation",
