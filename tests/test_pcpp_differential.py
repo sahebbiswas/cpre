@@ -49,14 +49,17 @@ SUPPORTED_CASES = (
 
 KNOWN_DIFFERENCES = {
     "unsupported_include.c": (
-        "cpre intentionally rejects reachable #include processing instead of "
-        "returning partial source; downstream non-impact is unproven (#39)"
+        "cpre intentionally rejects raw reachable includes; C-GULL resolves project "
+        "headers first and masks remaining unresolved include directives under the "
+        "reviewed migration profile (#39)"
     ),
     "unsupported_va_opt.c": (
-        "cpre rejects __VA_OPT__; downstream non-impact is unproven (#39)"
+        "cpre rejects __VA_OPT__; the pinned C-GULL migration corpus contains zero "
+        "occurrences and keeps this construct outside the reviewed profile (#39)"
     ),
     "incomplete_unknown_condition.c": (
-        "cpre requires explicit configuration; pcpp defaults unknown names to zero (#37)"
+        "open-world preprocessing requires explicit configuration; the C-GULL "
+        "migration uses the reviewed closed MacroConfiguration policy (#37)"
     ),
     "divergent_builtin_line.c": "__LINE__ remains unexpanded with complete=True (#38)",
     "divergent_pragma.c": "#pragma once remains in complete output (#38)",

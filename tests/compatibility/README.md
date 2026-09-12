@@ -14,12 +14,34 @@ verdict. A green suite includes regression assertions for known gaps and does no
 mean pcpp can be removed. Each `KNOWN_DIFFERENCES` entry has a tracking issue;
 removal requires a fix or reviewed downstream non-impact evidence.
 
+## C-GULL migration profile
+
+Issue #39 defines a narrower, reviewed boundary for the two intentionally unsupported
+constructs that are not required by the pinned C-GULL migration corpus. The public
+rationale and downstream evidence are in
+[`docs/cgull-migration-profile.md`](../../docs/cgull-migration-profile.md); the
+machine-readable scope is `cgull-profile.json`.
+
+`tests/test_cgull_migration_profile.py` enforces that boundary:
+
+- project headers are already expanded before cpre receives the prepared TU;
+- remaining unresolved include directive lines are masked by the C-GULL adapter
+  while physical line endings are preserved;
+- C-GULL's typedef prelude is injected after cpre;
+- raw reachable includes remain atomically unsupported by cpre;
+- `__VA_OPT__` remains atomically unsupported and is excluded only because the
+  pinned C-GULL corpus contains zero occurrences.
+
+The fixture under `cgull_profile/` is deliberately separate from the differential
+fixture directory. It models caller-prepared input rather than claiming that cpre
+itself resolved an include.
+
 ## Adding a fixture
 
 1. Add a small, self-contained `.c` file under `tests/compatibility/fixtures/`. Keep it representative of a downstream preprocessing requirement rather than a synthetic tokenizer-only case.
 2. Add or update its cpre classification in `tests/test_downstream_compatibility.py`. For supported cases that expand macros in executable/declaration text, list the physical invocation lines in `expanded_lines` when source-map coverage is meaningful.
 3. Add every supported fixture/configuration to `SUPPORTED_CASES` in `tests/test_pcpp_differential.py`. If cpre intentionally cannot preprocess it, add the fixture to `KNOWN_DIFFERENCES` with the specific capability gap instead. The manifest test fails if a fixture is in neither set.
-4. If the case is supported, keep it parseable by `pycparser` after preprocessing. Add local typedefs or declarations instead of relying on system headers, because include processing is intentionally tracked as a compatibility gap.
+4. If the case is supported, keep it parseable by `pycparser` after preprocessing. Add local typedefs or declarations instead of relying on system headers, because include processing is outside cpre's supported boundary unless the caller has already prepared the TU according to an explicitly reviewed profile.
 5. If the case is unsupported or incomplete, assert the exact `ErrorCode` and physical line so the gap remains measurable and cannot silently regress into partial output.
 6. Prefer adding a focused assertion when the fixture represents a particularly important downstream shape, such as the `offsetof`/container recovery case.
 7. For complete-but-divergent cases, assert the specific difference against pcpp and link a blocker. Update the readiness report's counts, configurations and verdict when changing the corpus. Do not classify such cases as supported just because both outputs parse.
