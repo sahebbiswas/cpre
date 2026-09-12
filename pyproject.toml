@@ -37,6 +37,7 @@ cpre = "cpre.cli:main"
 dev = [
   "pytest>=7",
   "hypothesis>=6",
+  "pycparser>=2.22",
   "build>=1",
   "twine>=5",
 ]
