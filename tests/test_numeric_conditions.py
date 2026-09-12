@@ -40,6 +40,15 @@ def test_integer_suffixes_bases_and_unsigned_conversion():
     assert chosen("-1 > 0u")
     assert chosen("0xffffffffffffffffu + 1u == 0u")
     assert chosen("~0u == 0xffffffffffffffffu")
+    assert chosen("0xffffffffffffffffu / 2u == 0x7fffffffffffffffu")
+    assert chosen("0xffffffffffffffffu % 2u == 1u")
+
+
+def test_unsigned_division_by_zero_is_structured():
+    result = preprocess_source("#if 1u % 0u\nyes\n#endif\n")
+    assert not result.complete
+    assert result.incomplete[0].code is ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION
+    assert "division by zero" in result.incomplete[0].message
 
 
 def test_object_aliases_expand_before_evaluation():
