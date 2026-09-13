@@ -32,7 +32,7 @@ result = preprocess_source(source, pragma_handler=pragmas)
 
 ## `_Pragma` destringization
 
-cpre recognizes `_Pragma(string-literal)` after normal macro expansion. It removes the string-literal encoding prefix when present, removes the surrounding quotes, and destringizes `\"` to `"` and `\\` to `\` before dispatch. Malformed reachable `_Pragma` syntax returns a structured atomic incomplete result.
+cpre recognizes `_Pragma(string-literal)` after normal macro expansion. It removes the string-literal encoding prefix when present, removes the surrounding quotes, and destringizes `\"` to `"` and `\\` to `\` before dispatch. Malformed reachable `_Pragma` syntax returns a structured atomic incomplete result. Because `_Pragma` is a standard phase-4 preprocessing operator, a surviving `_Pragma` token that does not form the required parenthesized string-literal expression is treated as malformed reserved preprocessing syntax rather than passed through as an ordinary identifier.
 
 Macro-generated forms such as this are supported:
 
