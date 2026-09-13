@@ -31,7 +31,7 @@ from .preprocessing import (
     PreprocessResult,
     compact,
 )
-from .include_queries import IncludeForm, IncludeQuery, IncludeQueryProvider, preprocess_source
+from .include_queries import preprocess_source
 
 __version__ = "0.10.15"
 
@@ -49,9 +49,6 @@ __all__ = [
     "Finding",
     "FindingKind",
     "FixConfidence",
-    "IncludeForm",
-    "IncludeQuery",
-    "IncludeQueryProvider",
     "MacroAssumptions",
     "MacroConfiguration",
     "MacroDefinition",
