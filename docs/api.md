@@ -293,11 +293,11 @@ Booleans: `None` means unknown. Assumption-only entries have no source definitio
 
 Object-like integer literals (decimal, octal, hexadecimal, with suffixes, optional
 sign and enclosing parentheses) expose `numeric_value` and determine Boolean
-truth. Empty replacements are known-defined but have unknown truth. Aliases and compound replacement expressions expand in ordinary source, but
-conditions requiring their values remain unresolved; expansion inside conditional
-expressions is not part of this API increment. A bare function-like macro
-name has false value because it is not invoked. Numeric comparisons remain opaque,
-even when the operand macro has a known integer value.
+truth. Empty replacements are known-defined but have unknown truth. Aliases and compound
+replacement expressions expand in ordinary source and in concrete numeric `#if`/`#elif`
+evaluation. A bare function-like macro name has false value because it is not invoked.
+Conditions which remain implementation-dependent or otherwise unresolved after bounded
+macro expansion still return a structured incomplete result.
 
 `MacroEnvironment(assumptions)` provides `get(name)`, `define(MacroDefinition(...))`,
 `undef(name)`, and `snapshot()` for reuse by downstream consumers. `get` returns an
@@ -310,34 +310,76 @@ resolution remain internal; the symbolic `analyze_source` API is unchanged.
 
 Active `#include`, `#include_next`, and `#import` directives produce
 `unsupported_preprocessing_directive`. Malformed or unsupported active macro
-definitions produce the same diagnostic. Reachable nonconditional directives outside
-the supported conditional/definition set, including `#line`, `#pragma`, `#error`,
-`#warning`, and implementation-specific directives, also produce
-`unsupported_preprocessing_directive`. A null `#` directive is harmless and masked.
-Directives in discarded branches do not block selection. `#error` and `#warning`
-are represented only by the returned structured diagnostic; the library does not
-write them directly to stderr. Include processing remains unsupported; standard
-stringification and token pasting are supported as described below.
+definitions produce the same diagnostic. Standard active `#line <integer>` and
+`#line <integer> "file"` directives are supported and masked from output; their
+operands are macro-expanded before interpretation. Other reachable nonconditional
+directives, including `#pragma`, `#error`, `#warning`, and implementation-specific
+directives, produce `unsupported_preprocessing_directive`. A null `#` directive is
+harmless and masked. Directives in discarded branches do not block selection.
+`#error` and `#warning` are represented only by the returned structured diagnostic;
+the library does not write them directly to stderr. Include processing remains
+unsupported; standard stringification and token pasting are supported as described
+below.
 
-Known predefined macros whose values cpre does not model deterministically, including
-`__LINE__`, `__FILE__`, `__DATE__`, `__TIME__`, `__COUNTER__`, and standard `__STDC*`
-names, produce `unsupported_macro_expansion` when they are reachable without an
-explicit concrete replacement definition. This applies in ordinary source, reachable
-conditional expressions, and when another macro expands to one of these names.
-Ordinary unknown C identifiers remain valid and unchanged; matching spellings inside
-comments or string/character literals are not treated as macro uses. A concrete
-`MacroConfiguration` definition may supply replacement text for an environment macro;
-Boolean assumptions alone do not invent replacement text.
+### Standard predefined preprocessing context (0.10.14)
 
-All of these unsupported cases are atomic. `source`, `source_map`, and `macros` are
-`None`, so callers cannot accidentally consume a partially transformed translation
-unit or a fabricated mapping for semantics cpre did not perform. `complete=True`
-therefore certifies the documented supported selection/expansion surface and no known
-#38 built-in/directive blocker, but it still does not certify general GCC/Clang
-preprocessing equivalence or arbitrary implementation-specific extensions.
-`AnalysisOptions` supplies the same resource limits as analysis; limit exhaustion
-also returns no source or macro snapshot. The bounded migration status is tracked by
-the [C-GULL replacement gate](pcpp-readiness.md).
+`__LINE__` and `__FILE__` have deterministic analyzer-oriented semantics during
+concrete preprocessing. `__LINE__` expands to the active logical source line.
+`__FILE__` expands to the active logical file identity, initially taken from
+`filename=`. A standard `#line` directive changes those logical values for following
+source while leaving physical provenance untouched. `PreprocessResult.filename`,
+diagnostic locations, and every `SourceMapping.start`/`end` continue to refer to the
+original physical input.
+
+Callers provide other supported standard environment values through the public
+`PreprocessingContext` rather than through host discovery:
+
+```python
+context = cpre.PreprocessingContext(
+    standard_macros={
+        "__STDC__": "1",
+        "__STDC_VERSION__": "202311L",
+        "__STDC_HOSTED__": "1",
+        "__DATE__": '"Sep 12 2026"',
+        "__TIME__": '"20:14:00"',
+    }
+)
+result = cpre.preprocess_source(
+    source,
+    filename="src/example.c",
+    configuration=config,
+    context=context,
+)
+```
+
+Values are exact preprocessing replacement text and are part of the deterministic
+input. cpre never reads the wall clock, discovers a host compiler, guesses a language
+mode, or imports GCC/Clang/MSVC vendor/target macro catalogs. `__LINE__` and `__FILE__`
+are intentionally not caller-settable through `PreprocessingContext`; their values
+come only from logical preprocessing state. See
+[Concrete macro configuration](concrete-configuration.md) for the supported standard
+context names and configuration ownership model.
+
+A reachable standard predefined macro whose value is environment-dependent and has
+no deterministic configured replacement remains `unsupported_macro_expansion`. This
+includes unconfigured build-time/language-environment uses such as `__DATE__`,
+`__TIME__`, or `__STDC_VERSION__`. A `__FILE__` value use without either `filename=`
+or a preceding `#line ... "file"` likewise remains atomic incomplete. Definedness-only
+checks continue to use the configured open/closed-world macro policy when cpre does
+not have a deterministic standard value.
+
+Vendor/target names such as `__GNUC__`, `__clang__`, `_MSC_VER`, architecture,
+endianness, pointer-width, SIMD, optimization, and command-line-derived feature
+catalogs are intentionally out of scope. cpre does not claim GCC/Clang compiler-
+environment emulation.
+
+Unsupported cases remain atomic. `source`, `source_map`, and `macros` are `None`, so
+callers cannot accidentally consume a partially transformed translation unit or a
+fabricated mapping for semantics cpre did not perform. `complete=True` certifies the
+documented supported selection/expansion surface, not general compiler-preprocessor
+equivalence. `AnalysisOptions` supplies the same resource limits as analysis; limit
+exhaustion also returns no source or macro snapshot. The bounded migration status is
+tracked by the [C-GULL replacement gate](pcpp-readiness.md).
 
 
 ### Object-like macro expansion (0.10.0)
@@ -427,8 +469,8 @@ invocations interrupted by preprocessing directives return structured incomplete
 results without partial source, macro snapshots, or source maps. A call may span
 ordinary physical lines, but directives between its name and closing parenthesis
 are not supported. Definitions in inactive branches still have no effect, and
-ordinary redefinitions affect only following uses. Expansion is not added to
-`#if`/`#elif` expressions by this release.
+ordinary redefinitions affect only following uses. Concrete numeric `#if`/`#elif`
+evaluation macro-expands expressions with the same bounded expansion machinery.
 
 Expanded map ranges cover the complete physical invocation, including its closing
 parenthesis. Nested expansions map to the enclosing invocation; aliases which
