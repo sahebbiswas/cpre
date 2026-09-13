@@ -146,8 +146,8 @@ def test_pragma_without_handler_is_atomic_incomplete():
     assert result.macros is None
     assert result.source_map is None
     assert result.incomplete[0].code is ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE
-    assert result.incomplete[0].location == SourceLocation(1, 1)
-    assert "caller-provided" in result.incomplete[0].message
+    assert result.incomplete[0].location == SourceLocation(1)
+    assert "#pragma" in result.incomplete[0].message
 
 
 def test_handler_can_explicitly_reject_pragma_atomically():
