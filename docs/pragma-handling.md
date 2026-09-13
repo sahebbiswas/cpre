@@ -9,7 +9,7 @@ cpre supports the **standard syntax and dispatch boundary** for reachable pragma
 
 The callback receives a frozen `Pragma` value with:
 
-- `payload`: the active `#pragma` preprocessing-token spelling, or the standard destringized `_Pragma` string payload;
+- `payload`: stable phase-3 pragma payload spelling after comment removal and whitespace normalization, for both source `#pragma` and destringized `_Pragma`;
 - `origin`: `PragmaOrigin.DIRECTIVE` or `PragmaOrigin.OPERATOR`;
 - `location`: the physical source location of the directive or `_Pragma` invocation;
 - `filename`: the caller-supplied source identity, when present.
@@ -32,7 +32,7 @@ result = preprocess_source(source, pragma_handler=pragmas)
 
 ## `_Pragma` destringization
 
-cpre recognizes `_Pragma(string-literal)` after normal macro expansion. It removes the string-literal encoding prefix when present, removes the surrounding quotes, and destringizes `\"` to `"` and `\\` to `\` before dispatch. Malformed reachable `_Pragma` syntax returns a structured atomic incomplete result. Because `_Pragma` is a standard phase-4 preprocessing operator, a surviving `_Pragma` token that does not form the required parenthesized string-literal expression is treated as malformed reserved preprocessing syntax rather than passed through as an ordinary identifier.
+cpre recognizes `_Pragma(string-literal)` after normal macro expansion. It removes the string-literal encoding prefix when present, removes the surrounding quotes, and destringizes `\"` to `"` and `\\` to `\`. The resulting character sequence is then normalized with the same phase-3 comment/whitespace handling used for source `#pragma`, so the host sees one consistent payload representation. Malformed reachable `_Pragma` syntax returns a structured atomic incomplete result. Because `_Pragma` is a standard phase-4 preprocessing operator, a surviving `_Pragma` token that does not form the required parenthesized string-literal expression is treated as malformed reserved preprocessing syntax rather than passed through as an ordinary identifier.
 
 Macro-generated forms such as this are supported:
 
