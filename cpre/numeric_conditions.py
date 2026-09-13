@@ -157,14 +157,13 @@ def _integer(text: str) -> _Value:
 def _numeric_character(value: int, text: str) -> _Value:
     # Every conforming C implementation can represent 0..127 in unsigned char,
     # and values in that range do not depend on plain-char signedness when mapped
-    # to the #if intmax_t model. Above that boundary the ordinary character
-    # constant may become negative or otherwise depend on target character width.
+    # to the #if intmax_t model. Above that boundary both the numeric value and
+    # even zero/nonzero truth may depend on target char width/conversion rules.
     if value <= 0x7f:
         return _signed(value)
     return _Value(
         None,
         False,
-        True,
         reason=(
             f"ordinary character constant {text!r} depends on target char signedness/width"
         ),
