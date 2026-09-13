@@ -92,6 +92,18 @@ def _placeholder(index: int, source: str, blocked: set[str]) -> str:
         suffix += 1
 
 
+def _public_location(location: object) -> SourceLocation:
+    """Convert the parser's internal location shape to the stable public type."""
+    line = getattr(location, "line", None)
+    column = getattr(location, "column", None)
+    if line is None:
+        raise AnalysisError(
+            "conditional source location is missing a physical line",
+            code=ErrorCode.ANALYSIS_FAILURE,
+        )
+    return SourceLocation(line, column)
+
+
 def _scan_occurrences(
     source: str,
     blocked_names: set[str],
@@ -147,8 +159,8 @@ def _scan_occurrences(
                     invocation_end = len(expression)
                     next_index = len(parts)
 
-            start_location = expression_locations[invocation_start]
-            end_location = expression_locations[invocation_end - 1]
+            start_location = _public_location(expression_locations[invocation_start])
+            end_location = _public_location(expression_locations[invocation_end - 1])
             start_offset = _offset(starts, start_location)
             end_offset = _offset(starts, end_location) + 1
             placeholder = _placeholder(len(found), source, blocked_names)
@@ -464,7 +476,11 @@ def preprocess_source(
 
         available = include_query(query)
         if available is None:
-            delimiter = f'"{query.header}"' if query.form is IncludeForm.QUOTED else f"<{query.header}>"
+            delimiter = (
+                f'"{query.header}"'
+                if query.form is IncludeForm.QUOTED
+                else f"<{query.header}>"
+            )
             return _diagnostic_result(
                 filename,
                 PreprocessDiagnostic(
