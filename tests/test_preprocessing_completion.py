@@ -10,15 +10,26 @@ from cpre import (
     '#define HERE __LINE__\n#if HERE > 0\nint kept;\n#endif\n',
     '#define HERE() __LINE__\n#if HERE() > 0\nint kept;\n#endif\n',
 ])
-def test_predefined_macro_reached_through_condition_expansion_is_unsupported(source):
+def test_line_macro_reached_through_condition_expansion_is_supported(source):
+    result = preprocess_source(source)
+
+    assert result.complete, result.incomplete
+    assert 'int kept;' in result.source
+
+
+@pytest.mark.parametrize('source', [
+    '#define BUILD_DATE __DATE__\nint value = BUILD_DATE;\n',
+    '#define BUILD_DATE() __DATE__\nint value = BUILD_DATE();\n',
+])
+def test_unconfigured_environment_macro_reached_through_expansion_is_unsupported(source):
     result = preprocess_source(source)
 
     assert not result.complete
     assert result.source is result.source_map is result.macros is None
     diagnostic, = result.incomplete
     assert diagnostic.code is ErrorCode.UNSUPPORTED_MACRO_EXPANSION
-    assert diagnostic.location == SourceLocation(2)
-    assert '__LINE__' in diagnostic.message
+    assert diagnostic.location == SourceLocation(2, 13)
+    assert '__DATE__' in diagnostic.message
 
 
 @pytest.mark.parametrize('source', [
