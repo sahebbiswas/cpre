@@ -31,9 +31,15 @@ from .preprocessing import (
     PreprocessResult,
     compact,
 )
-from .include_queries import preprocess_source
+from .pragmas import (
+    Pragma,
+    PragmaDisposition,
+    PragmaHandler,
+    PragmaOrigin,
+    preprocess_source,
+)
 
-__version__ = "0.10.15"
+__version__ = "0.10.16"
 
 __all__ = [
     "AnalysisError",
@@ -55,6 +61,10 @@ __all__ = [
     "MacroEnvironment",
     "MacroState",
     "ParseError",
+    "Pragma",
+    "PragmaDisposition",
+    "PragmaHandler",
+    "PragmaOrigin",
     "PreprocessingContext",
     "PreprocessDiagnostic",
     "PreprocessResult",
