@@ -103,6 +103,19 @@ def _public_location(location: object) -> SourceLocation:
     return SourceLocation(line, column)
 
 
+def _normalize_pragma_payload(payload: str) -> str:
+    """Return stable phase-3 spelling for host dispatch.
+
+    Comments become whitespace and physical whitespace is normalized, while the
+    spelling and adjacency of non-whitespace preprocessing tokens is preserved.
+    """
+    phase3 = "".join(
+        " " if token.kind == "comment" else token.text
+        for token in tokenize(payload)
+    )
+    return re.sub(r"\s+", " ", phase3).strip()
+
+
 def _mask_source_pragmas(source: str) -> tuple[str, tuple[_SourcePragma, ...]]:
     """Replace pragma directives with inert same-width markers.
 
@@ -142,7 +155,7 @@ def _mask_source_pragmas(source: str) -> tuple[str, tuple[_SourcePragma, ...]]:
         characters[marker_offset] = "0"
         characters[marker_offset + 1] = ";"
         pragmas.append(_SourcePragma(
-            re.sub(r"\s+", " ", match.group(1)).strip(),
+            _normalize_pragma_payload(match.group(1)),
             location,
             marker_offset,
             line.start_line,
@@ -191,7 +204,7 @@ def _destringize_pragma(literal: str) -> str:
     )
     if match is None:
         raise ValueError("_Pragma expects one ordinary string literal")
-    return re.sub(r'\\(["\\])', r'\1', match.group(1)).strip()
+    return re.sub(r'\\(["\\])', r'\1', match.group(1))
 
 
 def _scan_operator_pragmas(
@@ -227,7 +240,7 @@ def _scan_operator_pragmas(
             raise _MalformedPragma("_Pragma expects one ordinary string literal", location)
         literal = tokens[literal_index]
         try:
-            payload = _destringize_pragma(literal.text)
+            payload = _normalize_pragma_payload(_destringize_pragma(literal.text))
         except ValueError as error:
             raise _MalformedPragma(str(error), location) from error
         closing_index = significant(literal_index + 1)
