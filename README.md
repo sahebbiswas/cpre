@@ -22,6 +22,7 @@ python -m pip install -e ".[dev]"
 
 - [Python API integration guide](docs/api.md) — developer-focused guidance for embedding cpre in tools, linters, and scripts.
 - [Concrete macro configuration](docs/concrete-configuration.md) — explicit external macro definitions and open/closed unknown-name policy for concrete preprocessing.
+- [Concrete conditional expressions](docs/conditional-expressions.md) — supported `#if`/`#elif` integer-expression grammar, ternary semantics, character constants, and deterministic implementation-defined boundaries.
 - [SARIF output](docs/sarif.md) — SARIF 2.1.0 format, rule mapping, fixes, and code-scanning integration.
 - [Downstream compatibility contract](docs/downstream-compatibility.md) — supported API and preprocessing guarantees.
 - [C-GULL replacement readiness](docs/pcpp-readiness.md) — measured corpus, migration blockers, and release gate.
@@ -177,30 +178,3 @@ When adding analyzer behavior, preserve structured public data, deterministic or
 The package version is defined in `cpre/__init__.py` as `__version__` and is consumed by `pyproject.toml` during builds.
 
 `0.7.0` marks cpre's transition from Alpha to Beta. During the Beta series, the documented top-level API is intended for real downstream integrations and compatibility-sensitive changes should be deliberate and documented. The path to 1.0 will emphasize downstream integration experience and validation against larger real-world C/C++ codebases.
-
-During beta, incremental features and fixes generally use patch releases. Reserve minor version bumps for deliberate compatibility changes. Changes that affect documented public behavior should update compatibility tests alongside the implementation.
-
-## License
-
-Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
-
-### Select a concrete configuration
-
-`preprocess_source()` keeps its existing open-world `assumptions=` contract for callers that only know Boolean state. For build-equivalent external macro definitions, use `MacroConfiguration` instead:
-
-```python
-config = cpre.MacroConfiguration(
-    presence={"FEATURE"},
-    integers={"FEATURE_VALUE": 42},
-    unknown_names=cpre.UnknownNamePolicy.UNDEFINED,
-)
-result = cpre.preprocess_source(source, configuration=config)
-```
-
-`UnknownNamePolicy.UNDEFINED` is opt-in and gives concrete condition evaluation the pcpp/C-preprocessor behavior where otherwise-unmentioned names are undefined/zero. The default remains open-world; symbolic analysis behavior does not change. `MacroConfiguration` can also carry explicit undefined names and arbitrary `MacroDefinition` replacement text/function-like macros. Active source `#define` and `#undef` directives override configured state in source order.
-
-Always check `result.complete` before consuming `result.source`. Unknown reachable conditions under open-world mode and unsupported include directives return structured incomplete diagnostics. Macros expand in active ordinary source, including nested calls and standard `__VA_ARGS__` substitution; `result.source_map` maps expanded output back to physical invocation ranges. Unsupported expansion forms such as `__VA_OPT__` return incomplete diagnostics. Standard stringification (`#`) and token pasting (`##`) are supported. See the [concrete selection API](docs/api.md#concrete-conditional-selection) and [concrete configuration guide](docs/concrete-configuration.md) for the contract.
-
-The [pcpp replacement gate](docs/pcpp-readiness.md) is currently **blocked**.
-`complete=True` certifies the documented cpre operations; it does not yet certify
-general pcpp equivalence, including built-ins and retained directives.
