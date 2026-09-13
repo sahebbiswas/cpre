@@ -22,6 +22,7 @@ python -m pip install -e ".[dev]"
 
 - [Python API integration guide](docs/api.md) — developer-focused guidance for embedding cpre in tools, linters, and scripts.
 - [Concrete macro configuration](docs/concrete-configuration.md) — explicit external macro definitions and open/closed unknown-name policy for concrete preprocessing.
+- [Concrete conditional expressions](docs/conditional-expressions.md) — supported `#if`/`#elif` integer-expression grammar, ternary semantics, character constants, and deterministic implementation-defined boundaries.
 - [SARIF output](docs/sarif.md) — SARIF 2.1.0 format, rule mapping, fixes, and code-scanning integration.
 - [Downstream compatibility contract](docs/downstream-compatibility.md) — supported API and preprocessing guarantees.
 - [C-GULL replacement readiness](docs/pcpp-readiness.md) — measured corpus, migration blockers, and release gate.

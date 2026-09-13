@@ -66,6 +66,10 @@ def test_defined_operator_mixes_with_numeric_expression():
     assert chosen("defined(FOO) && FOO == 3", "#define FOO 3\n")
 
 
+def test_defined_operand_is_checked_before_macro_expansion():
+    assert chosen("defined(ALIAS)", "#define ALIAS MISSING\n")
+
+
 def test_unknown_identifiers_and_definedness_remain_unresolved():
     for condition in ("VERSION >= 4", "defined(FOO) && FOO == 3"):
         result = preprocess_source(f"#if {condition}\nyes\n#endif\n")
@@ -73,8 +77,76 @@ def test_unknown_identifiers_and_definedness_remain_unresolved():
         assert result.incomplete[0].code is ErrorCode.UNRESOLVED_CONDITION
 
 
-def test_unsupported_numeric_operation_is_structured():
-    result = preprocess_source("#if 1 ? 2 : 0\nyes\n#endif\n")
+@pytest.mark.parametrize(
+    "condition, expected",
+    [
+        ("1 ? 2 : 3", True),
+        ("0 ? 2 : 0", False),
+        ("1 || 0 ? 0 : 1", False),
+        ("0 ? 1 : 0 || 1", True),
+        ("0 ? 1 : 1 ? 2 : 3", True),
+        ("(0 ? 1 : 1 ? 2 : 3) == 2", True),
+        ("1 ? 7 : (1 / 0)", True),
+        ("0 ? (1 / 0) : 9", True),
+    ],
+)
+def test_conditional_operator_precedence_nesting_and_short_circuit(condition, expected):
+    assert chosen(condition) is expected
+
+
+def test_conditional_operator_applies_common_unsigned_type_from_dead_arm():
+    assert chosen("(1 ? -1 : 0u) > 0u")
+    assert chosen("(0 ? 0u : -1) > 0u")
+
+
+def test_macro_expanded_conditional_operator_short_circuits():
+    definitions = "#define PICK(c, a, b) ((c) ? (a) : (b))\n"
+    assert chosen("PICK(1, 4, 1 / 0) == 4", definitions)
+
+
+@pytest.mark.parametrize(
+    "condition, expected",
+    [
+        ("'a'", True),
+        ("'a' == 'a'", True),
+        ("'a' != 'b'", True),
+        ("'a' != 0", True),
+        ("'\\0' == 0", True),
+        ("'\\x41' == 65", True),
+        ("'\\101' == 65", True),
+        ("'\\n' == '\\n'", True),
+        ("'\\n' != '\\0'", True),
+    ],
+)
+def test_portable_character_constant_cases(condition, expected):
+    assert chosen(condition) is expected
+
+
+def test_character_constant_expands_from_macro_before_evaluation():
+    assert chosen("LETTER == 'a'", "#define LETTER 'a'\n")
+
+
+@pytest.mark.parametrize(
+    "condition, message",
+    [
+        ("'a' == 97", "implementation character set"),
+        ("'\\xFF' == 255", "char signedness/width"),
+        ("'ab'", "multicharacter"),
+        ("L'a'", "source-language/encoding"),
+        ("u'a'", "source-language/encoding"),
+        ("U'a'", "source-language/encoding"),
+        ("u8'a'", "source-language/encoding"),
+    ],
+)
+def test_implementation_defined_character_forms_are_structured(condition, message):
+    result = preprocess_source(f"#if {condition}\nyes\n#endif\n")
+    assert not result.complete
+    assert result.incomplete[0].code is ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION
+    assert message in result.incomplete[0].message
+
+
+def test_unsupported_comma_operator_is_structured():
+    result = preprocess_source("#if (1, 2)\nyes\n#endif\n")
     assert not result.complete
     assert result.incomplete[0].code is ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION
     assert result.incomplete[0].location.line == 1
@@ -94,6 +166,14 @@ def test_deep_unary_nesting_is_structured_instead_of_recursing():
     # Keep an arithmetic leaf so the expression reaches the numeric fallback
     # instead of being solved entirely by Boolean simplification.
     result = preprocess_source("#if " + "!" * 60 + "(1 + 0)\nyes\n#endif\n")
+    assert not result.complete
+    assert result.incomplete[0].code is ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION
+    assert "nesting" in result.incomplete[0].message
+
+
+def test_deep_conditional_nesting_is_structured_instead_of_recursing():
+    condition = "1 ? " * 60 + "1" + " : 0" * 60
+    result = preprocess_source(f"#if {condition}\nyes\n#endif\n")
     assert not result.complete
     assert result.incomplete[0].code is ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION
     assert "nesting" in result.incomplete[0].message
