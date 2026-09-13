@@ -27,6 +27,7 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://github.com/sahebbiswas/cpre"
+Documentation = "https://github.com/sahebbiswas/cpre/blob/main/docs/README.md"
 Repository = "https://github.com/sahebbiswas/cpre"
 Issues = "https://github.com/sahebbiswas/cpre/issues"
 
