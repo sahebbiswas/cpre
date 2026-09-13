@@ -72,7 +72,10 @@ class _HeaderOperandError(ValueError):
 
 def _physical_line_starts(source: str) -> list[int]:
     starts = [0]
-    starts.extend(match.end() for match in re.finditer(r"\r\n|\r|\n", source))
+    offset = 0
+    for line in source.splitlines(keepends=True):
+        offset += len(line)
+        starts.append(offset)
     return starts
 
 
