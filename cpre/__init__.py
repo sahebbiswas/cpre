@@ -25,9 +25,15 @@ from .api import (
 from .configuration import MacroConfiguration, UnknownNamePolicy
 from .expansion import SourceMapping
 from .macros import MacroDefinition, MacroEnvironment, MacroState
-from .preprocessing import PreprocessDiagnostic, PreprocessResult, compact, preprocess_source
+from .preprocessing import (
+    PreprocessingContext,
+    PreprocessDiagnostic,
+    PreprocessResult,
+    compact,
+    preprocess_source,
+)
 
-__version__ = "0.10.13"
+__version__ = "0.10.14"
 
 __all__ = [
     "AnalysisError",
@@ -49,6 +55,7 @@ __all__ = [
     "MacroEnvironment",
     "MacroState",
     "ParseError",
+    "PreprocessingContext",
     "PreprocessDiagnostic",
     "PreprocessResult",
     "UnknownNamePolicy",
