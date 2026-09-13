@@ -19,6 +19,12 @@ The compatibility suite in `tests/test_downstream_contract.py` is the executable
 
 `SuggestedEdit` is intentionally optional. Exact condition rewrites may be used as context-independent mechanical fixes. Contextual rewrites are valid only under the branch context and should be treated as lower-confidence suggestions. Dead/redundant classification and macro-form directives do not imply a mechanical edit unless `cpre` explicitly returns one.
 
+## Host-owned pragma compatibility
+
+cpre supports standard `#pragma` syntax and `_Pragma` destringization/dispatch, but pragma **meaning is not part of the core compatibility contract**. A downstream analyzer that needs reachable pragmas must provide `pragma_handler` and explicitly return `PragmaDisposition.CONSUME` only for payloads its analysis profile can safely account for. Unknown or rejected pragmas remain atomic `unsupported_preprocessing_directive` results; discarded-branch pragmas are not dispatched.
+
+Both source `#pragma` and macro-generated `_Pragma` use the same `Pragma` callback surface with physical source provenance. cpre does not emulate GCC, Clang, MSVC, OpenMP/OpenACC, packing, diagnostic, optimization, or other implementation-defined pragma semantics. See [Standard pragma syntax and host-owned semantics](pragma-handling.md).
+
 ## pcpp replacement compatibility gate
 
 Before a downstream consumer removes an existing `pcpp` preprocessing path in favor of `cpre.preprocess_source`, the corpus in `tests/compatibility/fixtures` must pass `tests/test_pcpp_differential.py` for every supported fixture/configuration relevant to that consumer.

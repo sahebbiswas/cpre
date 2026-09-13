@@ -41,8 +41,10 @@ For every supported differential case, the harness checks preprocessing-token eq
 The remaining non-complete cases are not treated as successful equivalence:
 
 - raw reachable include directives: `unsupported_preprocessing_directive`;
-- reachable unsupported nonconditional directives such as `#pragma`: `unsupported_preprocessing_directive`;
+- reachable pragmas without an explicit host `pragma_handler`, and other unsupported nonconditional directives: `unsupported_preprocessing_directive`;
 - open-world conditions without enough configuration: `unresolved_condition`.
+
+Standard pragma syntax/dispatch is now available as a host extension point; pragma meaning remains outside cpre core. A downstream profile may consume only the pragma payloads it explicitly accounts for, while unknown pragmas stay atomic incomplete results. See [pragma handling](pragma-handling.md).
 
 Environment-dependent standard predefined values still require deterministic caller context. For example, `__DATE__`, `__TIME__`, or a language-mode macro used without an explicit value remains atomic `unsupported_macro_expansion`. These cases expose no partial `source`, `source_map`, or macro snapshot.
 
