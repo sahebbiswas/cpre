@@ -30,10 +30,10 @@ from .preprocessing import (
     PreprocessDiagnostic,
     PreprocessResult,
     compact,
-    preprocess_source,
 )
+from .include_queries import preprocess_source
 
-__version__ = "0.10.14"
+__version__ = "0.10.15"
 
 __all__ = [
     "AnalysisError",
