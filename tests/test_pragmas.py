@@ -63,7 +63,7 @@ def test_direct_pragma_with_comments_and_splicing_has_token_payload():
 
 def test_direct_pragma_operator_is_destringized_and_masked():
     handler, seen = _handler({'message("hello") path\\name'})
-    source = '_Pragma("message(\\\"hello\\\") path\\\\name")\nint kept;\n'
+    source = '_Pragma("  message(\\\"hello\\\") path\\\\name  ")\nint kept;\n'
 
     result = preprocess_source(source, pragma_handler=handler)
 
