@@ -1,5 +1,7 @@
 # Concrete macro expansion
 
+This is the authoritative detailed reference for cpre's concrete macro-expansion semantics. For the overall `preprocess_source()` result, configuration, mapping, and complete/incomplete contract, see [Concrete preprocessing](preprocessing.md).
+
 `preprocess_source` expands active ordinary-source macros using C/C++ preprocessing-token semantics. Macro definitions are applied in source order, expansion is bounded by the shared `AnalysisOptions.max_work` budget, and expanded output retains invocation provenance through `PreprocessResult.source_map`.
 
 ## Function-like substitution
