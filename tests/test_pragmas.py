@@ -61,6 +61,20 @@ def test_direct_pragma_with_comments_and_splicing_has_token_payload():
     assert seen[0].location == SourceLocation(1, 3)
 
 
+def test_pragma_payload_normalization_preserves_literal_whitespace():
+    expected = 'message("a  b")'
+    handler, seen = _handler({expected})
+    source = (
+        '#pragma message("a  b")\n'
+        '_Pragma("message(\\\"a  b\\\")")\n'
+    )
+
+    result = preprocess_source(source, pragma_handler=handler)
+
+    assert result.complete
+    assert [pragma.payload for pragma in seen] == [expected, expected]
+
+
 def test_direct_pragma_operator_is_destringized_and_masked():
     handler, seen = _handler({'message("hello") path\\name'})
     source = '_Pragma("  message(\\\"hello\\\") /* hidden */ path\\\\name  ")\nint kept;\n'
