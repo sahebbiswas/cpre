@@ -215,6 +215,9 @@ def _scan_operator_pragmas(
             index += 1
             continue
 
+        # _Pragma is a standard phase-4 preprocessing operator. Treat a surviving
+        # token that does not form the required unary expression as malformed
+        # reserved preprocessing syntax rather than silently passing it through.
         location = _location_for_output(source, source_map, token.start)
         opening_index = significant(index + 1)
         if opening_index >= len(tokens) or tokens[opening_index].text != "(":
@@ -386,15 +389,6 @@ def preprocess_source(
         source="".join(characters),
         removed_lines=frozenset(removed_lines),
     )
-
-
-# Importing the package initializes this module after both lower-level wrappers.
-# Keep documented submodule imports on the same public pragma-aware entry point.
-from . import include_queries as _include_queries_module
-from . import preprocessing as _preprocessing_module
-
-_include_queries_module.preprocess_source = preprocess_source
-_preprocessing_module.preprocess_source = preprocess_source
 
 
 __all__ = [
