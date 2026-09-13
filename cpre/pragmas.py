@@ -106,14 +106,20 @@ def _public_location(location: object) -> SourceLocation:
 def _normalize_pragma_payload(payload: str) -> str:
     """Return stable phase-3 spelling for host dispatch.
 
-    Comments become whitespace and physical whitespace is normalized, while the
-    spelling and adjacency of non-whitespace preprocessing tokens is preserved.
+    Comments become whitespace and physical inter-token whitespace is normalized,
+    while every non-whitespace preprocessing token keeps its exact spelling.
     """
-    phase3 = "".join(
-        " " if token.kind == "comment" else token.text
-        for token in tokenize(payload)
-    )
-    return re.sub(r"\s+", " ", phase3).strip()
+    parts: list[str] = []
+    pending_space = False
+    for token in tokenize(payload):
+        if token.kind in {"space", "comment"}:
+            pending_space = True
+            continue
+        if pending_space and parts:
+            parts.append(" ")
+        parts.append(token.text)
+        pending_space = False
+    return "".join(parts)
 
 
 def _mask_source_pragmas(source: str) -> tuple[str, tuple[_SourcePragma, ...]]:
