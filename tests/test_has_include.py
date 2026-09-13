@@ -222,3 +222,17 @@ def test_malformed_unclosed_has_include_is_structured_incomplete():
     assert not result.complete
     assert result.source is None
     assert result.incomplete[0].code is ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION
+
+
+def test_has_include_offsets_follow_parser_splitlines_semantics():
+    provider, seen = _provider({(IncludeForm.ANGLE, "optional.h"): True})
+    source = "int before;\f#if __has_include(<optional.h>)\nint yes;\n#endif\n"
+
+    result = preprocess_source(source, include_query=provider)
+
+    assert result.complete
+    assert "int before;" in result.source
+    assert "int yes;" in result.source
+    assert seen == [
+        IncludeQuery("optional.h", IncludeForm.ANGLE, SourceLocation(2, 5), None)
+    ]
