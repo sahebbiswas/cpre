@@ -1,12 +1,12 @@
 # Python API integration guide
 
-This guide is for tools, linters, CI integrations, and scripts that want to use `cpre` as a library rather than parse its CLI output.
+Use the top-level `cpre` package as the supported Python compatibility boundary. This guide covers symbolic conditional analysis and the general integration contract. Concrete configuration selection and macro expansion live in the separate [preprocessing guide](preprocessing.md).
 
-For SARIF-specific integration, see [SARIF output](sarif.md). The package README remains the quick-start entry point; this document describes the programmatic contract in more detail.
+For command-line workflows, see the [CLI guide](cli.md). For process-to-process findings interchange, see [SARIF output](sarif.md).
 
-## Basic analysis
+## Supported import boundary
 
-Import supported symbols from the top-level `cpre` package:
+Import public symbols from `cpre`:
 
 ```python
 import cpre
@@ -14,34 +14,44 @@ import cpre
 result = cpre.analyze_source(source_text, filename="src/example.c")
 ```
 
-`filename` is metadata only. It does not affect Boolean reasoning, but downstream tools should supply it so findings and diagnostics retain source identity.
+The names exported by `cpre.__all__` are the supported public boundary. Internal implementation modules such as `cpre.robdd`, `cpre.parser`, and the historical compatibility facade are not downstream APIs.
 
-A successful `AnalysisResult` contains:
+The public surface includes the symbolic analysis result/error model, source locations and edits, macro assumptions/configuration types, and concrete preprocessing types. This guide focuses on `analyze_source()`; see [Concrete preprocessing](preprocessing.md) for `preprocess_source()`, `PreprocessResult`, `compact()`, macro environments, deterministic preprocessing context, and pragma handling.
 
-- `findings`: an ordered tuple of structured `Finding` objects.
-- `tree`: the analyzed conditional tree for callers that need structural context.
-- `filename`: the optional source identity supplied by the caller.
-- `complete`: `True` when exact analysis completed within configured resource limits.
-- `incomplete`: structured diagnostics explaining why exact analysis was curtailed.
-
-Do not infer success from an empty `findings` tuple alone. Always check `result.complete` before treating an analysis as clean.
+## Basic analysis
 
 ```python
-result = cpre.analyze_source(source_text, filename=path)
-if not result.complete:
-    for diagnostic in result.incomplete:
-        handle_incomplete(path, diagnostic)
-    return
+import cpre
 
-for finding in result.findings:
-    handle_finding(path, finding)
+try:
+    result = cpre.analyze_source(source_text, filename="src/example.c")
+except cpre.CpreError as error:
+    handle_error(error)
+else:
+    if not result.complete:
+        handle_incomplete(result.incomplete)
+    else:
+        for finding in result.findings:
+            handle_finding(finding)
 ```
 
-When analysis is incomplete, cpre deliberately emits no findings based on partial proofs.
+`filename` is source identity metadata. Supplying it is recommended so findings and diagnostics remain associated with their originating file.
+
+A successful `AnalysisResult` exposes:
+
+- `findings`: ordered structured `Finding` values;
+- `tree`: the analyzed conditional tree for consumers that need structural context;
+- `filename`: caller-supplied source identity;
+- `complete`: whether exact analysis completed within the configured contract and limits;
+- `incomplete`: structured diagnostics explaining why exact analysis did not complete.
+
+Do not infer success from an empty findings tuple. Always check `result.complete` before treating analysis as clean.
+
+When analysis is incomplete, cpre deliberately does not expose findings based on partial proofs.
 
 ## Finding kinds
 
-`Finding.kind` is a `FindingKind` enum. Handle enum members rather than matching rendered messages:
+`Finding.kind` is a `FindingKind` enum. Match enum members rather than rendered messages:
 
 ```python
 for finding in result.findings:
@@ -56,28 +66,32 @@ for finding in result.findings:
             report_contextual_simplification(finding)
 ```
 
-Each finding includes a one-based `location`, the directive kind, the original condition when applicable, a human-readable `reason`, and any opaque predicates retained by the Boolean model.
+Findings carry physical source location, directive/condition context, a human-readable reason, and structured simplification/edit fields where applicable. `depends_on_assumptions` identifies proofs that materially depend on caller-supplied macro assumptions.
 
-`depends_on_assumptions` identifies findings whose proof materially depends on caller-supplied macro assumptions. This is useful when a parent analyzer needs to distinguish configuration-independent results from configuration-specific results.
+Treat human-readable messages as presentation. Use enum values and structured fields for automation.
 
-## Simplifications and edits
+## Exact and contextual simplifications
 
-Exact and contextual simplifications have intentionally different guarantees:
+cpre deliberately distinguishes two guarantees:
 
 - `ExactSimplification` is Boolean-equivalent to the original condition under the active assumptions.
-- `ContextualSimplification` is equivalent only in the branch's reachable context.
+- `ContextualSimplification` is equivalent only inside that branch's reachable context, including enclosing and preceding branch conditions.
 
-Prefer the typed fields over compatibility convenience properties:
+Prefer the typed fields:
 
 ```python
 if finding.exact_simplification is not None:
     replacement = finding.exact_simplification.replacement
 
 if finding.contextual_simplification is not None:
-    contextual_replacement = finding.contextual_simplification.replacement
+    replacement = finding.contextual_simplification.replacement
 ```
 
-When cpre can describe a safe direct source replacement, `finding.edit` contains a `SuggestedEdit`:
+A consumer should preserve the distinction rather than presenting contextual replacements as globally equivalent expressions.
+
+## Suggested edits and source ranges
+
+When cpre can describe a safe direct source replacement, `finding.edit` is a `SuggestedEdit`:
 
 ```python
 edit = finding.edit
@@ -88,13 +102,13 @@ if edit is not None:
     confidence = edit.confidence
 ```
 
-`SourceRange.end` is exclusive. Locations are physical, one-based source positions. Backslash-continued preprocessor directives retain physical line/column information.
+`SourceRange.end` is exclusive. Locations are physical, one-based source positions. Backslash-continued directives retain physical line/column provenance.
 
-Dead and redundant branch findings intentionally do not imply a mechanical deletion. Consumers should not synthesize destructive fixes merely because `finding.edit` is absent.
+Dead/redundant branch findings intentionally do not imply mechanical branch deletion. Do not synthesize destructive fixes merely because a branch is unreachable or redundant; apply automatic changes only when an explicit structured edit is present and suitable for the host tool's policy.
 
 ## Macro assumptions
 
-The default analysis is symbolic and configuration-independent. Callers with known build configuration may constrain the analysis.
+Without assumptions, symbolic analysis remains configuration-independent. Callers with known build state may constrain the proof.
 
 For simple Boolean values:
 
@@ -102,27 +116,37 @@ For simple Boolean values:
 result = cpre.analyze_source(
     source_text,
     filename=path,
-    assumptions={"FEATURE_A": True, "FEATURE_B": False},
+    assumptions={
+        "FEATURE_A": True,
+        "FEATURE_B": False,
+    },
 )
 ```
 
-Use `MacroAssumptions` when definedness and Boolean value need to be modeled independently:
+Use `MacroAssumptions` when definedness and Boolean value must be represented separately:
 
 ```python
 assumptions = cpre.MacroAssumptions(
     defined={"FEATURE_A", "FEATURE_ZERO"},
     undefined={"FEATURE_B"},
-    values={"FEATURE_A": True, "FEATURE_ZERO": False},
+    values={
+        "FEATURE_A": True,
+        "FEATURE_ZERO": False,
+    },
 )
 
 result = cpre.analyze_source(source_text, assumptions=assumptions)
 ```
 
-Unknown macros remain symbolic. cpre does not silently treat unmentioned macros as false.
+Unmentioned macros remain symbolic. cpre does not silently treat unknown names as false in symbolic analysis.
 
-## Resource limits
+Use `Finding.depends_on_assumptions` when the host needs to distinguish configuration-independent findings from findings proven only under supplied assumptions.
 
-ROBDD reasoning is bounded deterministically. Defaults are intended to be conservative for static-analysis use, and callers can provide explicit limits:
+For exact external macro replacement definitions and open/closed unknown-name policy during concrete preprocessing, use `MacroConfiguration` as described in [Concrete macro configuration](concrete-configuration.md) and [Concrete preprocessing](preprocessing.md).
+
+## Deterministic resource limits
+
+ROBDD reasoning is bounded deterministically. Callers may provide explicit limits:
 
 ```python
 options = cpre.AnalysisOptions(
@@ -130,28 +154,33 @@ options = cpre.AnalysisOptions(
     max_bdd_nodes=100_000,
     max_work=500_000,
 )
-result = cpre.analyze_source(source_text, filename=path, options=options)
+
+result = cpre.analyze_source(
+    source_text,
+    filename=path,
+    options=options,
+)
 ```
 
-If a limit is exceeded, `analyze_source` returns an incomplete `AnalysisResult` rather than raising an exception or returning partial findings:
+If a limit is exceeded, `analyze_source()` returns an incomplete `AnalysisResult` rather than raising solely because the configured proof budget was exhausted or returning partial findings.
 
 ```python
 if not result.complete:
-    diagnostic = result.incomplete[0]
-    print(
-        diagnostic.code,
-        diagnostic.resource,
-        diagnostic.limit,
-        diagnostic.observed,
-        diagnostic.location,
-    )
+    for diagnostic in result.incomplete:
+        print(
+            diagnostic.code,
+            diagnostic.resource,
+            diagnostic.limit,
+            diagnostic.observed,
+            diagnostic.location,
+        )
 ```
 
-A downstream analyzer should propagate this distinction. Treating incomplete analysis as "no findings" can create false confidence.
+Downstream tools should preserve this distinction. Converting incomplete analysis into "no findings" creates false confidence.
 
 ## Structured errors
 
-Malformed conditional source and invalid API input use the public `CpreError` hierarchy:
+Malformed conditional source and invalid public API input use the `CpreError` hierarchy:
 
 ```python
 try:
@@ -165,15 +194,13 @@ except cpre.CpreError as error:
     )
 ```
 
-Use `ErrorCode` values rather than parsing `str(error)` or human-readable messages. Stable codes include syntax/directive errors, invalid assumptions, bounded-analysis failures, and `SOURCE_READ_ERROR` for tool-level source ingestion reporting.
+Use `ErrorCode` values and structured locations rather than parsing `str(error)` or terminal text. Unexpected programming errors are intentionally not collapsed into `CpreError`.
 
-Note that `analyze_source` accepts source text; it does not open files itself. `SOURCE_READ_ERROR` is primarily used by the CLI/SARIF integration layer. Library callers that read files are responsible for converting their own I/O failures into the diagnostic model appropriate for their host tool.
+`analyze_source()` accepts source text and does not open files. File I/O policy belongs to the host application. `SOURCE_READ_ERROR` is primarily used by cpre's CLI/SARIF ingestion layer; library callers should map their own I/O failures into the diagnostic model appropriate for their host.
 
-Unexpected programming errors are intentionally not collapsed into `CpreError`.
+## Recommended downstream pattern
 
-## Integrating into another analyzer
-
-A typical static-analysis integration should keep cpre as a focused conditional-analysis component:
+A static-analysis host should keep cpre focused on conditional reasoning:
 
 ```python
 import cpre
@@ -204,334 +231,32 @@ def analyze_preprocessor_conditions(path: str, source: str):
 
 Recommended integration rules:
 
-1. Read source and own file-system policy in the host tool.
-2. Call `cpre.analyze_source` once per source input.
-3. Catch only `CpreError` as supported cpre failures.
+1. Let the host own file reading, build-system discovery, and policy.
+2. Call `cpre.analyze_source()` once per source/configuration being analyzed.
+3. Catch `CpreError` for supported cpre failures.
 4. Check `result.complete` before consuming findings.
-5. Map `FindingKind` directly to the host tool's rule identifiers.
+5. Map `FindingKind` through structured values, not messages.
 6. Preserve `depends_on_assumptions` when configuration-specific reasoning is enabled.
-7. Apply only explicit `SuggestedEdit` objects as automatic source replacements.
-8. Do not import private modules such as `cpre.robdd`, `cpre.parser`, or the compatibility facade internals.
+7. Apply only explicit `SuggestedEdit` objects according to host policy.
+8. Import supported symbols from `cpre`, not implementation modules.
 
-For a tool such as cgull, this keeps ownership clean: cgull can provide source identity/configuration, invoke cpre, translate cpre findings into its own issue model, and preserve cpre's complete/incomplete distinction without depending on cpre's CLI or internal ROBDD representation.
+For a host that instead needs one selected translation-unit representation, use the [preprocessing integration checklist](preprocessing.md#downstream-integration-checklist).
 
-## API compatibility
+## Choosing an interchange surface
 
-Supported integrations should import from `cpre`, not internal modules. The top-level `__all__` is the compatibility boundary for public symbols.
+The CLI's JSON output is a structural conditional-tree report. It should not be treated as a substitute for the Python object model.
 
-The CLI JSON format is a structural conditional-tree report and should not be used as the library API. If a process-to-process interchange format is required, prefer [SARIF output](sarif.md) for findings or call the Python API directly when both components run in Python.
+Use:
 
-## Concrete conditional selection
+- the Python API when both components run in Python and need the richest structured contract;
+- [SARIF](sarif.md) when findings need to cross a process/tool boundary;
+- CLI text for human-facing terminal workflows;
+- [concrete preprocessing](preprocessing.md) when a downstream parser/analyzer needs selected source and provenance.
 
-`preprocess_source` selects one configuration and expands supported object-like
-and function-like macros without reading headers. Always check `complete` before
-passing its output to a downstream parser:
+## Compatibility expectations
 
-```python
-from cpre import MacroAssumptions, preprocess_source
+cpre is in Beta. The documented top-level API is intended for real downstream integrations, and compatibility-sensitive changes should be deliberate and documented.
 
-result = preprocess_source(
-    "#ifdef FEATURE\nint enabled;\n#else\nint disabled;\n#endif\n",
-    filename="example.c",
-    assumptions=MacroAssumptions(defined={"FEATURE"}),
-)
-if result.complete:
-    parse_translation_unit(result.source, filename=result.filename)
-else:
-    for diagnostic in result.incomplete:
-        report(diagnostic.code, diagnostic.location, diagnostic.message)
-```
+Evergreen integration code should depend on documented types, enum values, result fields, and `cpre.__all__`, not private helpers or implementation-specific ROBDD/parser details.
 
-The public `PreprocessResult` contains `source`, `filename`, `incomplete`, `macros`,
-`source_map`, and a
-`complete` property. `source` is `None` whenever selection is incomplete; partial
-selection is never exposed. Diagnostics are ordered by source line and use either
-`PreprocessDiagnostic` or the existing `AnalysisIncomplete` resource diagnostic.
-Malformed conditional directives raise structured `ParseError`, with the same
-codes, physical locations, and filename metadata as `analyze_source`.
-
-On success, conditional directives (including all continuation lines) and inactive
-text become spaces. Block comments overlapping retained text are kept whole to
-balance delimiters across selected lines; comments wholly in discarded regions
-stay masked. Physical line endings and the presence or absence of a final newline
-are preserved. Macro expansion changes text length and columns; use
-`source_map` for physical source coordinates. Unexpanded spans retain their text
-and map one-to-one. Nested `#if`, `#ifdef`, `#ifndef`,
-`#elif`, `#elifdef`, `#elifndef`, `#else`, and `#endif` are supported.
-
-Assumptions accept the same `MacroAssumptions` or Boolean mapping as
-`analyze_source`: mappings constrain Boolean values; definedness alone does not
-imply a nonzero value; undefined macros have false values. This concrete API always
-distinguishes definedness from value, including when assumptions are omitted
-(unlike the legacy symbolic analysis mode). Unmentioned macros and opaque
-arithmetic/comparison predicates remain unknown. If they affect a reachable branch
-choice, `unresolved_condition` marks the result incomplete. Tautologies and
-unreachable unknown conditions do not require extra assumptions.
-
-Active `#define` and `#undef` directives update a per-run `MacroEnvironment` in
-source order and are masked in the output. Changes inside discarded branches do
-not affect state. Each active redefinition replaces the previous entry, including
-assumption-seeded state; `#undef` records known-undefined/false state even for an
-unmentioned macro. Earlier conditions are never reevaluated after a later change.
-
-```python
-result = preprocess_source("#define COUNT 0\n#ifdef COUNT\nint enabled;\n#endif\n")
-assert result.complete
-state = result.macros["COUNT"]
-assert state.defined is True and state.value is False
-assert state.definition.numeric_value == 0
-```
-
-The public `MacroDefinition`, `MacroState`, and `MacroEnvironment` types live in
-`cpre.macros` and are exported from `cpre`. `MacroDefinition` stores the name,
-comment-stripped logical replacement text, physical definition location, parameter
-tuple, and variadic flag. `parameters=None` means object-like; `parameters=()` means
-a function-like macro with no named parameters. Standard trailing `...` is supported.
-Definitions retain unexpanded replacement text (not a byte-for-byte copy of
-continued source); ordinary active source uses the definitions current at each use. `MacroState.defined` and `.value` are independent optional
-Booleans: `None` means unknown. Assumption-only entries have no source definition.
-
-Object-like integer literals (decimal, octal, hexadecimal, with suffixes, optional
-sign and enclosing parentheses) expose `numeric_value` and determine Boolean
-truth. Empty replacements are known-defined but have unknown truth. Aliases and compound
-replacement expressions expand in ordinary source and in concrete numeric `#if`/`#elif`
-evaluation. A bare function-like macro name has false value because it is not invoked.
-Conditions which remain implementation-dependent or otherwise unresolved after bounded
-macro expansion still return a structured incomplete result.
-
-`MacroEnvironment(assumptions)` provides `get(name)`, `define(MacroDefinition(...))`,
-`undef(name)`, and `snapshot()` for reuse by downstream consumers. `get` returns an
-unknown state for unmentioned names. Snapshots contain only explicitly tracked
-names in sorted order and are detached read-only mappings of immutable entries.
-`PreprocessResult.macros` is the final snapshot on success, including an empty
-mapping for an empty environment; it is `None` on incomplete results. This API does
-not currently expose point-in-source snapshots. Directive parsing and Boolean
-resolution remain internal; the symbolic `analyze_source` API is unchanged.
-
-Active `#include`, `#include_next`, and `#import` directives produce
-`unsupported_preprocessing_directive`. Malformed or unsupported active macro
-definitions produce the same diagnostic. Standard active `#line <integer>` and
-`#line <integer> "file"` directives are supported and masked from output; their
-operands are macro-expanded before interpretation. Other reachable nonconditional
-directives, including `#pragma`, `#error`, `#warning`, and implementation-specific
-directives, produce `unsupported_preprocessing_directive`. A null `#` directive is
-harmless and masked. Directives in discarded branches do not block selection.
-`#error` and `#warning` are represented only by the returned structured diagnostic;
-the library does not write them directly to stderr. Include processing remains
-unsupported; standard stringification and token pasting are supported as described
-below.
-
-### Standard predefined preprocessing context (0.10.14)
-
-`__LINE__` and `__FILE__` have deterministic analyzer-oriented semantics during
-concrete preprocessing. `__LINE__` expands to the active logical source line.
-`__FILE__` expands to the active logical file identity, initially taken from
-`filename=`. A standard `#line` directive changes those logical values for following
-source while leaving physical provenance untouched. `PreprocessResult.filename`,
-diagnostic locations, and every `SourceMapping.start`/`end` continue to refer to the
-original physical input.
-
-Callers provide other supported standard environment values through the public
-`PreprocessingContext` rather than through host discovery:
-
-```python
-context = cpre.PreprocessingContext(
-    standard_macros={
-        "__STDC__": "1",
-        "__STDC_VERSION__": "202311L",
-        "__STDC_HOSTED__": "1",
-        "__DATE__": '"Sep 12 2026"',
-        "__TIME__": '"20:14:00"',
-    }
-)
-result = cpre.preprocess_source(
-    source,
-    filename="src/example.c",
-    configuration=config,
-    context=context,
-)
-```
-
-Values are exact preprocessing replacement text and are part of the deterministic
-input. cpre never reads the wall clock, discovers a host compiler, guesses a language
-mode, or imports GCC/Clang/MSVC vendor/target macro catalogs. `__LINE__` and `__FILE__`
-are intentionally not caller-settable through `PreprocessingContext`; their values
-come only from logical preprocessing state. See
-[Concrete macro configuration](concrete-configuration.md) for the supported standard
-context names and configuration ownership model.
-
-A reachable standard predefined macro whose value is environment-dependent and has
-no deterministic configured replacement remains `unsupported_macro_expansion`. This
-includes unconfigured build-time/language-environment uses such as `__DATE__`,
-`__TIME__`, or `__STDC_VERSION__`. A `__FILE__` value use without either `filename=`
-or a preceding `#line ... "file"` likewise remains atomic incomplete. Definedness-only
-checks continue to use the configured open/closed-world macro policy when cpre does
-not have a deterministic standard value.
-
-Vendor/target names such as `__GNUC__`, `__clang__`, `_MSC_VER`, architecture,
-endianness, pointer-width, SIMD, optimization, and command-line-derived feature
-catalogs are intentionally out of scope. cpre does not claim GCC/Clang compiler-
-environment emulation.
-
-Unsupported cases remain atomic. `source`, `source_map`, and `macros` are `None`, so
-callers cannot accidentally consume a partially transformed translation unit or a
-fabricated mapping for semantics cpre did not perform. `complete=True` certifies the
-documented supported selection/expansion surface, not general compiler-preprocessor
-equivalence. `AnalysisOptions` supplies the same resource limits as analysis; limit
-exhaustion also returns no source or macro snapshot. The bounded migration status is
-tracked by the [C-GULL replacement gate](pcpp-readiness.md).
-
-
-### Object-like macro expansion (0.10.0)
-
-Active ordinary-source identifiers expand recursively using the current macro
-environment. Redefinitions affect subsequent uses; discarded branches do not
-change expansion. Ordinary undefined and unmentioned identifiers remain unchanged;
-known unmodeled predefined macro names are diagnosed as described above. Comments,
-quoted literals (including encoding prefixes and raw strings), and preprocessing
-numbers are protected. Replacement-token separators prevent accidental identifier,
-operator, or comment formation; whitespace is not intended to match compiler `-E`
-formatting. Empty macros produce separating whitespace.
-
-A macro is disabled while its replacement is rescanned: `A -> A` and `A -> B -> A`
-terminate with the suppressed identifier retained, matching C recursion suppression.
-The implementation uses an explicit stack and the shared `max_work` budget, including
-emitted replacement characters. Limit exhaustion returns no source, map, or macro
-snapshot. Invalid replacement operations and assumption-only macros without
-replacement text return `unsupported_macro_expansion`. Standard `#`/`##`
-operations, including digraph spellings, are described below. Bare function-like names can remain in output;
-unused unsupported definitions and inactive uses do not block preprocessing.
-Boolean assumptions are not guessed to mean literal `0` or `1` replacement text.
-
-```python
-result = preprocess_source("#define N 12345\nint a[N];\n", filename="example.c")
-assert result.complete
-for span in result.source_map:
-    if span.expanded:
-        assert result.source[span.output_start:span.output_end].strip() == "12345"
-        assert span.start.line == 2  # the invocation, not the definition
-```
-
-`SourceMapping` is a frozen public dataclass exported from `cpre`. Its
-`output_start`/`output_end` and `source_start`/`source_end` are zero-based,
-half-open Python character offsets, not byte offsets. `start`/`end` are one-based
-physical `SourceLocation` values, also end-exclusive. The ordered tuple covers
-all output characters. For `expanded=False`, map an output offset by adding its
-displacement within the span to `source_start`. For `expanded=True`, all characters
-(including separating whitespace) map to the original invocation's physical range.
-Nested replacements map to the outer source invocation. Spliced invocations can
-cover several physical lines; their line endings are retained after the replacement.
-`source_map` is `()` for empty input and `None` on incomplete results.
-
-This deliberately changes the 0.9.x guarantee of unchanged retained text and
-columns. Consumers of expanded output must use the map rather than equating output
-columns with original columns. The symbolic `analyze_source` API is unchanged.
-
-
-### Function-like macro expansion (0.10.1)
-
-Function-like macros expand when their identifier is followed by a `(`
-preprocessing token; comments, spaces, and physical newlines may intervene.
-Arguments are collected **before expansion**: only commas at parenthesis depth
-zero separate arguments. Parentheses inside literals and comments do not count.
-Braces, brackets, and C++ template angle brackets do not protect commas; callers
-must add parentheses where needed. A bare function-like macro name remains text.
-Expanding a later token into `(` does not retroactively invoke an earlier name.
-
-Each used argument is fully macro-expanded before substitution, then the
-substituted replacement is rescanned together with following source tokens.
-Unused arguments are not expanded. For example, `F(F(1))` expands its inner call
-before substituting into the outer call. Recursion suppression stays attached to
-tokens, so direct and mutual recursion terminate and suppressed names are not
-incorrectly reenabled by argument substitution. Both argument prescan and body
-rescan use an explicit stack with the shared deterministic work budget.
-
-```python
-source = "#define ADD(a,b) ((a)+(b))\nint n = ADD(1, ADD(2,3));\n"
-result = preprocess_source(source)
-assert result.complete
-span, = [span for span in result.source_map if span.expanded]
-assert source[span.source_start:span.source_end] == "ADD(1, ADD(2,3))"
-```
-
-Zero-parameter macros (`F()`), empty positional arguments (`F(,x)`), multiline
-replacement definitions, and multiline invocations are supported. Standard
-trailing `...` parameters substitute their comma-separated tokens through
-`__VA_ARGS__`. A variadic-only `V()` supplies empty variadic tokens. For a macro
-with named parameters plus `...`, supply the separating comma even when the
-variadic part is empty: `V(x,)`. Omitted variadic arguments and GNU named variadic
-parameters remain outside the supported contract. Standard `__VA_OPT__` support is
-described below; stringification and token pasting are supported as described in
-the following section.
-
-Arity mismatches, unterminated calls, unsupported replacement operations, and
-invocations interrupted by preprocessing directives return structured incomplete
-results without partial source, macro snapshots, or source maps. A call may span
-ordinary physical lines, but directives between its name and closing parenthesis
-are not supported. Definitions in inactive branches still have no effect, and
-ordinary redefinitions affect only following uses. Concrete numeric `#if`/`#elif`
-evaluation macro-expands expressions with the same bounded expansion machinery.
-
-Expanded map ranges cover the complete physical invocation, including its closing
-parenthesis. Nested expansions map to the enclosing invocation; aliases which
-consume following source arguments extend the mapped range to include them.
-Physical line endings consumed by a multiline invocation are retained after its
-replacement, keeping later physical lines aligned. Comments outside consumed
-invocations remain unchanged; comments inside arguments are preprocessing
-whitespace and disappear with the invocation.
-
-### Standard `__VA_OPT__` variadic expansion (0.10.12)
-
-Inside a variadic function-like replacement list, `__VA_OPT__(tokens)` is treated
-like a parameter. The contained tokens participate when the hypothetical ordinary
-substitution of `__VA_ARGS__` contains preprocessing tokens after macro expansion;
-otherwise the construct contributes a placemarker that disappears before the final
-rescan. This means an argument whose macro expansion is empty also makes
-`__VA_OPT__` empty.
-
-```python
-source = """\
-#define EMPTY
-#define LOG(fmt, ...) log(fmt __VA_OPT__(,) __VA_ARGS__)
-LOG("plain", )
-LOG("empty", EMPTY)
-LOG("value=%d", n)
-"""
-result = preprocess_source(source)
-assert result.complete
-```
-
-The contained token sequence may use named parameters, `__VA_ARGS__`, nested
-parentheses, stringification, and token pasting when it is valid as the replacement
-list of the current macro. `__VA_OPT__` itself also participates in surrounding
-`#`/`##` processing as a parameter. Placemarkers are retained through these
-operations until standard paste/stringification processing is complete; this is
-important for cases where an empty parameter inside active `__VA_OPT__` is adjacent
-to an outer `##`.
-
-Nested `__VA_OPT__`, missing or unbalanced parentheses, use outside a variadic
-replacement list, invalid `#`/`##` placement, and invalid paste results produce an
-atomic `unsupported_macro_expansion` result when reached. Ordinary source uses of
-the reserved `__VA_OPT__` identifier are likewise rejected. GNU named variadics and
-GNU `, ## __VA_ARGS__` comma deletion are intentionally not added by this feature.
-The existing explicit-separating-comma rule for named-plus-variadic cpre invocations
-also remains unchanged.
-
-### Stringification and token pasting (0.10.2)
-
-`#parameter` stringifies the unexpanded argument, trims leading/trailing whitespace,
-collapses internal preprocessing whitespace, and escapes quotes and backslashes
-inside string/character literals. `##` substitutes adjacent arguments without
-prescan, joins the bordering tokens, validates that the result is one preprocessing
-token, and rescans it. Empty arguments use placemarker behavior. The digraphs `%:`
-and `%:%:` have the same operator roles. Normal parameter uses still expand before
-substitution; two-level wrapper macros can therefore request expansion before
-stringification or pasting.
-
-Standard `__VA_ARGS__` and `__VA_OPT__` work with these operators. GNU comma
-swallowing remains outside the supported contract. Invalid pastes and malformed
-operator placement return `unsupported_macro_expansion` atomically when used.
-The compatibility corpus checks representative legacy operator output against pcpp;
-standards-valid `__VA_OPT__` cases are checked separately against available GCC and
-Clang preprocessors at the preprocessing-token level. This does not claim full
-GCC/Clang compatibility.
+For the broader transformation and downstream-compatibility boundary, see [Downstream compatibility](downstream-compatibility.md).
