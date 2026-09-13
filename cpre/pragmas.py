@@ -191,7 +191,7 @@ def _destringize_pragma(literal: str) -> str:
     )
     if match is None:
         raise ValueError("_Pragma expects one ordinary string literal")
-    return re.sub(r'\\(["\\])', r'\1', match.group(1))
+    return re.sub(r'\\(["\\])', r'\1', match.group(1)).strip()
 
 
 def _scan_operator_pragmas(
