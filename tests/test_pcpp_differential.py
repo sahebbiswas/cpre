@@ -43,6 +43,7 @@ SUPPORTED_CASES = (
     DifferentialCase("multiline_nested_macros.c"),
     DifferentialCase("general_macro_operators.c"),
     DifferentialCase("incomplete_numeric_condition.c"),
+    DifferentialCase("divergent_builtin_line.c"),
     DifferentialCase("configured_conditional.c", (("FEATURE", True),)),
     DifferentialCase("configured_conditional.c", (("FEATURE", False),)),
 )
@@ -56,10 +57,6 @@ EXPLICIT_NONCOMPLETE_CASES = {
     "incomplete_unknown_condition.c": (
         "open-world preprocessing requires explicit configuration; the C-GULL "
         "migration uses the reviewed closed MacroConfiguration policy (#37)"
-    ),
-    "divergent_builtin_line.c": (
-        "cpre returns atomic unsupported_macro_expansion for unmodeled predefined "
-        "macros instead of certifying semantically divergent output (#38)"
     ),
     "divergent_pragma.c": (
         "cpre returns atomic unsupported_preprocessing_directive for reachable "
@@ -259,28 +256,17 @@ def test_unknown_condition_has_concrete_pcpp_outcome_but_remains_incomplete():
     c_parser.CParser().parse(_without_line_markers(output))
 
 
-@pytest.mark.parametrize("fixture,code,expected", [
-    (
-        "divergent_builtin_line.c",
-        ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
-        ("int", "physical_line", "=", "1", ";"),
-    ),
-    (
-        "divergent_pragma.c",
-        ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
-        ("int", "value", ";"),
-    ),
-])
-def test_completion_blockers_are_atomic_instead_of_complete_but_divergent(fixture, code, expected):
+def test_unsupported_pragma_is_atomic_instead_of_complete_but_divergent():
+    fixture = "divergent_pragma.c"
     case = DifferentialCase(fixture)
     source = _load(fixture)
     result = preprocess_source(source, filename=fixture)
     assert not result.complete
     assert result.source is result.source_map is result.macros is None
     diagnostic, = result.incomplete
-    assert diagnostic.code is code
+    assert diagnostic.code is ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE
     assert diagnostic.location.line == 1
 
     reference = _run_pcpp(case, source)
-    assert _semantic_tokens(reference) == expected
+    assert _semantic_tokens(reference) == ("int", "value", ";")
     c_parser.CParser().parse(_without_line_markers(reference))
