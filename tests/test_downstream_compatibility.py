@@ -29,6 +29,7 @@ CASES = (
     CompatibilityCase("multiline_nested_macros.c", "supported", expanded_lines=(8,)),
     CompatibilityCase("general_macro_operators.c", "supported"),
     CompatibilityCase("incomplete_numeric_condition.c", "supported"),
+    CompatibilityCase("divergent_builtin_line.c", "supported", expanded_lines=(1,)),
     CompatibilityCase(
         "configured_conditional.c", "supported",
         assumptions=(("FEATURE", True),),
@@ -44,10 +45,6 @@ CASES = (
     CompatibilityCase(
         "incomplete_unknown_condition.c", "incomplete",
         ErrorCode.UNRESOLVED_CONDITION, 1,
-    ),
-    CompatibilityCase(
-        "divergent_builtin_line.c", "unsupported",
-        ErrorCode.UNSUPPORTED_MACRO_EXPANSION, 1,
     ),
     CompatibilityCase(
         "divergent_pragma.c", "unsupported",
