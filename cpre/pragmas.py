@@ -142,7 +142,7 @@ def _mask_source_pragmas(source: str) -> tuple[str, tuple[_SourcePragma, ...]]:
         characters[marker_offset] = "0"
         characters[marker_offset + 1] = ";"
         pragmas.append(_SourcePragma(
-            match.group(1).strip(),
+            re.sub(r"\s+", " ", match.group(1)).strip(),
             location,
             marker_offset,
             line.start_line,
@@ -271,11 +271,16 @@ def _unsupported_pragma(
     *,
     unknown_handler: bool,
 ) -> PreprocessResult:
-    if unknown_handler:
+    location = pragma.location
+    if unknown_handler and pragma.origin is PragmaOrigin.DIRECTIVE:
+        # Preserve the pre-extension default diagnostic shape for source pragmas.
+        message = "#pragma preprocessing directive is not supported during concrete preprocessing"
+        location = SourceLocation(pragma.location.line)
+    elif unknown_handler:
         message = "reachable pragma requires caller-provided pragma handling"
     else:
         message = "reachable pragma is unsupported by the caller's pragma handler"
-    if pragma.payload:
+    if pragma.payload and not (unknown_handler and pragma.origin is PragmaOrigin.DIRECTIVE):
         message += f": {pragma.payload}"
     return PreprocessResult(
         None,
@@ -283,7 +288,7 @@ def _unsupported_pragma(
         (PreprocessDiagnostic(
             ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
             message,
-            pragma.location,
+            location,
         ),),
     )
 
