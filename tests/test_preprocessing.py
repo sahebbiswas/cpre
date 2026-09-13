@@ -102,7 +102,6 @@ def test_includes_are_explicitly_unsupported(directive):
 
 @pytest.mark.parametrize('directive', [
     '#pragma once',
-    '#line 40 "mapped.c"',
     '#error stop here',
     '#warning review this',
     '#ident "toolchain"',
@@ -132,8 +131,8 @@ def test_null_directive_is_masked_without_blocking_completion():
     assert output.splitlines() == [' ', 'int value;']
 
 
-@pytest.mark.parametrize('name', ['__LINE__', '__FILE__', '__DATE__', '__TIME__', '__STDC__'])
-def test_predefined_macros_are_explicitly_incomplete(name):
+@pytest.mark.parametrize('name', ['__DATE__', '__TIME__', '__STDC__'])
+def test_unconfigured_environment_predefined_macros_are_explicitly_incomplete(name):
     result = preprocess_source(f'prefix\nint value = {name};\n', filename='x.c')
     assert not result.complete
     assert result.source is result.source_map is result.macros is None
@@ -143,28 +142,25 @@ def test_predefined_macros_are_explicitly_incomplete(name):
     assert name in diagnostic.message
 
 
-def test_predefined_macro_in_reachable_condition_is_explicitly_incomplete():
+def test_line_predefined_macro_is_available_in_reachable_condition():
     result = preprocess_source('#if __LINE__ > 0\nint kept;\n#endif\n')
-    assert not result.complete
-    assert result.source is result.source_map is result.macros is None
-    diagnostic, = result.incomplete
-    assert diagnostic.code is ErrorCode.UNSUPPORTED_MACRO_EXPANSION
-    assert diagnostic.location == SourceLocation(1)
+    assert result.complete, result.incomplete
+    assert 'int kept;' in result.source
 
 
 def test_predefined_macro_in_unreachable_condition_does_not_block():
-    source = '#if 0\n#if __LINE__\nint dead;\n#endif\n#endif\nint kept;\n'
+    source = '#if 0\n#if __DATE__\nint dead;\n#endif\n#endif\nint kept;\n'
     assert 'int kept;' in selected(source)
 
 
-def test_predefined_macro_from_replacement_is_located_at_invocation():
+def test_line_predefined_macro_from_replacement_uses_invocation_location():
     source = '#define HERE __LINE__\nint value = HERE;\n'
     result = preprocess_source(source)
-    assert not result.complete
-    assert result.source is result.source_map is result.macros is None
-    diagnostic, = result.incomplete
-    assert diagnostic.code is ErrorCode.UNSUPPORTED_MACRO_EXPANSION
-    assert diagnostic.location == SourceLocation(2, 13)
+    assert result.complete, result.incomplete
+    assert '2' in result.source
+    expanded = [mapping for mapping in result.source_map if mapping.expanded]
+    assert len(expanded) == 1
+    assert expanded[0].start == SourceLocation(2, 13)
 
 
 def test_predefined_spelling_in_literals_comments_and_other_identifiers_is_valid():
