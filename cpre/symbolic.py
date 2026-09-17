@@ -1,6 +1,6 @@
 """Stable symbolic-expression helpers exposed through :mod:`cpre`.
 
-The implementation model continues to live in internal modules.  Downstream
+The implementation model continues to live in internal modules. Downstream
 consumers should import these names from the top-level :mod:`cpre` package,
 which is the compatibility boundary documented by the project.
 """
@@ -8,14 +8,9 @@ which is the compatibility boundary documented by the project.
 from __future__ import annotations
 
 from .expressions import (
-    conjunction as _conjunction,
-    disjunction as _disjunction,
     expression_atoms as _expression_atoms,
     expression_comparison_key as _expression_comparison_key,
-    expression_predicates as _expression_predicates,
     format_expression as _format_expression,
-    negate as _negate,
-    simplify as _simplify,
 )
 from .model import (
     BooleanAtom,
@@ -46,34 +41,101 @@ def _require_expression(expression: Expression) -> None:
         raise TypeError("expected a symbolic expression")
 
 
+def _sort_key(expression: Expression) -> tuple[object, ...]:
+    # Preserve the established display-oriented ordering while ensuring nodes
+    # with identical rendered text (for example Variable("A") and
+    # Predicate("A")) have a stable semantic tie-breaker.
+    return (_format_expression(expression), _expression_comparison_key(expression))
+
+
 def negate(expression: Expression) -> Expression:
     """Return the normalized Boolean negation of *expression*."""
 
-    _require_expression(expression)
-    return _negate(expression)
+    expression = simplify(expression)
+    if isinstance(expression, Constant):
+        return Constant(not expression.value)
+    if isinstance(expression, Negation):
+        return expression.operand
+    return Negation(expression)
 
 
 def conjunction(*expressions: Expression) -> Expression:
     """Build a normalized conjunction using deterministic Boolean identities."""
 
+    operands: list[Expression] = []
     for expression in expressions:
-        _require_expression(expression)
-    return _conjunction(*expressions)
+        expression = simplify(expression)
+        if expression == FALSE:
+            return FALSE
+        if expression == TRUE:
+            continue
+        operands.extend(
+            expression.operands if isinstance(expression, Conjunction) else (expression,)
+        )
+
+    unique = set(operands)
+    if any(negate(operand) in unique for operand in unique):
+        return FALSE
+
+    filtered = [
+        operand
+        for operand in unique
+        if not (
+            isinstance(operand, Disjunction)
+            and any(term in unique for term in operand.operands)
+        )
+    ]
+    if not filtered:
+        return TRUE
+    if len(filtered) == 1:
+        return filtered[0]
+    return Conjunction(tuple(sorted(filtered, key=_sort_key)))
 
 
 def disjunction(*expressions: Expression) -> Expression:
     """Build a normalized disjunction using deterministic Boolean identities."""
 
+    operands: list[Expression] = []
     for expression in expressions:
-        _require_expression(expression)
-    return _disjunction(*expressions)
+        expression = simplify(expression)
+        if expression == TRUE:
+            return TRUE
+        if expression == FALSE:
+            continue
+        operands.extend(
+            expression.operands if isinstance(expression, Disjunction) else (expression,)
+        )
+
+    unique = set(operands)
+    if any(negate(operand) in unique for operand in unique):
+        return TRUE
+
+    filtered = [
+        operand
+        for operand in unique
+        if not (
+            isinstance(operand, Conjunction)
+            and any(term in unique for term in operand.operands)
+        )
+    ]
+    if not filtered:
+        return FALSE
+    if len(filtered) == 1:
+        return filtered[0]
+    return Disjunction(tuple(sorted(filtered, key=_sort_key)))
 
 
 def simplify(expression: Expression) -> Expression:
     """Apply local Boolean identities without performing SAT/integer reasoning."""
 
     _require_expression(expression)
-    return _simplify(expression)
+    if isinstance(expression, (Constant, Variable, Predicate)):
+        return expression
+    if isinstance(expression, Negation):
+        return negate(expression.operand)
+    if isinstance(expression, Conjunction):
+        return conjunction(*expression.operands)
+    return disjunction(*expression.operands)
 
 
 def normalize(expression: Expression) -> Expression:
@@ -103,8 +165,11 @@ def ordered_atoms(expression: Expression) -> tuple[BooleanAtom, ...]:
 def expression_predicates(expression: Expression) -> set[str]:
     """Return opaque predicate text without interpreting identifiers inside it."""
 
-    _require_expression(expression)
-    return _expression_predicates(expression)
+    return {
+        atom.text
+        for atom in ordered_atoms(expression)
+        if isinstance(atom, Predicate)
+    }
 
 
 def expression_to_dict(expression: Expression) -> dict[str, object]:
@@ -125,8 +190,14 @@ def _to_dict(expression: Expression) -> dict[str, object]:
     if isinstance(expression, Negation):
         return {"kind": "not", "operand": _to_dict(expression.operand)}
     if isinstance(expression, Conjunction):
-        return {"kind": "and", "operands": [_to_dict(item) for item in expression.operands]}
-    return {"kind": "or", "operands": [_to_dict(item) for item in expression.operands]}
+        return {
+            "kind": "and",
+            "operands": [_to_dict(item) for item in expression.operands],
+        }
+    return {
+        "kind": "or",
+        "operands": [_to_dict(item) for item in expression.operands],
+    }
 
 
 def _require_exact_fields(data: dict[object, object], *fields: str) -> None:
