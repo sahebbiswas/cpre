@@ -22,7 +22,8 @@ Use this index to choose the guide that matches your integration surface.
 
 - [SARIF output](sarif.md) — SARIF 2.1.0 rules, fixes, notifications, and code-scanning integration.
 - [Downstream compatibility](downstream-compatibility.md) — supported transformation and API guarantees for consumers.
-- [C-GULL migration profile](cgull-migration-profile.md) — cpre integration profile for C-GULL.
-- [pcpp replacement readiness](pcpp-readiness.md) — measured compatibility gate and remaining migration boundaries.
+- [C-GULL concrete preprocessing migration profile](cgull-migration-profile.md) — bounded `preprocess_source()`/`pcpp` replacement profile for C-GULL.
+- [C-GULL symbolic migration readiness](cgull-symbolic-migration-readiness.md) — versioned expression, structure, proof, witness, and configuration-semantics compatibility gate for replacing C-GULL's local symbolic preprocessor modules.
+- [pcpp replacement readiness](pcpp-readiness.md) — measured concrete-preprocessing compatibility gate and remaining migration boundaries.
 
 The repository [README](../README.md) is intentionally the short release/PyPI landing page. Detailed behavior belongs in these guides so each contract has one authoritative home.
