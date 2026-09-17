@@ -5,17 +5,37 @@ import cpre
 
 PUBLIC_IMPORTS = (
     cpre.AnalysisResult,
+    cpre.BooleanAtom,
     cpre.ConditionalTree,
+    cpre.Conjunction,
+    cpre.Constant,
     cpre.ContextualSimplification,
+    cpre.DefinedVariable,
+    cpre.Disjunction,
     cpre.ExactSimplification,
+    cpre.Expression,
+    cpre.FALSE,
     cpre.Finding,
     cpre.FindingKind,
     cpre.FixConfidence,
     cpre.MacroAssumptions,
+    cpre.Negation,
+    cpre.Predicate,
     cpre.SourceLocation,
     cpre.SourceRange,
     cpre.SuggestedEdit,
+    cpre.TRUE,
+    cpre.Variable,
     cpre.analyze_source,
+    cpre.conjunction,
+    cpre.disjunction,
+    cpre.expression_from_dict,
+    cpre.expression_to_dict,
+    cpre.format_expression,
+    cpre.negate,
+    cpre.normalize,
+    cpre.ordered_atoms,
+    cpre.simplify,
 )
 
 
@@ -25,6 +45,30 @@ def _by_kind(result, kind):
 
 def test_documented_top_level_imports_are_available():
     assert all(symbol is not None for symbol in PUBLIC_IMPORTS)
+
+
+def test_symbolic_expression_installed_contract():
+    value = cpre.Variable("FEATURE")
+    defined = cpre.DefinedVariable("FEATURE")
+    predicate = cpre.Predicate("FEATURE")
+    expression = cpre.Conjunction((value, defined, predicate, value))
+
+    assert value != defined
+    assert cpre.normalize(cpre.Conjunction((value, value))) == value
+    assert cpre.conjunction(value, cpre.negate(value)) == cpre.FALSE
+    assert cpre.disjunction(value, cpre.negate(value)) == cpre.TRUE
+    assert set(cpre.ordered_atoms(expression)) == {value, defined, predicate}
+
+    encoded = cpre.expression_to_dict(expression)
+    assert {item["kind"] for item in encoded["operands"]} == {
+        "variable",
+        "defined",
+        "predicate",
+    }
+    assert cpre.expression_from_dict(encoded) == cpre.normalize(expression)
+    assert cpre.format_expression(expression) == cpre.format_expression(
+        cpre.Conjunction(tuple(reversed(expression.operands)))
+    )
 
 
 def test_representative_findings_have_stable_kinds_and_ordering():
