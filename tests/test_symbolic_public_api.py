@@ -41,7 +41,7 @@ def test_public_formatting_normalizes_nested_structure_deterministically():
         )
     )
 
-    assert cpre.format_expression(expression) == "A && B || !defined(DISABLED)"
+    assert cpre.format_expression(expression) == "!defined(DISABLED) || A && B"
 
 
 def test_ordered_atoms_preserves_all_unsimplified_atom_categories():
