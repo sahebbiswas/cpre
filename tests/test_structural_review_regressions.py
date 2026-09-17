@@ -20,7 +20,7 @@ def test_comments_are_masked_before_conditional_tokenization():
 @pytest.mark.parametrize("prefix", ["u8", "u", "U", "L"])
 def test_prefixed_raw_strings_cannot_introduce_conditional_directives(prefix):
     source = (
-        f'auto text = {prefix}R"tag("embedded quote"\n'
+        f'auto text = {prefix}R"tag(foo"bar\n'
         "#if FAKE\n"
         ")tag\";\n"
         "#if REAL\n"
