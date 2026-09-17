@@ -6,6 +6,7 @@ Use this index to choose the guide that matches your integration surface.
 
 - [Command-line interface](cli.md) — invocation, inputs/discovery, text/JSON/SARIF reporting, CI behavior, errors, and exit statuses.
 - [Python API integration](api.md) — public symbolic expressions/algebra/interchange, `analyze_source()`, structured findings, simplifications, edits, errors, resource limits, and compatibility expectations.
+- [Lossless conditional structure](conditional-structure.md) — `parse_conditionals()`, exact physical ranges, nested branches, recovery diagnostics, and source-preserving downstream integration.
 - [Concrete preprocessing](preprocessing.md) — `preprocess_source()`, canonical output, source mappings, macro state, compact output, deterministic context, and downstream parser integration.
 
 ## Preprocessing references
