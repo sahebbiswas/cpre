@@ -38,6 +38,18 @@ from .pragmas import (
     PragmaOrigin,
     preprocess_source,
 )
+from .structure import (
+    ConditionalBlock,
+    ConditionalBranch,
+    ConditionalDirective,
+    ConditionalStructureTree,
+    DirectiveToken,
+    StructuralSourceLocation,
+    StructuralSourceRange,
+    StructureDiagnostic,
+    StructureDiagnosticCode,
+    parse_conditionals,
+)
 from .symbolic import (
     BooleanAtom,
     Conjunction,
@@ -62,7 +74,7 @@ from .symbolic import (
     simplify,
 )
 
-__version__ = "0.10.17"
+__version__ = "0.10.18"
 
 __all__ = [
     "AnalysisError",
@@ -71,12 +83,17 @@ __all__ = [
     "AnalysisResult",
     "BooleanAtom",
     "ConditionError",
+    "ConditionalBlock",
+    "ConditionalBranch",
+    "ConditionalDirective",
+    "ConditionalStructureTree",
     "ConditionalTree",
     "Conjunction",
     "Constant",
     "ContextualSimplification",
     "CpreError",
     "DefinedVariable",
+    "DirectiveToken",
     "Disjunction",
     "ErrorCode",
     "ExactSimplification",
@@ -103,6 +120,10 @@ __all__ = [
     "SourceLocation",
     "SourceMapping",
     "SourceRange",
+    "StructuralSourceLocation",
+    "StructuralSourceRange",
+    "StructureDiagnostic",
+    "StructureDiagnosticCode",
     "SuggestedEdit",
     "TRUE",
     "UnknownNamePolicy",
@@ -119,6 +140,7 @@ __all__ = [
     "negate",
     "normalize",
     "ordered_atoms",
+    "parse_conditionals",
     "preprocess_source",
     "simplify",
 ]

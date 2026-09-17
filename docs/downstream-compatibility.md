@@ -4,11 +4,14 @@ This document defines the supported `cpre` surface for library consumers such as
 
 ## Supported contract
 
-The compatibility suite in `tests/test_downstream_contract.py` is the executable contract for downstream integrations. It covers:
+The compatibility suites in `tests/test_downstream_contract.py` and `tests/test_structural_downstream_contract.py` are the executable contracts for downstream integrations. They cover:
 
 - documented top-level imports
 - public symbolic expression categories and deterministic local Boolean algebra
 - stable tagged symbolic expression interchange
+- lossless `parse_conditionals()` structure with offset-aware physical ranges
+- stable structural blocks, branches, directives, tokens, and recovery diagnostics
+- C23 `#elifdef` / `#elifndef` structure and deterministic source ordering
 - `AnalysisResult` and ordered `Finding` results
 - stable `FindingKind` categories
 - one-based source locations and end-exclusive physical edit ranges
@@ -20,6 +23,18 @@ The compatibility suite in `tests/test_downstream_contract.py` is the executable
 - optional `SuggestedEdit` metadata and `FixConfidence`
 
 `SuggestedEdit` is intentionally optional. Exact condition rewrites may be used as context-independent mechanical fixes. Contextual rewrites are valid only under the branch context and should be treated as lower-confidence suggestions. Dead/redundant classification and macro-form directives do not imply a mechanical edit unless `cpre` explicitly returns one.
+
+## Lossless structural compatibility
+
+`parse_conditionals()` is the supported configuration-independent source-structure API. It returns `ConditionalStructureTree`, which is intentionally distinct from the historical analyzer `ConditionalTree` returned through `AnalysisResult.tree`.
+
+Downstream analyzers may rely on the top-level structural types `ConditionalStructureTree`, `ConditionalBlock`, `ConditionalBranch`, `ConditionalDirective`, `DirectiveToken`, `StructureDiagnostic`, `StructureDiagnosticCode`, `StructuralSourceLocation`, and `StructuralSourceRange`.
+
+Structural locations always include the Python string `offset` plus one-based `line` and `column`. Structural ranges are half-open and preserve the exact original physical source across backslash-newline continuation. Directive, condition, branch-body, token, and block ranges are therefore directly sliceable without importing parser internals or reconstructing offsets.
+
+Recoverable malformed structure is represented as deterministic source-ordered diagnostics while recognized directives and recoverable blocks remain available. This includes missing conditions, malformed macro-only forms, unexpected trailing text, unmatched directives, duplicate `#else`, branches after `#else`, and unterminated conditionals. The structural parser does not select active branches or apply macro configuration.
+
+The detailed field and coordinate contract is documented in [Lossless conditional structure](conditional-structure.md). Patch releases must preserve the documented structural categories, range semantics, and deterministic traversal/diagnostic behavior.
 
 ## Symbolic expression compatibility
 
@@ -81,4 +96,4 @@ Downstream projects should pin a compatible release range and rely only on behav
 
 ## Installed-package validation
 
-CI builds the wheel, installs that wheel, copies the downstream contract test outside the repository checkout, and runs it against the installed package. CI also verifies `python -m cpre --help`. This catches missing package files, incorrect exports, symbolic API packaging drift, and other packaging-only failures that editable-source tests can miss.
+CI builds the wheel, installs that wheel, copies both downstream contract tests outside the repository checkout, and runs them against the installed package. CI also verifies `python -m cpre --help`. This catches missing package files, incorrect exports, structural/symbolic API packaging drift, and other packaging-only failures that editable-source tests can miss.

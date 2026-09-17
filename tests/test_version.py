@@ -1,5 +1,7 @@
+from importlib.metadata import version
+
 import cpre
 
 
-def test_version_for_beta_release():
-    assert cpre.__version__ == "0.10.17"
+def test_public_version_matches_package_metadata():
+    assert cpre.__version__ == version("cpre")
