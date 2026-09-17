@@ -159,8 +159,11 @@ def _logical_source(source: str) -> tuple[str, str, list[int]]:
                 continue
 
         raw = (
-            re.match(r'R"([^ ()\\\t\r\n]{0,16})\(', text[index : index + 20])
-            if text.startswith('R"', index)
+            re.match(
+                r'(?:u8R|uR|UR|LR|R)"([^ ()\\\t\r\n]{0,16})\(',
+                text[index : index + 22],
+            )
+            if text.startswith(("u8R\"", "uR\"", "UR\"", "LR\"", 'R"'), index)
             else None
         )
         if raw:
