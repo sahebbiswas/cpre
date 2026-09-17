@@ -14,9 +14,67 @@ import cpre
 result = cpre.analyze_source(source_text, filename="src/example.c")
 ```
 
-The names exported by `cpre.__all__` are the supported public boundary. Internal implementation modules such as `cpre.robdd`, `cpre.parser`, and the historical compatibility facade are not downstream APIs.
+The names exported by `cpre.__all__` are the supported public boundary. Internal implementation modules such as `cpre.robdd`, `cpre.parser`, `cpre.model`, and `cpre.expressions` are not downstream APIs.
 
-The public surface includes the symbolic analysis result/error model, source locations and edits, macro assumptions/configuration types, and concrete preprocessing types. This guide focuses on `analyze_source()`; see [Concrete preprocessing](preprocessing.md) for `preprocess_source()`, `PreprocessResult`, `compact()`, macro environments, deterministic preprocessing context, and pragma handling.
+The public surface includes the symbolic expression model/algebra, symbolic analysis result/error model, source locations and edits, macro assumptions/configuration types, and concrete preprocessing types. This guide focuses on `analyze_source()` and the reusable symbolic expression surface; see [Concrete preprocessing](preprocessing.md) for `preprocess_source()`, `PreprocessResult`, `compact()`, macro environments, deterministic preprocessing context, and pragma handling.
+
+## Symbolic expression API
+
+Downstream analyzers that need configuration-independent Boolean structure can construct and inspect expressions using top-level `cpre` imports only:
+
+```python
+import cpre
+
+condition = cpre.conjunction(
+    cpre.Variable("FEATURE"),
+    cpre.DefinedVariable("CONFIG"),
+    cpre.Predicate("VERSION >= 4"),
+)
+
+print(cpre.format_expression(condition))
+```
+
+The public node categories are:
+
+- `Constant` / `TRUE` / `FALSE` for Boolean constants;
+- `Variable(name)` for the truth/value of a macro;
+- `DefinedVariable(name)` for macro definedness;
+- `Predicate(text)` for an opaque C/preprocessor predicate that cpre does not interpret as an integer expression in this symbolic model;
+- `Negation`, `Conjunction`, and `Disjunction` for Boolean structure;
+- `Expression` and `BooleanAtom` as public typing aliases for those categories.
+
+`Variable("A")`, `DefinedVariable("A")`, and `Predicate("A")` are intentionally different atoms even though two of them may render to the same text. Do not infer atom identity from rendered strings or class module paths.
+
+### Deterministic algebra and formatting
+
+Use the public helpers instead of depending on internal expression functions:
+
+```python
+a = cpre.Variable("A")
+b = cpre.Variable("B")
+
+expr = cpre.conjunction(a, a, b)
+assert cpre.normalize(expr) == cpre.conjunction(a, b)
+assert cpre.disjunction(a, cpre.negate(a)) == cpre.TRUE
+```
+
+`normalize()` and `simplify()` are equivalent public entry points for local Boolean normalization. They flatten associative nodes, remove identities and duplicates, detect complements, apply simple absorption, and order operands deterministically. They do **not** perform ROBDD/SAT proofs or evaluate opaque predicates.
+
+`format_expression()` normalizes before rendering, so equivalent local structure has deterministic preprocessor-style output. `ordered_atoms()` returns every unique atom referenced by the original expression in deterministic semantic order; it intentionally inventories unsimplified input rather than dropping atoms eliminated by normalization. `expression_predicates()` returns the opaque predicate text set.
+
+### Structured expression interchange
+
+Use `expression_to_dict()` and `expression_from_dict()` when symbolic expressions need to cross cache/profile/artifact boundaries:
+
+```python
+encoded = cpre.expression_to_dict(condition)
+restored = cpre.expression_from_dict(encoded)
+assert restored == cpre.normalize(condition)
+```
+
+The representation is JSON-compatible and explicitly tagged by semantic node category (`constant`, `variable`, `defined`, `predicate`, `not`, `and`, `or`). Serialization is canonical: expressions are normalized first and operand order is deterministic. Deserialization rejects unknown kinds, missing/extra fields, and values with the wrong JSON shape rather than coercing them.
+
+The structured form, not dataclass `repr()`, implementation-module paths, or incidental hash/set ordering, is the supported interchange representation. Patch releases preserve these public categories and tagged semantics; intentional incompatible changes follow the downstream compatibility policy described below.
 
 ## Basic analysis
 
@@ -249,6 +307,7 @@ The CLI's JSON output is a structural conditional-tree report. It should not be 
 Use:
 
 - the Python API when both components run in Python and need the richest structured contract;
+- `expression_to_dict()` / `expression_from_dict()` for stable symbolic-expression interchange;
 - [SARIF](sarif.md) when findings need to cross a process/tool boundary;
 - CLI text for human-facing terminal workflows;
 - [concrete preprocessing](preprocessing.md) when a downstream parser/analyzer needs selected source and provenance.
@@ -257,6 +316,6 @@ Use:
 
 cpre is in Beta. The documented top-level API is intended for real downstream integrations, and compatibility-sensitive changes should be deliberate and documented.
 
-Evergreen integration code should depend on documented types, enum values, result fields, and `cpre.__all__`, not private helpers or implementation-specific ROBDD/parser details.
+Evergreen integration code should depend on documented types, enum values, result fields, symbolic expression categories/tagged interchange, and `cpre.__all__`, not private helpers or implementation-specific ROBDD/parser details.
 
 For the broader transformation and downstream-compatibility boundary, see [Downstream compatibility](downstream-compatibility.md).
