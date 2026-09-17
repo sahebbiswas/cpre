@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "downstream": {
+    "repository": "sahebbiswas/cgull",
+    "commit": "265f7bfdcb806a775a88510483ba28552f50f006",
+    "validated_on": "2026-09-17"
+  },
+  "cpre": {
+    "version": "0.11.0",
+    "implementation_commit": "88e14949e594c1739467b40ea53210e56bb56771",
+    "first_suitable_release": "0.11.0",
+    "latest_published_release_at_validation": "0.10.16"
+  },
+  "readiness": {
+    "status": "ready",
+    "scope": "cgull_symbolic_preprocessor_migration",
+    "release_state": "candidate",
+    "published_release_ready": false,
+    "complete_but_semantically_divergent_cases": 0,
+    "accepted_differences": 2,
+    "revalidate_on_downstream_revision_change": true
+  },
+  "inventory": {
+    "symbolic_modules": [
+      "cgull/preprocessor/expressions.py",
+      "cgull/preprocessor/directives.py",
+      "cgull/preprocessor/robdd.py",
+      "cgull/preprocessor/branch_analysis.py",
+      "cgull/preprocessor/configuration_space.py",
+      "cgull/preprocessor/profile_reduction.py"
+    ],
+    "direct_consumers": [
+      "cgull/__init__.py",
+      "cgull/ast_analyzer/preprocessor.py",
+      "cgull/compile_database.py",
+      "cgull/preprocessor/__init__.py",
+      "cgull/preprocessor_cli.py",
+      "cgull/rules/preprocessor_reachability.py",
+      "cgull/rules/preprocessor_simplification.py"
+    ],
+    "representative_tests": [
+      "tests/test_conditional_directives.py",
+      "tests/test_issue_423_preprocessor_reachability.py",
+      "tests/test_issue_424_preprocessor_simplification.py",
+      "tests/test_preprocessor_configuration_space.py",
+      "tests/test_config_profile_reduction.py",
+      "tests/test_preprocessor_concrete_ir.py"
+    ],
+    "documentation": [
+      "docs/analysis/symbolic-preprocessor.md"
+    ]
+  },
+  "public_api": {
+    "expressions": [
+      "Constant",
+      "Variable",
+      "DefinedVariable",
+      "Predicate",
+      "Negation",
+      "Conjunction",
+      "Disjunction",
+      "TRUE",
+      "FALSE",
+      "conjunction",
+      "disjunction",
+      "negate",
+      "normalize",
+      "format_expression",
+      "ordered_atoms",
+      "expression_to_dict",
+      "expression_from_dict"
+    ],
+    "structure": [
+      "parse_conditionals",
+      "ConditionalStructureTree",
+      "ConditionalBlock",
+      "ConditionalBranch",
+      "ConditionalDirective",
+      "DirectiveToken",
+      "StructuralSourceLocation",
+      "StructuralSourceRange",
+      "StructureDiagnostic",
+      "StructureDiagnosticCode"
+    ],
+    "proofs": [
+      "satisfiable",
+      "implies",
+      "equivalent",
+      "exact_simplify",
+      "witness_assignment",
+      "AnalysisOptions",
+      "SatisfiabilityResult",
+      "ProofResult",
+      "SimplificationResult",
+      "WitnessResult",
+      "WitnessAssignment",
+      "WitnessAtomKind"
+    ]
+  },
+  "accepted_differences": [
+    {
+      "id": "witness-defined-kind-name",
+      "cgull": "defined",
+      "cpre": "macro_defined",
+      "owner": "cgull_adapter",
+      "nonimpact_evidence": "one_to_one_category_mapping_preserves_definedness_distinct_from_macro_truth"
+    },
+    {
+      "id": "structure-diagnostic-code-names",
+      "cgull_to_cpre": {
+        "invalid_macro": "malformed_macro_directive",
+        "unexpected_tokens": "trailing_directive_text",
+        "misplaced_directive": "unmatched_directive",
+        "unterminated_block": "unterminated_conditional"
+      },
+      "owner": "cgull_adapter",
+      "nonimpact_evidence": "stable_structured_categories_and_source_ranges_are_preserved_with_explicit_mapping"
+    }
+  ],
+  "ownership": {
+    "cpre": [
+      "symbolic_expression_representation_and_algebra",
+      "conditional_structure_and_source_ranges",
+      "exact_boolean_proofs_and_witnesses",
+      "public_api_compatibility_contract"
+    ],
+    "cgull": [
+      "rule_ids_messages_and_severity",
+      "scan_profile_orchestration",
+      "build_and_translation_unit_policy",
+      "mapping_semantic_facts_to_findings",
+      "profile_selection_and_reduction_policy"
+    ]
+  }
+}
