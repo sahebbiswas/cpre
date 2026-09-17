@@ -1,12 +1,14 @@
 # Downstream compatibility contract
 
-This document defines the supported `cpre` surface for library consumers such as static analyzers. Consumers should import from the top-level `cpre` package only and should not depend on `cpre.cpre`, ROBDD internals, private helpers, CLI rendering, or incidental expression formatting beyond the documented replacement strings.
+This document defines the supported `cpre` surface for library consumers such as static analyzers. Consumers should import from the top-level `cpre` package only and should not depend on `cpre.cpre`, `cpre.model`, `cpre.expressions`, ROBDD internals, private helpers, CLI rendering, or incidental expression formatting beyond the documented public helpers and replacement strings.
 
 ## Supported contract
 
 The compatibility suite in `tests/test_downstream_contract.py` is the executable contract for downstream integrations. It covers:
 
 - documented top-level imports
+- public symbolic expression categories and deterministic local Boolean algebra
+- stable tagged symbolic expression interchange
 - `AnalysisResult` and ordered `Finding` results
 - stable `FindingKind` categories
 - one-based source locations and end-exclusive physical edit ranges
@@ -18,6 +20,27 @@ The compatibility suite in `tests/test_downstream_contract.py` is the executable
 - optional `SuggestedEdit` metadata and `FixConfidence`
 
 `SuggestedEdit` is intentionally optional. Exact condition rewrites may be used as context-independent mechanical fixes. Contextual rewrites are valid only under the branch context and should be treated as lower-confidence suggestions. Dead/redundant classification and macro-form directives do not imply a mechanical edit unless `cpre` explicitly returns one.
+
+## Symbolic expression compatibility
+
+The top-level symbolic expression surface is compatibility-sensitive for downstream analyzers that need to share preprocessor conditions without importing implementation modules.
+
+Supported semantic categories are:
+
+- `Constant` (`TRUE` / `FALSE`)
+- `Variable` for macro truth/value
+- `DefinedVariable` for macro definedness
+- `Predicate` for opaque predicates
+- `Negation`, `Conjunction`, and `Disjunction`
+- the `Expression` and `BooleanAtom` typing aliases
+
+Macro truth and macro definedness are separate facts. `Variable("A")` and `DefinedVariable("A")` must never be collapsed merely because they share a macro name, and `Predicate("A")` remains an opaque predicate rather than becoming a macro-value atom.
+
+The supported algebra helpers are `negate`, `conjunction`, `disjunction`, `simplify`, and `normalize`. They apply deterministic local Boolean identities only; exact ROBDD proof operations are a separate API concern. `format_expression` normalizes before rendering, and `ordered_atoms` gives deterministic semantic atom enumeration independent of set/hash iteration.
+
+`expression_to_dict` / `expression_from_dict` are the supported structured interchange boundary. The tagged kinds `constant`, `variable`, `defined`, `predicate`, `not`, `and`, and `or` preserve semantic categories without depending on dataclass module paths or `repr()` output. Encoded expressions are canonicalized deterministically. Unknown kinds, missing/extra fields, and wrong JSON value shapes are rejected instead of coerced.
+
+Patch releases must not deliberately reshape these categories, their semantic distinction, deterministic formatting/normalization behavior, or the tagged interchange meaning. Intentional incompatibilities follow the versioning rules below.
 
 ## Host-owned pragma compatibility
 
@@ -49,8 +72,8 @@ A new mismatch must either be fixed or deliberately added to `EXPLICIT_NONCOMPLE
 
 During the current `0.x` phase, `cpre` treats the documented public API as compatibility-sensitive even though semantic versioning traditionally permits breaking changes before `1.0`.
 
-- Patch releases must preserve documented imports and established result semantics. They may fix incorrect behavior without deliberately reshaping the public contract.
-- Minor releases may add backward-compatible public fields, types, finding categories, or capabilities. Downstream consumers should still review new finding kinds if they use exhaustive matching.
+- Patch releases must preserve documented imports and established result semantics. They may fix incorrect behavior and add compatible surface area without deliberately reshaping existing contracts.
+- Minor releases may add broader backward-compatible public fields, types, finding categories, or capabilities. Downstream consumers should still review new finding kinds if they use exhaustive matching.
 - Any deliberate incompatible change to the documented downstream contract requires an explicitly announced compatibility break and a minor-version boundary while `cpre` remains `0.x`.
 - After `1.0`, intentionally breaking public API changes require a major version bump.
 
@@ -58,4 +81,4 @@ Downstream projects should pin a compatible release range and rely only on behav
 
 ## Installed-package validation
 
-CI builds the wheel, installs that wheel, copies the downstream contract test outside the repository checkout, and runs it against the installed package. CI also verifies `python -m cpre --help`. This catches missing package files, incorrect exports, and other packaging-only failures that editable-source tests can miss.
+CI builds the wheel, installs that wheel, copies the downstream contract test outside the repository checkout, and runs it against the installed package. CI also verifies `python -m cpre --help`. This catches missing package files, incorrect exports, symbolic API packaging drift, and other packaging-only failures that editable-source tests can miss.
