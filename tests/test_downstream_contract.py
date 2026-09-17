@@ -21,21 +21,32 @@ PUBLIC_IMPORTS = (
     cpre.MacroAssumptions,
     cpre.Negation,
     cpre.Predicate,
+    cpre.ProofResult,
+    cpre.SatisfiabilityResult,
+    cpre.SimplificationResult,
     cpre.SourceLocation,
     cpre.SourceRange,
     cpre.SuggestedEdit,
     cpre.TRUE,
     cpre.Variable,
+    cpre.WitnessAssignment,
+    cpre.WitnessAtomKind,
+    cpre.WitnessResult,
     cpre.analyze_source,
     cpre.conjunction,
     cpre.disjunction,
+    cpre.equivalent,
+    cpre.exact_simplify,
     cpre.expression_from_dict,
     cpre.expression_to_dict,
     cpre.format_expression,
+    cpre.implies,
     cpre.negate,
     cpre.normalize,
     cpre.ordered_atoms,
+    cpre.satisfiable,
     cpre.simplify,
+    cpre.witness_assignment,
 )
 
 
@@ -69,6 +80,39 @@ def test_symbolic_expression_installed_contract():
     assert cpre.format_expression(expression) == cpre.format_expression(
         cpre.Conjunction(tuple(reversed(expression.operands)))
     )
+
+
+def test_exact_boolean_query_installed_contract():
+    a = cpre.Variable("A")
+    b = cpre.Variable("B")
+    reducible = cpre.Disjunction(
+        (
+            cpre.Conjunction((a, b)),
+            cpre.Conjunction((a, cpre.Negation(b))),
+        )
+    )
+
+    assert cpre.satisfiable(reducible).satisfiable is True
+    assert cpre.implies(cpre.Conjunction((a, b)), a).holds is True
+    assert cpre.equivalent(reducible, a).holds is True
+    simplified = cpre.exact_simplify(reducible)
+    assert simplified.complete and simplified.expression == a
+
+    witness = cpre.witness_assignment(
+        cpre.Conjunction((cpre.DefinedVariable("FEATURE"), cpre.Negation(cpre.Variable("FEATURE"))))
+    )
+    assert witness == cpre.WitnessResult(
+        satisfiable=True,
+        assignment=(
+            cpre.WitnessAssignment(cpre.WitnessAtomKind.MACRO_DEFINED, "FEATURE", True),
+            cpre.WitnessAssignment(cpre.WitnessAtomKind.MACRO_VALUE, "FEATURE", False),
+        ),
+    )
+
+    limited = cpre.implies(a, b, options=cpre.AnalysisOptions(max_work=1))
+    assert not limited.complete and limited.holds is None
+    assert limited.incomplete is not None
+    assert limited.incomplete.resource == "work"
 
 
 def test_representative_findings_have_stable_kinds_and_ordering():

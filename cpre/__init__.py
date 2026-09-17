@@ -38,6 +38,19 @@ from .pragmas import (
     PragmaOrigin,
     preprocess_source,
 )
+from .proofs import (
+    ProofResult,
+    SatisfiabilityResult,
+    SimplificationResult,
+    WitnessAssignment,
+    WitnessAtomKind,
+    WitnessResult,
+    equivalent,
+    exact_simplify,
+    implies,
+    satisfiable,
+    witness_assignment,
+)
 from .structure import (
     ConditionalBlock,
     ConditionalBranch,
@@ -74,7 +87,7 @@ from .symbolic import (
     simplify,
 )
 
-__version__ = "0.10.18"
+__version__ = "0.11.0"
 
 __all__ = [
     "AnalysisError",
@@ -117,6 +130,9 @@ __all__ = [
     "PreprocessingContext",
     "PreprocessDiagnostic",
     "PreprocessResult",
+    "ProofResult",
+    "SatisfiabilityResult",
+    "SimplificationResult",
     "SourceLocation",
     "SourceMapping",
     "SourceRange",
@@ -128,19 +144,27 @@ __all__ = [
     "TRUE",
     "UnknownNamePolicy",
     "Variable",
+    "WitnessAssignment",
+    "WitnessAtomKind",
+    "WitnessResult",
     "__version__",
     "analyze_source",
     "compact",
     "conjunction",
     "disjunction",
+    "equivalent",
+    "exact_simplify",
     "expression_from_dict",
     "expression_predicates",
     "expression_to_dict",
     "format_expression",
+    "implies",
     "negate",
     "normalize",
     "ordered_atoms",
     "parse_conditionals",
     "preprocess_source",
+    "satisfiable",
     "simplify",
+    "witness_assignment",
 ]
