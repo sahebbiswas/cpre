@@ -42,9 +42,14 @@ jobs:
       - name: Validate installed wheel public API contract
         run: |
           python -m pip install --force-reinstall dist/*.whl pytest
-          mkdir -p /tmp/cpre-contract
+          mkdir -p /tmp/cpre-contract/compatibility
           cp tests/test_downstream_contract.py /tmp/cpre-contract/
           cp tests/test_structural_downstream_contract.py /tmp/cpre-contract/
+          cp tests/test_cgull_symbolic_migration_profile.py /tmp/cpre-contract/
+          cp tests/compatibility/cgull-symbolic-profile.json /tmp/cpre-contract/compatibility/
           cd /tmp/cpre-contract
-          python -m pytest -q test_downstream_contract.py test_structural_downstream_contract.py
+          python -m pytest -q \
+            test_downstream_contract.py \
+            test_structural_downstream_contract.py \
+            test_cgull_symbolic_migration_profile.py
           python -m cpre --help

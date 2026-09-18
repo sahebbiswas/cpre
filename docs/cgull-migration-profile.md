@@ -2,6 +2,8 @@
 
 This document defines the reviewed input boundary for replacing C-GULL's `pcpp` preprocessing tier with `cpre.preprocess_source`. It resolves the scope question in issue #39 and is the bounded downstream profile used to satisfy readiness issue #28. It does **not** claim general compiler-preprocessor compatibility.
 
+> **Scope:** this document covers concrete preprocessing and `pcpp` replacement only. It is not evidence for replacing C-GULL's local symbolic preprocessor modules. See [C-GULL symbolic preprocessor migration readiness](cgull-symbolic-migration-readiness.md) for the separate expression, lossless-structure, exact-proof, witness, and configuration-semantics compatibility gate.
+
 The downstream evidence is pinned to [C-GULL `c61b275`](https://github.com/sahebbiswas/cgull/tree/c61b27520624c074661afa0a615160944b31ab3d). During final #28 validation on 2026-09-12, that commit remained C-GULL `main`. The profile is therefore **ready for migration at this pinned revision**. A migration against any newer C-GULL revision must re-run the inventory below and review any new preprocessing constructs before relying on this verdict.
 
 The machine-readable profile is [`tests/compatibility/cgull-profile.json`](../tests/compatibility/cgull-profile.json); its readiness section is part of the executable gate.
