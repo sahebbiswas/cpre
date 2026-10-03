@@ -4,17 +4,19 @@ from __future__ import annotations
 
 import re
 from bisect import bisect_right
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from enum import Enum
-from typing import Mapping, Protocol
+from typing import Protocol
 
 from .api import AnalysisOptions, MacroAssumptions
 from .configuration import MacroConfiguration
 from .errors import AnalysisError, ErrorCode, SourceLocation
 from .expansion import SourceMapping, tokenize
-from .include_queries import IncludeQueryProvider, preprocess_source as _include_preprocess_source
+from .include_queries import IncludeQueryProvider
+from .include_queries import preprocess_source as _include_preprocess_source
 from .parser import logical_lines
-from .preprocessing import PreprocessingContext, PreprocessDiagnostic, PreprocessResult
+from .preprocessing import PreprocessDiagnostic, PreprocessingContext, PreprocessResult
 
 
 class PragmaOrigin(str, Enum):
@@ -139,11 +141,7 @@ def _mask_source_pragmas(source: str) -> tuple[str, tuple[_SourcePragma, ...]]:
         match = re.match(r"^\s*#\s*pragma\b(.*)$", line.text, re.DOTALL)
         if match is None:
             continue
-        end_line = (
-            logical[index + 1].start_line - 1
-            if index + 1 < len(logical)
-            else len(physical)
-        )
+        end_line = logical[index + 1].start_line - 1 if index + 1 < len(logical) else len(physical)
         hash_index = line.text.find("#")
         if hash_index < 0 or hash_index >= len(line.locations):
             raise AnalysisError(
@@ -160,13 +158,15 @@ def _mask_source_pragmas(source: str) -> tuple[str, tuple[_SourcePragma, ...]]:
         # '#pragma' guarantees at least two writable characters beginning at '#'.
         characters[marker_offset] = "0"
         characters[marker_offset + 1] = ";"
-        pragmas.append(_SourcePragma(
-            _normalize_pragma_payload(match.group(1)),
-            location,
-            marker_offset,
-            line.start_line,
-            end_line,
-        ))
+        pragmas.append(
+            _SourcePragma(
+                _normalize_pragma_payload(match.group(1)),
+                location,
+                marker_offset,
+                line.start_line,
+                end_line,
+            )
+        )
 
     return "".join(characters), tuple(pragmas)
 
@@ -210,7 +210,7 @@ def _destringize_pragma(literal: str) -> str:
     )
     if match is None:
         raise ValueError("_Pragma expects one ordinary string literal")
-    return re.sub(r'\\(["\\])', r'\1', match.group(1))
+    return re.sub(r'\\(["\\])', r"\1", match.group(1))
 
 
 def _scan_operator_pragmas(
@@ -254,11 +254,13 @@ def _scan_operator_pragmas(
             raise _MalformedPragma("_Pragma expects exactly one string literal operand", location)
 
         closing = tokens[closing_index]
-        found.append(_RenderedPragma(
-            Pragma(payload, PragmaOrigin.OPERATOR, location, filename),
-            token.start,
-            closing.end,
-        ))
+        found.append(
+            _RenderedPragma(
+                Pragma(payload, PragmaOrigin.OPERATOR, location, filename),
+                token.start,
+                closing.end,
+            )
+        )
         index = closing_index + 1
 
     return tuple(found)
@@ -278,12 +280,14 @@ def _source_pragma_events(
             continue
         if result.source[output_offset] != "0":
             continue
-        found.append(_RenderedPragma(
-            Pragma(pragma.payload, PragmaOrigin.DIRECTIVE, pragma.location, filename),
-            output_offset,
-            min(output_offset + 2, len(result.source)),
-            tuple(range(pragma.start_line, pragma.end_line + 1)),
-        ))
+        found.append(
+            _RenderedPragma(
+                Pragma(pragma.payload, PragmaOrigin.DIRECTIVE, pragma.location, filename),
+                output_offset,
+                min(output_offset + 2, len(result.source)),
+                tuple(range(pragma.start_line, pragma.end_line + 1)),
+            )
+        )
     return tuple(found)
 
 
@@ -307,11 +311,13 @@ def _unsupported_pragma(
     return PreprocessResult(
         None,
         filename,
-        (PreprocessDiagnostic(
-            ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
-            message,
-            location,
-        ),),
+        (
+            PreprocessDiagnostic(
+                ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
+                message,
+                location,
+            ),
+        ),
     )
 
 
@@ -366,11 +372,13 @@ def preprocess_source(
         return PreprocessResult(
             None,
             filename,
-            (PreprocessDiagnostic(
-                ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
-                str(error),
-                error.location,
-            ),),
+            (
+                PreprocessDiagnostic(
+                    ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
+                    str(error),
+                    error.location,
+                ),
+            ),
         )
 
     rendered = [

@@ -17,9 +17,7 @@ from cpre import (
 )
 from cpre.expansion import tokenize
 
-_LINE_MARKER = re.compile(
-    r'(?m)^[ \t]*#[ \t]*(?:line[ \t]+)?\d+[^\r\n]*(?:\r\n|\r|\n|$)'
-)
+_LINE_MARKER = re.compile(r"(?m)^[ \t]*#[ \t]*(?:line[ \t]+)?\d+[^\r\n]*(?:\r\n|\r|\n|$)")
 
 
 @dataclass(frozen=True)
@@ -61,15 +59,16 @@ CASES = (
     ),
     ConcreteCase(
         "injected-offsetof",
-        "struct item { int value; };\n"
-        "unsigned long n = offsetof(struct item, value);\n",
-        MacroConfiguration(definitions=(
-            MacroDefinition(
-                "offsetof",
-                "((unsigned long)&(((TYPE*)0)->MEMBER))",
-                parameters=("TYPE", "MEMBER"),
-            ),
-        )),
+        "struct item { int value; };\nunsigned long n = offsetof(struct item, value);\n",
+        MacroConfiguration(
+            definitions=(
+                MacroDefinition(
+                    "offsetof",
+                    "((unsigned long)&(((TYPE*)0)->MEMBER))",
+                    parameters=("TYPE", "MEMBER"),
+                ),
+            )
+        ),
         ("offsetof(TYPE, MEMBER) ((unsigned long)&(((TYPE*)0)->MEMBER))",),
     ),
 )
@@ -77,10 +76,7 @@ CASES = (
 
 def _semantic_tokens(source: str) -> tuple[str, ...]:
     source = _LINE_MARKER.sub("", source)
-    return tuple(
-        token.text for token in tokenize(source)
-        if token.kind not in {"space", "comment"}
-    )
+    return tuple(token.text for token in tokenize(source) if token.kind not in {"space", "comment"})
 
 
 def _pcpp(source: str, definitions: tuple[str, ...]) -> str:
@@ -132,7 +128,7 @@ def test_configured_definition_maps_expansion_to_source_invocation():
     expanded = [mapping for mapping in result.source_map if mapping.expanded]
     assert len(expanded) == 1
     mapping = expanded[0]
-    assert source[mapping.source_start:mapping.source_end] == "COUNT"
+    assert source[mapping.source_start : mapping.source_end] == "COUNT"
     assert mapping.start.line == 1 and mapping.start.column == 12
     assert result.macros["COUNT"].definition.location is None
 

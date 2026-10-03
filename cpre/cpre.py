@@ -20,103 +20,157 @@ if __package__ in {None, ""}:
         sys.path.remove(package_parent)
     sys.path.insert(0, package_parent)
 
-    from cpre.analysis import analyze_source, analyze_tree, tree_expressions as _tree_expressions
-    from cpre.discovery import SOURCE_SUFFIXES as _SOURCE_SUFFIXES, source_paths as _source_paths
+    from cpre import reporting as _reporting
+    from cpre.analysis import analyze_source, analyze_tree
+    from cpre.analysis import tree_expressions as _tree_expressions
+    from cpre.discovery import SOURCE_SUFFIXES as _SOURCE_SUFFIXES
+    from cpre.discovery import source_paths as _source_paths
     from cpre.expressions import (
         ExpressionParser as _ExpressionParser,
+    )
+    from cpre.expressions import (
         conjunction,
         disjunction,
         expression_atoms,
-        expression_atoms_in_order as _expression_atoms_in_order,
-        expression_comparison_key as _expression_comparison_key,
         expression_predicates,
-        expressions_differ as _expressions_differ,
         format_expression,
         negate,
         parse_expression,
         simplify,
+    )
+    from cpre.expressions import (
+        expression_atoms_in_order as _expression_atoms_in_order,
+    )
+    from cpre.expressions import (
+        expression_comparison_key as _expression_comparison_key,
+    )
+    from cpre.expressions import (
+        expressions_differ as _expressions_differ,
+    )
+    from cpre.expressions import (
         tokens as _tokens,
     )
     from cpre.model import (
+        FALSE,
+        TRUE,
         BooleanAtom,
         BranchAnalysis,
-        ConditionError,
         ConditionalBranch,
         ConditionalGroup,
         ConditionalTree,
+        ConditionError,
         Conjunction,
         Constant,
         DirectiveStructureError,
         Disjunction,
         Expression,
         ExpressionSyntaxError,
-        FALSE,
         Negation,
         Predicate,
-        SourceLocation as _SourceLocation,
-        TRUE,
         Variable,
+    )
+    from cpre.model import (
+        SourceLocation as _SourceLocation,
     )
     from cpre.parser import (
         DIRECTIVE_RE as _DIRECTIVE_RE,
+    )
+    from cpre.parser import (
         LogicalLine as _LogicalLine,
+    )
+    from cpre.parser import (
         directive_expression as _directive_expression,
+    )
+    from cpre.parser import (
         logical_lines as _logical_lines,
+    )
+    from cpre.parser import (
         parse_source,
+    )
+    from cpre.parser import (
         remainder_location as _remainder_location,
+    )
+    from cpre.parser import (
         strip_comments as _strip_comments,
     )
-    from cpre import reporting as _reporting
-    from cpre.robdd import BDD as _BDD, exact_simplify, simplify_under
+    from cpre.robdd import BDD as _BDD
+    from cpre.robdd import exact_simplify, simplify_under
 else:
-    from .analysis import analyze_source, analyze_tree, tree_expressions as _tree_expressions
-    from .discovery import SOURCE_SUFFIXES as _SOURCE_SUFFIXES, source_paths as _source_paths
+    from . import reporting as _reporting
+    from .analysis import analyze_source, analyze_tree
+    from .analysis import tree_expressions as _tree_expressions
+    from .discovery import SOURCE_SUFFIXES as _SOURCE_SUFFIXES
+    from .discovery import source_paths as _source_paths
     from .expressions import (
         ExpressionParser as _ExpressionParser,
+    )
+    from .expressions import (
         conjunction,
         disjunction,
         expression_atoms,
-        expression_atoms_in_order as _expression_atoms_in_order,
-        expression_comparison_key as _expression_comparison_key,
         expression_predicates,
-        expressions_differ as _expressions_differ,
         format_expression,
         negate,
         parse_expression,
         simplify,
+    )
+    from .expressions import (
+        expression_atoms_in_order as _expression_atoms_in_order,
+    )
+    from .expressions import (
+        expression_comparison_key as _expression_comparison_key,
+    )
+    from .expressions import (
+        expressions_differ as _expressions_differ,
+    )
+    from .expressions import (
         tokens as _tokens,
     )
     from .model import (
+        FALSE,
+        TRUE,
         BooleanAtom,
         BranchAnalysis,
-        ConditionError,
         ConditionalBranch,
         ConditionalGroup,
         ConditionalTree,
+        ConditionError,
         Conjunction,
         Constant,
         DirectiveStructureError,
         Disjunction,
         Expression,
         ExpressionSyntaxError,
-        FALSE,
         Negation,
         Predicate,
-        SourceLocation as _SourceLocation,
-        TRUE,
         Variable,
+    )
+    from .model import (
+        SourceLocation as _SourceLocation,
     )
     from .parser import (
         DIRECTIVE_RE as _DIRECTIVE_RE,
+    )
+    from .parser import (
         LogicalLine as _LogicalLine,
+    )
+    from .parser import (
         directive_expression as _directive_expression,
+    )
+    from .parser import (
         logical_lines as _logical_lines,
+    )
+    from .parser import (
         parse_source,
+    )
+    from .parser import (
         remainder_location as _remainder_location,
+    )
+    from .parser import (
         strip_comments as _strip_comments,
     )
-    from . import reporting as _reporting
-    from .robdd import BDD as _BDD, exact_simplify, simplify_under
+    from .robdd import BDD as _BDD
+    from .robdd import exact_simplify, simplify_under
 
 
 _Visibility = _reporting.Visibility
@@ -142,15 +196,11 @@ def _compute_visibility(tree, verbose):
 
 
 def _render_report(tree, *, verbose=True, color=False):
-    return _with_legacy_notability(
-        _reporting.render_report, tree, verbose=verbose, color=color
-    )
+    return _with_legacy_notability(_reporting.render_report, tree, verbose=verbose, color=color)
 
 
 def format_report(tree, *, verbose=True, color=False):
-    return _with_legacy_notability(
-        _reporting.format_report, tree, verbose=verbose, color=color
-    )
+    return _with_legacy_notability(_reporting.format_report, tree, verbose=verbose, color=color)
 
 
 def tree_to_dict(tree, *, verbose=True):

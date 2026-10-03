@@ -13,13 +13,10 @@ from pycparser import c_ast, c_parser
 from cpre import ErrorCode, preprocess_source
 from cpre.expansion import tokenize
 
-
 FIXTURES = Path(__file__).parent / "compatibility" / "fixtures"
-_LINE_MARKER = re.compile(
-    r'(?m)^[ \t]*#[ \t]*(?:line[ \t]+)?(?P<line>\d+)[^\r\n]*(?:\r\n|\r|\n|$)'
-)
+_LINE_MARKER = re.compile(r"(?m)^[ \t]*#[ \t]*(?:line[ \t]+)?(?P<line>\d+)[^\r\n]*(?:\r\n|\r|\n|$)")
 _LINE_MARKER_LINE = re.compile(
-    r'^[ \t]*#[ \t]*(?:line[ \t]+)?(?P<line>\d+)[^\r\n]*(?:\r\n|\r|\n)?$'
+    r"^[ \t]*#[ \t]*(?:line[ \t]+)?(?P<line>\d+)[^\r\n]*(?:\r\n|\r|\n)?$"
 )
 
 
@@ -99,8 +96,7 @@ def _without_line_markers(source: str) -> str:
 def _semantic_tokens(source: str) -> tuple[str, ...]:
     normalized = _without_line_markers(source)
     return tuple(
-        token.text for token in tokenize(normalized)
-        if token.kind not in {"space", "comment"}
+        token.text for token in tokenize(normalized) if token.kind not in {"space", "comment"}
     )
 
 
@@ -143,12 +139,14 @@ def _pcpp_semantic_positions(source: str) -> tuple[tuple[str, int], ...]:
 
 
 def _token_diff(left: tuple[str, ...], right: tuple[str, ...]) -> str:
-    return "".join(difflib.unified_diff(
-        [f"{index:04d}: {token}\n" for index, token in enumerate(left)],
-        [f"{index:04d}: {token}\n" for index, token in enumerate(right)],
-        fromfile="cpre",
-        tofile="pcpp",
-    ))
+    return "".join(
+        difflib.unified_diff(
+            [f"{index:04d}: {token}\n" for index, token in enumerate(left)],
+            [f"{index:04d}: {token}\n" for index, token in enumerate(right)],
+            fromfile="cpre",
+            tofile="pcpp",
+        )
+    )
 
 
 def test_every_compatibility_fixture_is_gated_or_explicitly_noncomplete():
@@ -167,11 +165,12 @@ def test_every_compatibility_fixture_is_gated_or_explicitly_noncomplete():
 def test_classifications_and_differential_configurations_agree():
     from test_downstream_compatibility import CASES
 
-    classified = {(case.name, case.assumptions) for case in CASES
-                  if case.status == "supported"}
+    classified = {(case.name, case.assumptions) for case in CASES if case.status == "supported"}
     gated = {(case.fixture, case.assumptions) for case in SUPPORTED_CASES}
     assert classified == gated
-    assert {case.name for case in CASES if case.status != "supported"} == set(EXPLICIT_NONCOMPLETE_CASES)
+    assert {case.name for case in CASES if case.status != "supported"} == set(
+        EXPLICIT_NONCOMPLETE_CASES
+    )
 
 
 @pytest.mark.parametrize("case", SUPPORTED_CASES, ids=lambda case: case.id)
@@ -263,7 +262,7 @@ def test_unsupported_pragma_is_atomic_instead_of_complete_but_divergent():
     result = preprocess_source(source, filename=fixture)
     assert not result.complete
     assert result.source is result.source_map is result.macros is None
-    diagnostic, = result.incomplete
+    (diagnostic,) = result.incomplete
     assert diagnostic.code is ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE
     assert diagnostic.location.line == 1
 

@@ -1,5 +1,6 @@
-import cpre
 import pytest
+
+import cpre
 
 
 def _by_kind(result, kind):
@@ -44,6 +45,7 @@ def test_top_level_public_api_exposes_supported_symbols_only():
         "Finding",
         "FindingKind",
         "FixConfidence",
+        "IncompleteConfigurationError",
         "MacroAssumptions",
         "MacroConfiguration",
         "MacroDefinition",
@@ -132,9 +134,7 @@ def test_dead_branch_is_reported_structurally():
 
 
 def test_redundant_branch_is_reported_structurally_without_deletion_edit():
-    result = cpre.analyze_source(
-        "#if PARENT\n#if PARENT || CHILD\n#endif\n#endif\n"
-    )
+    result = cpre.analyze_source("#if PARENT\n#if PARENT || CHILD\n#endif\n#endif\n")
 
     findings = _by_kind(result, cpre.FindingKind.REDUNDANT_BRANCH)
     assert len(findings) == 1
@@ -188,9 +188,7 @@ def test_single_line_elif_simplification_has_precise_edit():
 
 
 def test_contextual_only_simplification_has_contextual_result_type_and_edit():
-    result = cpre.analyze_source(
-        "#if PARENT\n#if PARENT && CHILD\n#endif\n#endif\n"
-    )
+    result = cpre.analyze_source("#if PARENT\n#if PARENT && CHILD\n#endif\n#endif\n")
 
     findings = _by_kind(result, cpre.FindingKind.CONTEXTUAL_SIMPLIFICATION)
     assert len(findings) == 1
@@ -262,9 +260,7 @@ def test_comment_inside_condition_is_part_of_replaced_range():
 
 
 def test_macro_form_directive_does_not_emit_condition_edit():
-    result = cpre.analyze_source(
-        "#if PARENT\n#ifdef PARENT\n#endif\n#endif\n"
-    )
+    result = cpre.analyze_source("#if PARENT\n#ifdef PARENT\n#endif\n#endif\n")
 
     finding = _by_kind(result, cpre.FindingKind.REDUNDANT_BRANCH)[0]
     assert finding.directive == "ifdef"
@@ -278,9 +274,7 @@ def test_no_simplification_is_represented_by_absence():
 
 
 def test_contextual_false_is_canonical_zero_on_dead_branch():
-    result = cpre.analyze_source(
-        "#if PARENT\n#if !PARENT\n#endif\n#endif\n"
-    )
+    result = cpre.analyze_source("#if PARENT\n#if !PARENT\n#endif\n#endif\n")
 
     findings = _by_kind(result, cpre.FindingKind.DEAD_BRANCH)
     assert len(findings) == 1

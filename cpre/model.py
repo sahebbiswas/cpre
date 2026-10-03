@@ -34,17 +34,17 @@ class Predicate:
 
 @dataclass(frozen=True)
 class Negation:
-    operand: "Expression"
+    operand: Expression
 
 
 @dataclass(frozen=True)
 class Conjunction:
-    operands: tuple["Expression", ...]
+    operands: tuple[Expression, ...]
 
 
 @dataclass(frozen=True)
 class Disjunction:
-    operands: tuple["Expression", ...]
+    operands: tuple[Expression, ...]
 
 
 BooleanAtom = typing.Union[Variable, DefinedVariable, Predicate]
@@ -118,8 +118,8 @@ class ConditionalBranch:
     line: int
     expression_text: str | None
     expression: Expression | None
-    children: list["ConditionalGroup"] = field(default_factory=list)
-    analysis: "BranchAnalysis | None" = None
+    children: list[ConditionalGroup] = field(default_factory=list)
+    analysis: BranchAnalysis | None = None
 
 
 @dataclass

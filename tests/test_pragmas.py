@@ -50,9 +50,7 @@ def test_direct_pragma_uses_host_handler_and_is_masked():
 def test_direct_pragma_with_comments_and_splicing_has_token_payload():
     handler, seen = _handler({"cpre value more"})
     result = preprocess_source(
-        "  #pragma cpre /* comment */ value \\\n"
-        "    more\n"
-        "int kept;\n",
+        "  #pragma cpre /* comment */ value \\\n    more\nint kept;\n",
         pragma_handler=handler,
     )
 
@@ -64,10 +62,7 @@ def test_direct_pragma_with_comments_and_splicing_has_token_payload():
 def test_pragma_payload_normalization_preserves_literal_whitespace():
     expected = 'message("a  b")'
     handler, seen = _handler({expected})
-    source = (
-        '#pragma message("a  b")\n'
-        '_Pragma("message(\\\"a  b\\\")")\n'
-    )
+    source = '#pragma message("a  b")\n_Pragma("message(\\"a  b\\")")\n'
 
     result = preprocess_source(source, pragma_handler=handler)
 
@@ -77,7 +72,7 @@ def test_pragma_payload_normalization_preserves_literal_whitespace():
 
 def test_direct_pragma_operator_is_destringized_and_masked():
     handler, seen = _handler({'message("hello") path\\name'})
-    source = '_Pragma("  message(\\\"hello\\\") /* hidden */ path\\\\name  ")\nint kept;\n'
+    source = '_Pragma("  message(\\"hello\\") /* hidden */ path\\\\name  ")\nint kept;\n'
 
     result = preprocess_source(source, pragma_handler=handler)
 
@@ -96,11 +91,7 @@ def test_direct_pragma_operator_is_destringized_and_masked():
 
 def test_function_macro_generated_pragma_is_dispatched_at_invocation():
     handler, seen = _handler({"cpre generated"})
-    source = (
-        "#define DO_PRAGMA(x) _Pragma(#x)\n"
-        "DO_PRAGMA(cpre generated)\n"
-        "int kept;\n"
-    )
+    source = "#define DO_PRAGMA(x) _Pragma(#x)\nDO_PRAGMA(cpre generated)\nint kept;\n"
 
     result = preprocess_source(source, filename="macro.c", pragma_handler=handler)
 
@@ -119,11 +110,7 @@ def test_function_macro_generated_pragma_is_dispatched_at_invocation():
 
 def test_object_macro_can_expose_pragma_operator():
     handler, seen = _handler({"cpre object"})
-    source = (
-        '#define P _Pragma("cpre object")\n'
-        "P\n"
-        "int kept;\n"
-    )
+    source = '#define P _Pragma("cpre object")\nP\nint kept;\n'
 
     result = preprocess_source(source, pragma_handler=handler)
 
@@ -175,13 +162,7 @@ def test_handler_can_explicitly_reject_pragma_atomically():
 
 
 def test_pragmas_in_discarded_branches_do_not_require_handler():
-    source = (
-        "#if 0\n"
-        "#pragma ignored\n"
-        '_Pragma("also ignored")\n'
-        "#endif\n"
-        "int kept;\n"
-    )
+    source = '#if 0\n#pragma ignored\n_Pragma("also ignored")\n#endif\nint kept;\n'
 
     result = preprocess_source(source)
 
@@ -208,7 +189,7 @@ def test_malformed_pragma_operator_is_structured_incomplete_without_dispatch():
 def test_invalid_pragma_handler_result_is_configuration_error():
     with pytest.raises(AnalysisError) as error:
         preprocess_source(
-            '#pragma cpre\n',
+            "#pragma cpre\n",
             pragma_handler=lambda pragma: True,
         )
 
@@ -216,12 +197,7 @@ def test_invalid_pragma_handler_result_is_configuration_error():
 
 
 def test_repeated_pragma_preprocessing_is_deterministic():
-    source = (
-        '#define P _Pragma("stable operator")\n'
-        "P\n"
-        "#pragma stable directive\n"
-        "int kept;\n"
-    )
+    source = '#define P _Pragma("stable operator")\nP\n#pragma stable directive\nint kept;\n'
 
     def run():
         seen = []

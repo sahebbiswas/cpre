@@ -42,6 +42,11 @@ dev = [
   "pcpp>=1.30,<2",
   "build>=1",
   "twine>=5",
+  "ruff>=0.1",
+  "mypy>=1.0",
+  "pre-commit>=3.0",
+  "tox>=4.0",
+  "tox-uv>=1.0",
 ]
 
 [tool.setuptools.dynamic]
@@ -52,3 +57,31 @@ include = ["cpre*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["F401", "E501", "E402"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = [
+    "cpre.api",
+    "cpre.cli",
+    "cpre.expansion",
+    "cpre.numeric_conditions",
+    "cpre.pragmas",
+    "cpre.preprocessing",
+    "cpre.reporting",
+    "cpre.symbolic",
+]
+ignore_errors = true
+ignore_missing_imports = true

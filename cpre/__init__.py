@@ -5,8 +5,8 @@ from .api import (
     AnalysisIncomplete,
     AnalysisOptions,
     AnalysisResult,
-    ConditionError,
     ConditionalTree,
+    ConditionError,
     ContextualSimplification,
     CpreError,
     ErrorCode,
@@ -14,6 +14,7 @@ from .api import (
     Finding,
     FindingKind,
     FixConfidence,
+    IncompleteConfigurationError,
     MacroAssumptions,
     ParseError,
     SourceLocation,
@@ -21,22 +22,21 @@ from .api import (
     SuggestedEdit,
     analyze_source,
 )
-
 from .configuration import MacroConfiguration, UnknownNamePolicy
 from .expansion import SourceMapping
 from .macros import MacroDefinition, MacroEnvironment, MacroState
-from .preprocessing import (
-    PreprocessingContext,
-    PreprocessDiagnostic,
-    PreprocessResult,
-    compact,
-)
 from .pragmas import (
     Pragma,
     PragmaDisposition,
     PragmaHandler,
     PragmaOrigin,
     preprocess_source,
+)
+from .preprocessing import (
+    PreprocessDiagnostic,
+    PreprocessingContext,
+    PreprocessResult,
+    compact,
 )
 from .proofs import (
     ProofResult,
@@ -64,16 +64,16 @@ from .structure import (
     parse_conditionals,
 )
 from .symbolic import (
+    FALSE,
+    TRUE,
     BooleanAtom,
     Conjunction,
     Constant,
     DefinedVariable,
     Disjunction,
     Expression,
-    FALSE,
     Negation,
     Predicate,
-    TRUE,
     Variable,
     conjunction,
     disjunction,
@@ -87,7 +87,7 @@ from .symbolic import (
     simplify,
 )
 
-__version__ = "0.11.0"
+__version__ = "0.12.0"
 
 __all__ = [
     "AnalysisError",
@@ -115,6 +115,7 @@ __all__ = [
     "Finding",
     "FindingKind",
     "FixConfidence",
+    "IncompleteConfigurationError",
     "MacroAssumptions",
     "MacroConfiguration",
     "MacroDefinition",

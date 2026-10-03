@@ -6,9 +6,9 @@
     "validated_on": "2026-09-17"
   },
   "cpre": {
-    "version": "0.11.0",
+    "version": "0.12.0",
     "implementation_commit": "88e14949e594c1739467b40ea53210e56bb56771",
-    "first_suitable_release": "0.11.0",
+    "first_suitable_release": "0.12.0",
     "latest_published_release_at_validation": "0.10.16"
   },
   "readiness": {

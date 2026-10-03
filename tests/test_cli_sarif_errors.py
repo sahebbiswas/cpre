@@ -1,7 +1,6 @@
 import json
 
 import cpre
-
 from cpre.cli import main
 
 
@@ -42,9 +41,7 @@ def test_sarif_source_read_error_uses_stable_declared_descriptor(tmp_path, capsy
     run = document["runs"][0]
     notification = run["invocations"][0]["toolExecutionNotifications"][0]
     descriptor_id = notification["descriptor"]["id"]
-    declared_ids = {
-        descriptor["id"] for descriptor in run["tool"]["driver"]["notifications"]
-    }
+    declared_ids = {descriptor["id"] for descriptor in run["tool"]["driver"]["notifications"]}
 
     assert descriptor_id == cpre.ErrorCode.SOURCE_READ_ERROR.value
     assert descriptor_id in declared_ids

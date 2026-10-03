@@ -30,9 +30,7 @@ def test_structural_ranges_and_recovery_survive_installed_package_boundary():
     condition_range = first.directive.condition_range
     assert isinstance(condition_range, cpre.StructuralSourceRange)
     assert condition_range.text(source) == "FLAG && \\\n FLAG"
-    assert condition_range.start == cpre.StructuralSourceLocation(
-        offset=4, line=1, column=5
-    )
+    assert condition_range.start == cpre.StructuralSourceLocation(offset=4, line=1, column=5)
     assert condition_range.end.offset == source.index("FLAG\nbody") + 4
     assert first.body_range.text(source) == "body\n"
     assert [diagnostic.code for diagnostic in tree.diagnostics] == [
@@ -41,9 +39,7 @@ def test_structural_ranges_and_recovery_survive_installed_package_boundary():
 
 
 def test_structural_parser_exposes_public_symbolic_nodes_without_private_imports():
-    tree = cpre.parse_conditionals(
-        "#ifdef FEATURE\n#elifndef FALLBACK\n#endif\n"
-    )
+    tree = cpre.parse_conditionals("#ifdef FEATURE\n#elifndef FALLBACK\n#endif\n")
     first, second = tree.blocks[0].branches
     assert first.directive.condition == cpre.DefinedVariable("FEATURE")
     assert second.directive.condition == cpre.Negation(cpre.DefinedVariable("FALLBACK"))

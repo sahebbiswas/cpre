@@ -7,16 +7,16 @@ and atom-order tables. Public consumers should import these names from the
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Iterable
 
 from .api import AnalysisIncomplete, AnalysisOptions
 from .errors import AnalysisError, ErrorCode
-from .model import BooleanAtom, DefinedVariable, Expression, Predicate, TRUE, Variable
+from .model import TRUE, BooleanAtom, DefinedVariable, Expression, Predicate, Variable
+from .robdd import BDD as _BDD
 from .robdd import AnalysisBudget as _AnalysisBudget
 from .robdd import AnalysisLimitExceeded as _AnalysisLimitExceeded
-from .robdd import BDD as _BDD
 from .robdd import exact_simplify as _exact_simplify
 from .symbolic import normalize, ordered_atoms
 
@@ -105,7 +105,9 @@ def _atom_key(atom: BooleanAtom) -> tuple[str, str]:
     return ("predicate", atom.text)
 
 
-def _prepare(expressions: Iterable[Expression]) -> tuple[tuple[Expression, ...], tuple[BooleanAtom, ...]]:
+def _prepare(
+    expressions: Iterable[Expression],
+) -> tuple[tuple[Expression, ...], tuple[BooleanAtom, ...]]:
     originals = tuple(expressions)
     atoms: set[BooleanAtom] = set()
     normalized: list[Expression] = []

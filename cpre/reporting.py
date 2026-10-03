@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
-from typing import Iterator, Sequence
 
 from .expressions import expression_predicates, expressions_differ, format_expression
 from .model import ConditionalBranch, ConditionalGroup, ConditionalTree
@@ -13,9 +13,8 @@ def branch_differs_from_source(branch: ConditionalBranch) -> bool:
     assert branch.analysis is not None
     if branch.expression is None:
         return False
-    return (
-        expressions_differ(branch.expression, branch.analysis.simplified)
-        or expressions_differ(branch.expression, branch.analysis.contextual)
+    return expressions_differ(branch.expression, branch.analysis.simplified) or expressions_differ(
+        branch.expression, branch.analysis.contextual
     )
 
 
@@ -79,17 +78,20 @@ def branch_dict(branch: ConditionalBranch, visibility: Visibility) -> dict[str, 
             {
                 "simplified_condition": (
                     format_expression(branch.analysis.simplified)
-                    if branch.analysis.simplified is not None else None
+                    if branch.analysis.simplified is not None
+                    else None
                 ),
                 "contextual_condition": (
                     format_expression(branch.analysis.contextual)
-                    if branch.analysis.contextual is not None else None
+                    if branch.analysis.contextual is not None
+                    else None
                 ),
                 "effective_condition": format_expression(branch.analysis.effective),
                 "reason": branch.analysis.reason,
                 "opaque_predicates": (
                     sorted(expression_predicates(branch.expression))
-                    if branch.expression is not None else []
+                    if branch.expression is not None
+                    else []
                 ),
             }
         )
@@ -112,9 +114,7 @@ def tree_to_dict(tree: ConditionalTree, *, verbose: bool = True) -> dict[str, ob
     visibility = compute_visibility(tree, verbose)
     return {
         "groups": [
-            group_dict(group, visibility)
-            for group in tree.groups
-            if id(group) in visibility.groups
+            group_dict(group, visibility) for group in tree.groups if id(group) in visibility.groups
         ]
     }
 
@@ -172,10 +172,14 @@ def text_lines(
                 yield colored(reason, branch_color(branch), color)
             if branch.analysis.simplified is not None:
                 simplified = format_expression(branch.analysis.simplified)
-                contextual = format_expression(branch.analysis.contextual or branch.analysis.simplified)
+                contextual = format_expression(
+                    branch.analysis.contextual or branch.analysis.simplified
+                )
                 simplified_line = f"{'  ' * (depth + 1)}simplified: {simplified}"
                 simplified_color = (
-                    "green" if expressions_differ(branch.expression, branch.analysis.simplified) else "gray"
+                    "green"
+                    if expressions_differ(branch.expression, branch.analysis.simplified)
+                    else "gray"
                 )
                 yield colored(simplified_line, simplified_color, color)
                 if contextual != simplified:
@@ -185,7 +189,9 @@ def text_lines(
                 if predicates:
                     opaque = f"{'  ' * (depth + 1)}opaque: {', '.join(predicates)}"
                     yield colored(opaque, "cyan", color)
-            effective = f"{'  ' * (depth + 1)}effective: {format_expression(branch.analysis.effective)}"
+            effective = (
+                f"{'  ' * (depth + 1)}effective: {format_expression(branch.analysis.effective)}"
+            )
             yield colored(effective, "gray", color)
             yield from text_lines(branch.children, visibility, depth + 1, color=color)
 
@@ -218,6 +224,13 @@ def has_findings(tree: ConditionalTree) -> bool:
 
 
 __all__ = [
-    "Visibility", "branch_differs_from_source", "branch_is_notable", "colored",
-    "compute_visibility", "format_report", "has_findings", "render_report", "tree_to_dict"
+    "Visibility",
+    "branch_differs_from_source",
+    "branch_is_notable",
+    "colored",
+    "compute_visibility",
+    "format_report",
+    "has_findings",
+    "render_report",
+    "tree_to_dict",
 ]

@@ -148,10 +148,7 @@ def test_ifdef_ifndef_and_defined_forms():
     )
 
     assert conditions.format_expression(branch(tree).expression) == "FEATURE"
-    assert (
-        conditions.format_expression(branch(tree, index=1).expression)
-        == "FALLBACK && !DISABLED"
-    )
+    assert conditions.format_expression(branch(tree, index=1).expression) == "FALLBACK && !DISABLED"
     assert conditions.format_expression(branch(tree, group=1).expression) == "!OTHER"
 
 
@@ -168,9 +165,7 @@ def test_c23_elifdef_and_elifndef_forms():
     branches = tree.groups[0].branches
     assert [item.directive for item in branches] == ["if", "elifdef", "elifndef"]
     assert branches[1].expression == conditions.Variable("FALLBACK")
-    assert branches[2].expression == conditions.Negation(
-        conditions.Variable("DISABLED")
-    )
+    assert branches[2].expression == conditions.Negation(conditions.Variable("DISABLED"))
 
 
 def test_value_expression_becomes_opaque_predicate_without_losing_boolean_shape():
@@ -231,15 +226,10 @@ def test_unparenthesized_value_negation_remains_inside_opaque_predicate():
 
 
 def test_logical_text_inside_function_argument_remains_opaque():
-    expression = conditions.parse_expression(
-        '__has_include("platform( && )config.h") && FEATURE'
-    )
+    expression = conditions.parse_expression('__has_include("platform( && )config.h") && FEATURE')
 
     assert isinstance(expression, conditions.Conjunction)
-    assert (
-        conditions.Predicate('__has_include("platform( && )config.h")')
-        in expression.operands
-    )
+    assert conditions.Predicate('__has_include("platform( && )config.h")') in expression.operands
 
 
 def test_multiline_directive_and_comments_preserve_start_line():
@@ -307,9 +297,7 @@ def test_json_identifies_opaque_predicates():
     tree = conditions.analyze_source("#if (X + 1) >= LIMIT\n#endif\n")
 
     result = conditions.tree_to_dict(tree)
-    assert result["groups"][0]["branches"][0]["opaque_predicates"] == [
-        "(X + 1) >= LIMIT"
-    ]
+    assert result["groups"][0]["branches"][0]["opaque_predicates"] == ["(X + 1) >= LIMIT"]
 
 
 def test_text_report_labels_opaque_predicates():
@@ -545,10 +533,10 @@ def test_cli_recursively_analyzes_c_and_cpp_sources(tmp_path):
         "first.c",
         "second.hpp",
     ]
-    assert [
-        item["groups"][0]["branches"][0]["condition"]
-        for item in payload["files"]
-    ] == ["A", "B"]
+    assert [item["groups"][0]["branches"][0]["condition"] for item in payload["files"]] == [
+        "A",
+        "B",
+    ]
 
 
 def test_cli_recursive_fail_on_findings_aggregates_files(tmp_path):
@@ -654,12 +642,10 @@ def test_cli_json_filters_by_default_and_verbose_restores_full_tree(tmp_path):
     )
 
     concise_conditions = [
-        group["branches"][0]["condition"]
-        for group in json.loads(concise.stdout)["groups"]
+        group["branches"][0]["condition"] for group in json.loads(concise.stdout)["groups"]
     ]
     verbose_conditions = [
-        group["branches"][0]["condition"]
-        for group in json.loads(verbose.stdout)["groups"]
+        group["branches"][0]["condition"] for group in json.loads(verbose.stdout)["groups"]
     ]
     assert concise.returncode == verbose.returncode == 0
     assert concise_conditions == ["DUP && DUP", "0"]
@@ -670,9 +656,7 @@ def test_cli_json_filters_by_default_and_verbose_restores_full_tree(tmp_path):
 
 def test_cli_batch_json_omits_files_without_displayed_entries(tmp_path):
     (tmp_path / "unchanged.c").write_text("#if OK\n#endif\n", encoding="utf-8")
-    (tmp_path / "changed.c").write_text(
-        "#if DUP && DUP\n#endif\n", encoding="utf-8"
-    )
+    (tmp_path / "changed.c").write_text("#if DUP && DUP\n#endif\n", encoding="utf-8")
 
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--recursive", str(tmp_path), "--json"],

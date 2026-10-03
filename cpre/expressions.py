@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import re
-from typing import Iterator, Sequence
+from collections.abc import Iterator, Sequence
 
 from .model import (
+    FALSE,
+    TRUE,
     BooleanAtom,
     Conjunction,
     Constant,
@@ -13,11 +15,9 @@ from .model import (
     Disjunction,
     Expression,
     ExpressionSyntaxError,
-    FALSE,
     Negation,
     Predicate,
     SourceLocation,
-    TRUE,
     Variable,
 )
 
@@ -203,7 +203,11 @@ class ExpressionParser:
     @staticmethod
     def _parse_number(token: Token) -> Constant:
         digits = re.sub(r"[uUlL]+$", "", token.text)
-        base = 16 if digits.lower().startswith("0x") else (8 if len(digits) > 1 and digits.startswith("0") else 10)
+        base = (
+            16
+            if digits.lower().startswith("0x")
+            else (8 if len(digits) > 1 and digits.startswith("0") else 10)
+        )
         try:
             return Constant(int(digits, base) != 0)
         except ValueError as error:
@@ -253,13 +257,18 @@ def conjunction(*expressions: Expression) -> Expression:
             return FALSE
         if expression == TRUE:
             continue
-        operands.extend(expression.operands if isinstance(expression, Conjunction) else (expression,))
+        operands.extend(
+            expression.operands if isinstance(expression, Conjunction) else (expression,)
+        )
     unique = set(operands)
     if any(negate(operand) in unique for operand in unique):
         return FALSE
     filtered = [
-        operand for operand in unique
-        if not (isinstance(operand, Disjunction) and any(term in unique for term in operand.operands))
+        operand
+        for operand in unique
+        if not (
+            isinstance(operand, Disjunction) and any(term in unique for term in operand.operands)
+        )
     ]
     if not filtered:
         return TRUE
@@ -276,13 +285,18 @@ def disjunction(*expressions: Expression) -> Expression:
             return TRUE
         if expression == FALSE:
             continue
-        operands.extend(expression.operands if isinstance(expression, Disjunction) else (expression,))
+        operands.extend(
+            expression.operands if isinstance(expression, Disjunction) else (expression,)
+        )
     unique = set(operands)
     if any(negate(operand) in unique for operand in unique):
         return TRUE
     filtered = [
-        operand for operand in unique
-        if not (isinstance(operand, Conjunction) and any(term in unique for term in operand.operands))
+        operand
+        for operand in unique
+        if not (
+            isinstance(operand, Conjunction) and any(term in unique for term in operand.operands)
+        )
     ]
     if not filtered:
         return FALSE
@@ -391,7 +405,17 @@ def expressions_differ(left: Expression | None, right: Expression | None) -> boo
 
 
 __all__ = [
-    "ExpressionParser", "conjunction", "disjunction", "expression_atoms",
-    "expression_atoms_in_order", "expression_comparison_key", "expression_predicates",
-    "expressions_differ", "format_expression", "negate", "parse_expression", "simplify", "tokens"
+    "ExpressionParser",
+    "conjunction",
+    "disjunction",
+    "expression_atoms",
+    "expression_atoms_in_order",
+    "expression_comparison_key",
+    "expression_predicates",
+    "expressions_differ",
+    "format_expression",
+    "negate",
+    "parse_expression",
+    "simplify",
+    "tokens",
 ]

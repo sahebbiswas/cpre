@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from enum import Enum
-from typing import Iterable, Mapping
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .api import AnalysisOptions
+    from .preprocessing import PreprocessingContext
 
 from .errors import AnalysisError, ErrorCode
 from .macros import MacroDefinition, MacroEnvironment, MacroState
@@ -74,8 +79,7 @@ class MacroConfiguration:
         normalized: list[MacroDefinition] = []
         normalized.extend(MacroDefinition(name, "") for name in sorted(present))
         normalized.extend(
-            MacroDefinition(name, str(value))
-            for name, value in sorted(integer_values.items())
+            MacroDefinition(name, str(value)) for name, value in sorted(integer_values.items())
         )
 
         supplied_names: set[str] = set()
@@ -108,9 +112,99 @@ class MacroConfiguration:
                 code=ErrorCode.INVALID_CONFIGURATION,
             )
 
-        object.__setattr__(self, "definitions", tuple(sorted(normalized, key=lambda item: item.name)))
+        object.__setattr__(
+            self, "definitions", tuple(sorted(normalized, key=lambda item: item.name))
+        )
         object.__setattr__(self, "undefined", absent)
         object.__setattr__(self, "unknown_names", policy)
+
+    @classmethod
+    def from_source(
+        cls,
+        text: str,
+        *,
+        filename: str | None = None,
+        context: PreprocessingContext | None = None,
+        unknown_names: UnknownNamePolicy | str = UnknownNamePolicy.OPEN,
+        options: AnalysisOptions | None = None,
+    ) -> MacroConfiguration:
+        if type(text) is not str:
+            raise AnalysisError(
+                "text must be a string",
+                code=ErrorCode.INVALID_CONFIGURATION,
+            )
+
+        from .errors import IncompleteConfigurationError
+        from .pragmas import preprocess_source
+
+        seed_config = cls(unknown_names=unknown_names)
+        result = preprocess_source(
+            text,
+            filename=filename,
+            configuration=seed_config,
+            context=context,
+            options=options,
+        )
+
+        if not result.complete:
+            first = result.incomplete[0]
+            raise IncompleteConfigurationError(
+                getattr(first, "message", "incomplete configuration"),
+                code=getattr(first, "code", ErrorCode.ANALYSIS_FAILURE),
+                location=getattr(first, "location", None),
+                filename=filename,
+                incomplete=result.incomplete,
+            )
+
+        assert result.macros is not None
+        presence = []
+        undefined = []
+        integers = {}
+        definitions = []
+
+        context_names = set(context.standard_macros.keys()) if context is not None else set()
+
+        for name, state in result.macros.items():
+            if (
+                name in context_names
+                and state.defined
+                and state.definition is not None
+                and state.definition.location is None
+            ):
+                continue
+
+            if state.defined is False and state.definition is None:
+                undefined.append(name)
+            elif state.defined is True and state.definition is not None:
+                rep = state.definition.replacement
+                if state.definition.parameters is None:
+                    if rep == "":
+                        presence.append(name)
+                        continue
+                    try:
+                        val = int(rep)
+                        if str(val) == rep and val != 0:
+                            integers[name] = val
+                            continue
+                        elif val == 0 and rep == "0":
+                            integers[name] = val
+                            continue
+                    except ValueError:
+                        pass
+                definitions.append(state.definition)
+            else:
+                raise AnalysisError(
+                    "invalid macro state snapshot",
+                    code=ErrorCode.INVALID_CONFIGURATION,
+                )
+
+        return cls(
+            presence=presence,
+            undefined=undefined,
+            integers=integers,
+            definitions=definitions,
+            unknown_names=unknown_names,
+        )
 
     @staticmethod
     def _validate_name(name: object) -> None:

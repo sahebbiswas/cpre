@@ -7,7 +7,6 @@ from pycparser import c_parser
 
 from cpre import ErrorCode, preprocess_source
 
-
 COMPATIBILITY = Path(__file__).parent / "compatibility"
 FIXTURES = COMPATIBILITY / "fixtures"
 PROFILE_FIXTURES = COMPATIBILITY / "cgull_profile"
@@ -24,7 +23,7 @@ def _assert_atomic_diagnostic(source: str, code: ErrorCode, line: int) -> None:
     assert result.source is None
     assert result.source_map is None
     assert result.macros is None
-    diagnostic, = result.incomplete
+    (diagnostic,) = result.incomplete
     assert diagnostic.code is code
     assert diagnostic.location.line == line
 
@@ -61,15 +60,11 @@ def test_cgull_profile_is_pinned_and_declares_bounded_readiness():
     include = profile["exclusions"]["raw_reachable_include"]
     assert include["supported"] is False
     assert include["diagnostic"] == ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE.value
-    assert include["nonimpact_evidence"] == (
-        "handled_at_prepared_translation_unit_boundary"
-    )
+    assert include["nonimpact_evidence"] == ("handled_at_prepared_translation_unit_boundary")
 
 
 def test_prepared_cgull_translation_unit_is_supported_and_parseable():
-    source = (PROFILE_FIXTURES / "prepared_translation_unit.c").read_text(
-        encoding="utf-8"
-    )
+    source = (PROFILE_FIXTURES / "prepared_translation_unit.c").read_text(encoding="utf-8")
 
     # Physical line 1 models an unresolved external include already masked by the
     # C-GULL adapter. Resolved project-header content follows inline.

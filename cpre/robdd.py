@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 from .expressions import conjunction, disjunction, negate, simplify
 from .model import (
-    BooleanAtom, Conjunction, Constant, Disjunction, Expression, FALSE,
-    Negation, Predicate, TRUE, Variable,
+    FALSE,
+    TRUE,
+    BooleanAtom,
+    Conjunction,
+    Constant,
+    Disjunction,
+    Expression,
+    Negation,
+    Predicate,
+    Variable,
 )
 
 
@@ -158,8 +166,12 @@ class BDD:
         right_node = self.nodes[right]
         assert left_node is not None and right_node is not None
         variable = min(left_node[0], right_node[0])
-        left_low, left_high = (left_node[1], left_node[2]) if left_node[0] == variable else (left, left)
-        right_low, right_high = (right_node[1], right_node[2]) if right_node[0] == variable else (right, right)
+        left_low, left_high = (
+            (left_node[1], left_node[2]) if left_node[0] == variable else (left, left)
+        )
+        right_low, right_high = (
+            (right_node[1], right_node[2]) if right_node[0] == variable else (right, right)
+        )
         result = self._node(
             variable,
             self.apply(operation, left_low, right_low),
