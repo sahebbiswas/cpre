@@ -42,6 +42,11 @@ dev = [
   "pcpp>=1.30,<2",
   "build>=1",
   "twine>=5",
+  "ruff>=0.1",
+  "mypy>=1.0",
+  "pre-commit>=3.0",
+  "tox>=4.0",
+  "tox-uv>=1.0",
 ]
 
 [tool.setuptools.dynamic]
@@ -52,3 +57,23 @@ include = ["cpre*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = []
+
+[tool.mypy]
+python_version = "3.9"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[[tool.mypy.overrides]]
+module = ["pcpp.*", "pycparser.*"]
+ignore_missing_imports = true
