@@ -142,6 +142,8 @@ print(repr(cpre.ordered_atoms(expression)))
                 [sys.executable, "-c", script],
                 env=env,
                 text=True,
+                stdin=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
         )
 
