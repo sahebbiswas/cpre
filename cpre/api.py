@@ -8,7 +8,7 @@ from enum import Enum
 from typing import Iterable, Iterator, Mapping
 
 from . import cpre as _engine
-from .errors import AnalysisError, CpreError, ErrorCode, ParseError, SourceLocation
+from .errors import AnalysisError, CpreError, ErrorCode, IncompleteConfigurationError, ParseError, SourceLocation
 from .expressions import conjunction, negate
 from .model import DefinedVariable, TRUE, Variable
 from .robdd import AnalysisBudget as _AnalysisBudget

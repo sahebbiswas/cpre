@@ -154,7 +154,7 @@ result = cpre.preprocess_source(source, configuration=config)
 
 `UnknownNamePolicy.UNDEFINED` is explicit opt-in behavior for callers that want otherwise-unmentioned names to behave as undefined/zero during concrete evaluation. The default remains open-world.
 
-See [Concrete macro configuration](concrete-configuration.md) for presence, integer values, explicit undefined names, arbitrary macro definitions, and unknown-name policy.
+See [Concrete macro configuration](concrete-configuration.md) for presence, integer values, explicit undefined names, arbitrary macro definitions, and unknown-name policy. `MacroConfiguration` can also be derived from a seed source (such as `flags.h`) using `MacroConfiguration.from_source()`.
 
 ## Macro state and source-order updates
 

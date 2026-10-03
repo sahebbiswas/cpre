@@ -61,4 +61,15 @@ class AnalysisError(CpreError):
     """Raised for supported failures after parsing has completed."""
 
 
-__all__ = ["AnalysisError", "CpreError", "ErrorCode", "ParseError", "SourceLocation"]
+class IncompleteConfigurationError(CpreError):
+    """Raised when a configuration seed source yields an incomplete result."""
+
+    def __init__(self, message: str, *, code: ErrorCode,
+                 location: SourceLocation | None = None,
+                 filename: str | None = None,
+                 incomplete: tuple[object, ...] = ()) -> None:
+        super().__init__(message, code=code, location=location, filename=filename)
+        self.incomplete = incomplete
+
+
+__all__ = ["AnalysisError", "CpreError", "ErrorCode", "IncompleteConfigurationError", "ParseError", "SourceLocation"]

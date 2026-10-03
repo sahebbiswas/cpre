@@ -44,6 +44,23 @@ The forms are intentionally explicit:
 
 Names may appear in only one configured category. Invalid names, duplicate/conflicting definitions, non-integer values, and invalid unknown-name policies raise `AnalysisError` with `ErrorCode.INVALID_CONFIGURATION`.
 
+## Construction from source
+
+`MacroConfiguration` can be derived from a seed source (such as `flags.h`) using `from_source()`:
+
+```python
+config = cpre.MacroConfiguration.from_source(
+    text,
+    filename="flags.h",
+    context=context,
+    unknown_names=cpre.UnknownNamePolicy.OPEN,
+)
+```
+
+The string is evaluated as a normal preprocessing run. The resulting definitions are categorized into `presence`, `integers`, `undefined`, and `definitions` according to their replacement text. If the seed source is incomplete (e.g. contains an active `#include`), an `IncompleteConfigurationError` is raised.
+
+Note: Guard macros (such as `#ifndef FLAGS_H`) are currently retained as presence definitions. Self-preprocessing the seed using this derived configuration is not useful until include-guard handling is available in a future update.
+
 ## Standard predefined preprocessing context
 
 Use `PreprocessingContext` for deterministic standard-environment values. Replacement text is explicit and reproducible; cpre does not read the wall clock, inspect the host compiler, infer an ABI, or guess a language mode.
