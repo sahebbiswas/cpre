@@ -324,3 +324,33 @@ def test_base_is_not_mutated():
     snapshot = (base.definitions, base.undefined, base.unknown_names)
     MacroConfiguration.from_source("#undef FEATURE\n#define NEW\n", base=base)
     assert (base.definitions, base.undefined, base.unknown_names) == snapshot
+
+
+def test_base_defining_context_name_is_rejected_not_silently_stripped():
+    context = PreprocessingContext(standard_macros={"__STDC__": "1"})
+    base = MacroConfiguration(integers={"__STDC__": 1, "FEATURE": 1})
+    with pytest.raises(AnalysisError) as exc_info:
+        MacroConfiguration.from_source("#define OTHER 2\n", base=base, context=context)
+    assert exc_info.value.code == ErrorCode.INVALID_CONFIGURATION
+
+
+@pytest.mark.parametrize(
+    "base",
+    [
+        MacroConfiguration(integers={"__STDC__": 1, "FEATURE": 1}),
+        MacroConfiguration(undefined={"__STDC__"}, integers={"FEATURE": 1}),
+    ],
+)
+def test_context_stripping_never_drops_untouched_base_names(base, monkeypatch):
+    # Disable the context/configuration conflict check so the stripping guard
+    # in from_source() is exercised on its own: base names must survive even
+    # though base definitions and context definitions both have location=None.
+    import cpre.preprocessing
+
+    monkeypatch.setattr(cpre.preprocessing, "_configured_preprocessing_context", lambda *_: None)
+    context = PreprocessingContext(standard_macros={"__STDC__": "1"})
+    config = MacroConfiguration.from_source("#define OTHER 2\n", base=base, context=context)
+    assert config == MacroConfiguration(
+        definitions=[*base.definitions, MacroDefinition("OTHER", "2")],
+        undefined=base.undefined,
+    )

@@ -188,7 +188,18 @@ class MacroConfiguration:
         integers = {}
         definitions = []
 
-        context_names = set(context.standard_macros.keys()) if context is not None else set()
+        # Only names injected by the context during this run are candidates for
+        # stripping. Base definitions also have ``location=None``, so exclude
+        # any name the base configured rather than relying on the separate
+        # context/configuration conflict check to keep them disjoint.
+        base_names = (
+            {definition.name for definition in base.definitions} | base.undefined
+            if base is not None
+            else set()
+        )
+        context_names = (
+            set(context.standard_macros.keys()) - base_names if context is not None else set()
+        )
 
         for name, state in result.macros.items():
             if (
