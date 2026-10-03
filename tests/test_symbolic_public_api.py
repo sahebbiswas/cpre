@@ -3,8 +3,9 @@ import os
 import subprocess
 import sys
 
-import cpre
 import pytest
+
+import cpre
 
 
 def test_macro_truth_definedness_and_predicate_are_distinct_atoms():
@@ -119,7 +120,7 @@ def test_expression_from_dict_rejects_malformed_or_unknown_data(data):
 
 
 def test_public_symbolic_output_is_hash_seed_independent():
-    script = r'''
+    script = r"""
 import json
 import cpre
 
@@ -132,7 +133,7 @@ expression = cpre.Conjunction((
 print(cpre.format_expression(expression))
 print(json.dumps(cpre.expression_to_dict(expression), separators=(",", ":")))
 print(repr(cpre.ordered_atoms(expression)))
-'''
+"""
 
     outputs = []
     for seed in ("1", "2", "12345"):

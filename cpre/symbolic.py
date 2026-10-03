@@ -9,25 +9,39 @@ from __future__ import annotations
 
 from .expressions import (
     conjunction as _conjunction,
+)
+from .expressions import (
     disjunction as _disjunction,
+)
+from .expressions import (
     expression_atoms as _expression_atoms,
+)
+from .expressions import (
     expression_comparison_key as _expression_comparison_key,
+)
+from .expressions import (
     expression_predicates as _expression_predicates,
+)
+from .expressions import (
     format_expression as _format_expression,
+)
+from .expressions import (
     negate as _negate,
+)
+from .expressions import (
     simplify as _simplify,
 )
 from .model import (
+    FALSE,
+    TRUE,
     BooleanAtom,
     Conjunction,
     Constant,
     DefinedVariable,
     Disjunction,
     Expression,
-    FALSE,
     Negation,
     Predicate,
-    TRUE,
     Variable,
 )
 

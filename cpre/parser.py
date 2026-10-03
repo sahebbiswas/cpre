@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
-from typing import Iterator, Sequence
 
 from .expressions import ExpressionParser
 from .model import (
@@ -20,18 +20,23 @@ from .model import (
     Variable,
 )
 
-DIRECTIVE_RE = re.compile(
-    r"^\s*#\s*(if|ifdef|ifndef|elif|elifdef|elifndef|else|endif)\b(.*)$"
-)
+DIRECTIVE_RE = re.compile(r"^\s*#\s*(if|ifdef|ifndef|elif|elifdef|elifndef|else|endif)\b(.*)$")
 
 
 def strip_comments(source: str) -> str:
     def replacement(match: re.Match[str]) -> str:
         return "".join(character if character in "\r\n" else " " for character in match.group())
+
     # Preserve quoted replacement tokens such as URLs and comment delimiters.
-    pattern = r"\b[0-9][A-Za-z0-9_'.]*|" + r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|/\*.*?\*/|//[^\r\n]*'
-    return re.sub(pattern, lambda match: replacement(match) if match.group().startswith('/')
-                  else match.group(), source, flags=re.DOTALL)
+    pattern = (
+        r"\b[0-9][A-Za-z0-9_'.]*|" + r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|/\*.*?\*/|//[^\r\n]*'
+    )
+    return re.sub(
+        pattern,
+        lambda match: replacement(match) if match.group().startswith("/") else match.group(),
+        source,
+        flags=re.DOTALL,
+    )
 
 
 @dataclass(frozen=True)
@@ -211,6 +216,11 @@ def parse_source(source: str, *, distinguish_defined: bool = False) -> Condition
 
 
 __all__ = [
-    "DIRECTIVE_RE", "LogicalLine", "directive_expression", "logical_lines",
-    "parse_source", "remainder_location", "strip_comments"
+    "DIRECTIVE_RE",
+    "LogicalLine",
+    "directive_expression",
+    "logical_lines",
+    "parse_source",
+    "remainder_location",
+    "strip_comments",
 ]

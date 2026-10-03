@@ -3,14 +3,21 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from enum import Enum
-from typing import Iterable, Iterator, Mapping
 
 from . import cpre as _engine
-from .errors import AnalysisError, CpreError, ErrorCode, IncompleteConfigurationError, ParseError, SourceLocation
+from .errors import (
+    AnalysisError,
+    CpreError,
+    ErrorCode,
+    IncompleteConfigurationError,
+    ParseError,
+    SourceLocation,
+)
 from .expressions import conjunction, negate
-from .model import DefinedVariable, TRUE, Variable
+from .model import TRUE, DefinedVariable, Variable
 from .robdd import AnalysisBudget as _AnalysisBudget
 from .robdd import AnalysisLimitExceeded as _AnalysisLimitExceeded
 from .robdd import ResourceLimits as _ResourceLimits
@@ -357,33 +364,51 @@ def _finding_for_branch(
     }
     if analysis.status == "dead":
         kind = FindingKind.DEAD_BRANCH
-        return (Finding(kind=kind, reason=analysis.reason or "branch is unreachable", edit=None,
-                        depends_on_assumptions=_analysis_dependency(branch, baseline, kind), **common),)
+        return (
+            Finding(
+                kind=kind,
+                reason=analysis.reason or "branch is unreachable",
+                edit=None,
+                depends_on_assumptions=_analysis_dependency(branch, baseline, kind),
+                **common,
+            ),
+        )
     if analysis.status == "redundant":
         kind = FindingKind.REDUNDANT_BRANCH
-        return (Finding(kind=kind, reason=analysis.reason or "condition is redundant in this context", edit=None,
-                        depends_on_assumptions=_analysis_dependency(branch, baseline, kind), **common),)
+        return (
+            Finding(
+                kind=kind,
+                reason=analysis.reason or "condition is redundant in this context",
+                edit=None,
+                depends_on_assumptions=_analysis_dependency(branch, baseline, kind),
+                **common,
+            ),
+        )
     if branch.expression is None:
         return ()
     findings: list[Finding] = []
     if exact is not None:
         kind = FindingKind.SIMPLIFIABLE_CONDITION
-        findings.append(Finding(
-            kind=kind,
-            reason="condition has an exact simpler form",
-            edit=_edit_for(branch, ranges, exact.replacement, FixConfidence.EXACT),
-            depends_on_assumptions=_analysis_dependency(branch, baseline, kind),
-            **common,
-        ))
+        findings.append(
+            Finding(
+                kind=kind,
+                reason="condition has an exact simpler form",
+                edit=_edit_for(branch, ranges, exact.replacement, FixConfidence.EXACT),
+                depends_on_assumptions=_analysis_dependency(branch, baseline, kind),
+                **common,
+            )
+        )
     if contextual is not None:
         kind = FindingKind.CONTEXTUAL_SIMPLIFICATION
-        findings.append(Finding(
-            kind=kind,
-            reason="condition has a simpler equivalent under its branch context",
-            edit=_edit_for(branch, ranges, contextual.replacement, FixConfidence.CONTEXTUAL),
-            depends_on_assumptions=_analysis_dependency(branch, baseline, kind),
-            **common,
-        ))
+        findings.append(
+            Finding(
+                kind=kind,
+                reason="condition has a simpler equivalent under its branch context",
+                edit=_edit_for(branch, ranges, contextual.replacement, FixConfidence.CONTEXTUAL),
+                depends_on_assumptions=_analysis_dependency(branch, baseline, kind),
+                **common,
+            )
+        )
     return tuple(findings)
 
 
@@ -489,7 +514,9 @@ def analyze_source(
         )
         ranges = _condition_ranges(source)
         branches = tuple(_branches(tree.groups))
-        baseline_branches = tuple(_branches(baseline_tree.groups)) if baseline_tree is not None else ()
+        baseline_branches = (
+            tuple(_branches(baseline_tree.groups)) if baseline_tree is not None else ()
+        )
         findings = tuple(
             finding
             for index, branch in enumerate(branches)
@@ -531,6 +558,7 @@ __all__ = [
     "Finding",
     "FindingKind",
     "FixConfidence",
+    "IncompleteConfigurationError",
     "MacroAssumptions",
     "ParseError",
     "SourceLocation",

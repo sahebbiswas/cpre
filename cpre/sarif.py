@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 from urllib.parse import quote
 
 from .api import (
@@ -201,7 +201,9 @@ def _finding_result(finding: Finding, filename: str | None) -> dict[str, object]
     return result
 
 
-def _location(filename: str | None, location: SourceLocation | None) -> list[dict[str, object]] | None:
+def _location(
+    filename: str | None, location: SourceLocation | None
+) -> list[dict[str, object]] | None:
     if location is None:
         return None
     region: dict[str, int] = {"startLine": location.line}

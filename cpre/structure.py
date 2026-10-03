@@ -7,10 +7,10 @@ selection, macro configuration, and exact Boolean analysis.
 
 from __future__ import annotations
 
+import re
 from bisect import bisect_right
 from dataclasses import dataclass, field
 from enum import Enum
-import re
 
 from .model import (
     Conjunction,
@@ -92,8 +92,8 @@ class ConditionalBranch:
 
     directive: ConditionalDirective
     body_range: StructuralSourceRange
-    block: "ConditionalBlock" = field(repr=False)
-    children: list["ConditionalBlock"] = field(default_factory=list)
+    block: ConditionalBlock = field(repr=False)
+    children: list[ConditionalBlock] = field(default_factory=list)
 
 
 @dataclass(eq=False)
@@ -121,13 +121,11 @@ _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _PP_NUMBER = r"(?:[0-9]|\.[0-9])(?:[eEpP][+-]|[A-Za-z0-9_.]|'[A-Za-z0-9_])*"
 _NUMBER = re.compile(_PP_NUMBER)
 _TOKEN = re.compile(
-    r'''[A-Za-z_][A-Za-z0-9_]*|'''
+    r"""[A-Za-z_][A-Za-z0-9_]*|"""
     + _PP_NUMBER
-    + r'''|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|&&|\|\||==|!=|<=|>=|<<|>>|[^\s]'''
+    + r"""|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|&&|\|\||==|!=|<=|>=|<<|>>|[^\s]"""
 )
-_FORMS = frozenset(
-    ("if", "ifdef", "ifndef", "elif", "elifdef", "elifndef", "else", "endif")
-)
+_FORMS = frozenset(("if", "ifdef", "ifndef", "elif", "elifdef", "elifndef", "else", "endif"))
 
 
 def _logical_source(source: str) -> tuple[str, str, list[int]]:
@@ -163,7 +161,7 @@ def _logical_source(source: str) -> tuple[str, str, list[int]]:
                 r'(?:u8R|uR|UR|LR|R)"([^ ()\\\t\r\n]{0,16})\(',
                 text[index : index + 22],
             )
-            if text.startswith(("u8R\"", "uR\"", "UR\"", "LR\"", 'R"'), index)
+            if text.startswith(('u8R"', 'uR"', 'UR"', 'LR"', 'R"'), index)
             else None
         )
         if raw:
@@ -292,10 +290,31 @@ def _condition(text: str) -> Expression:
                     return _condition(text[1:-1].strip())
                 break
 
-    if top and top[0][0] == "!" and not any(
-        token[0]
-        in ("+", "-", "*", "/", "%", "<", ">", "<=", ">=", "==", "!=", "&", "|", "^", "<<", ">>")
-        for token in top[1:]
+    if (
+        top
+        and top[0][0] == "!"
+        and not any(
+            token[0]
+            in (
+                "+",
+                "-",
+                "*",
+                "/",
+                "%",
+                "<",
+                ">",
+                "<=",
+                ">=",
+                "==",
+                "!=",
+                "&",
+                "|",
+                "^",
+                "<<",
+                ">>",
+            )
+            for token in top[1:]
+        )
     ):
         operand = text[1:].strip()
         if operand:
@@ -477,11 +496,7 @@ def parse_conditionals(
                 if kind == "else"
                 else StructureDiagnosticCode.BRANCH_AFTER_ELSE
             )
-            message = (
-                "duplicate #else"
-                if kind == "else"
-                else f"#{kind} appears after #else"
-            )
+            message = "duplicate #else" if kind == "else" else f"#{kind} appears after #else"
             diagnostic(code, message, directive_range)
         if kind == "else":
             seen_else.add(id(block))

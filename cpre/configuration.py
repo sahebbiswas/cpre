@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from enum import Enum
-from typing import TYPE_CHECKING, Iterable, Mapping
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .api import AnalysisOptions
@@ -78,8 +79,7 @@ class MacroConfiguration:
         normalized: list[MacroDefinition] = []
         normalized.extend(MacroDefinition(name, "") for name in sorted(present))
         normalized.extend(
-            MacroDefinition(name, str(value))
-            for name, value in sorted(integer_values.items())
+            MacroDefinition(name, str(value)) for name, value in sorted(integer_values.items())
         )
 
         supplied_names: set[str] = set()
@@ -112,7 +112,9 @@ class MacroConfiguration:
                 code=ErrorCode.INVALID_CONFIGURATION,
             )
 
-        object.__setattr__(self, "definitions", tuple(sorted(normalized, key=lambda item: item.name)))
+        object.__setattr__(
+            self, "definitions", tuple(sorted(normalized, key=lambda item: item.name))
+        )
         object.__setattr__(self, "undefined", absent)
         object.__setattr__(self, "unknown_names", policy)
 
@@ -132,8 +134,8 @@ class MacroConfiguration:
                 code=ErrorCode.INVALID_CONFIGURATION,
             )
 
-        from .pragmas import preprocess_source
         from .errors import IncompleteConfigurationError
+        from .pragmas import preprocess_source
 
         seed_config = cls(unknown_names=unknown_names)
         result = preprocess_source(
@@ -163,7 +165,12 @@ class MacroConfiguration:
         context_names = set(context.standard_macros.keys()) if context is not None else set()
 
         for name, state in result.macros.items():
-            if name in context_names and state.defined and state.definition is not None and state.definition.location is None:
+            if (
+                name in context_names
+                and state.defined
+                and state.definition is not None
+                and state.definition.location is None
+            ):
                 continue
 
             if state.defined is False and state.definition is None:

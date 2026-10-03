@@ -4,72 +4,80 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Mapping
 
 from .analysis import _macro_semantics, tree_expressions
 from .api import (
-    AnalysisIncomplete, AnalysisOptions, MacroAssumptions,
-    _normalize_assumptions, _translate_parse_error,
+    AnalysisIncomplete,
+    AnalysisOptions,
+    MacroAssumptions,
+    _normalize_assumptions,
+    _translate_parse_error,
 )
 from .configuration import (
-    MacroConfiguration, _condition_environment, _configured_environment,
+    MacroConfiguration,
+    _condition_environment,
+    _configured_environment,
 )
 from .errors import AnalysisError, ErrorCode, SourceLocation
 from .expansion import Expansion, ExpansionError, SourceMapping, Token, tokenize
 from .expressions import conjunction, expression_atoms_in_order, negate
-from .model import ConditionError, ConditionalGroup, DefinedVariable, Variable, TRUE
 from .macros import MacroDefinition, MacroEnvironment, MacroState, _apply_macro_directive
+from .model import TRUE, ConditionalGroup, ConditionError, DefinedVariable, Variable
 from .numeric_conditions import NumericConditionError, evaluate_numeric_condition
 from .parser import logical_lines, parse_source
-from .robdd import AnalysisBudget, AnalysisLimitExceeded, BDD
-
+from .robdd import BDD, AnalysisBudget, AnalysisLimitExceeded
 
 # These names have implementation-provided semantics in common C/C++ preprocessors.
 # cpre must never silently certify them as ordinary identifiers. Explicit concrete
 # definitions may model environment macros such as __STDC__; otherwise a reachable
 # value use is reported as unsupported until cpre implements deterministic semantics.
-_PREDEFINED_MACROS = frozenset({
-    "__BASE_FILE__",
-    "__COUNTER__",
-    "__DATE__",
-    "__FILE__",
-    "__INCLUDE_LEVEL__",
-    "__LINE__",
-    "__STDC__",
-    "__STDC_HOSTED__",
-    "__STDC_IEC_559__",
-    "__STDC_IEC_559_COMPLEX__",
-    "__STDC_ISO_10646__",
-    "__STDC_LIB_EXT1__",
-    "__STDC_MB_MIGHT_NEQ_WC__",
-    "__STDC_NO_ATOMICS__",
-    "__STDC_NO_COMPLEX__",
-    "__STDC_NO_THREADS__",
-    "__STDC_NO_VLA__",
-    "__STDC_VERSION__",
-    "__TIME__",
-    "__TIMESTAMP__",
-    "__cplusplus",
-})
-_STANDARD_CONFIGURABLE_PREDEFINED = frozenset({
-    "__DATE__",
-    "__STDC__",
-    "__STDC_HOSTED__",
-    "__STDC_IEC_559__",
-    "__STDC_IEC_559_COMPLEX__",
-    "__STDC_ISO_10646__",
-    "__STDC_LIB_EXT1__",
-    "__STDC_MB_MIGHT_NEQ_WC__",
-    "__STDC_NO_ATOMICS__",
-    "__STDC_NO_COMPLEX__",
-    "__STDC_NO_THREADS__",
-    "__STDC_NO_VLA__",
-    "__STDC_VERSION__",
-    "__TIME__",
-    "__cplusplus",
-})
+_PREDEFINED_MACROS = frozenset(
+    {
+        "__BASE_FILE__",
+        "__COUNTER__",
+        "__DATE__",
+        "__FILE__",
+        "__INCLUDE_LEVEL__",
+        "__LINE__",
+        "__STDC__",
+        "__STDC_HOSTED__",
+        "__STDC_IEC_559__",
+        "__STDC_IEC_559_COMPLEX__",
+        "__STDC_ISO_10646__",
+        "__STDC_LIB_EXT1__",
+        "__STDC_MB_MIGHT_NEQ_WC__",
+        "__STDC_NO_ATOMICS__",
+        "__STDC_NO_COMPLEX__",
+        "__STDC_NO_THREADS__",
+        "__STDC_NO_VLA__",
+        "__STDC_VERSION__",
+        "__TIME__",
+        "__TIMESTAMP__",
+        "__cplusplus",
+    }
+)
+_STANDARD_CONFIGURABLE_PREDEFINED = frozenset(
+    {
+        "__DATE__",
+        "__STDC__",
+        "__STDC_HOSTED__",
+        "__STDC_IEC_559__",
+        "__STDC_IEC_559_COMPLEX__",
+        "__STDC_ISO_10646__",
+        "__STDC_LIB_EXT1__",
+        "__STDC_MB_MIGHT_NEQ_WC__",
+        "__STDC_NO_ATOMICS__",
+        "__STDC_NO_COMPLEX__",
+        "__STDC_NO_THREADS__",
+        "__STDC_NO_VLA__",
+        "__STDC_VERSION__",
+        "__TIME__",
+        "__cplusplus",
+    }
+)
 _DEFINEDNESS_DIRECTIVES = frozenset({"ifdef", "ifndef", "elifdef", "elifndef"})
 
 
@@ -263,7 +271,7 @@ def _parse_line_directive(
             candidate.kind != "literal"
             or re.fullmatch(r'"(?:\\.|[^"\\])*"', candidate.text, re.DOTALL) is None
         ):
-            raise ValueError('#line filename must expand to an ordinary string literal')
+            raise ValueError("#line filename must expand to an ordinary string literal")
         file_literal = candidate.text
     return line_number, file_literal
 
@@ -399,8 +407,9 @@ def preprocess_source(
     _configured_preprocessing_context(base_environment, context)
     resolved_options = options if options is not None else AnalysisOptions()
     if not isinstance(resolved_options, AnalysisOptions):
-        raise AnalysisError("options must be an AnalysisOptions instance",
-                            code=ErrorCode.ANALYSIS_FAILURE)
+        raise AnalysisError(
+            "options must be an AnalysisOptions instance", code=ErrorCode.ANALYSIS_FAILURE
+        )
     try:
         tree = parse_source(source, distinguish_defined=True)
     except ConditionError as error:
@@ -408,14 +417,17 @@ def preprocess_source(
 
     physical = source.splitlines(keepends=True)
     logical = list(logical_lines(source))
-    ends = {line.start_line: (logical[index + 1].start_line - 1
-                             if index + 1 < len(logical) else len(physical))
-            for index, line in enumerate(logical)}
+    ends = {
+        line.start_line: (
+            logical[index + 1].start_line - 1 if index + 1 < len(logical) else len(physical)
+        )
+        for index, line in enumerate(logical)
+    }
     retained = [True] * len(physical)
     diagnostics: list[PreprocessDiagnostic | AnalysisIncomplete] = []
 
     def blank(start: int, end: int) -> None:
-        retained[start - 1:end] = [False] * (end - start + 1)
+        retained[start - 1 : end] = [False] * (end - start + 1)
 
     limits = resolved_options._resource_limits()
     budget = AnalysisBudget(limits.max_work)
@@ -430,8 +442,11 @@ def preprocess_source(
     logical_file_literal = _file_literal(filename)
     try:
         semantics = _macro_semantics(tree, legacy_symbolic=False)
-        atoms = [atom for expression in (*tree_expressions(tree.groups), semantics)
-                 for atom in expression_atoms_in_order(expression)]
+        atoms = [
+            atom
+            for expression in (*tree_expressions(tree.groups), semantics)
+            for atom in expression_atoms_in_order(expression)
+        ]
         bdd = BDD(atoms, limits=limits, budget=budget)
         names = sorted({atom.name for atom in atoms if isinstance(atom, Variable)})
         starts = {group.line: group for group in tree.groups}
@@ -475,26 +490,35 @@ def preprocess_source(
                             else None
                         )
                         if builtin is not None:
-                            diagnostics.append(PreprocessDiagnostic(
-                                ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
-                                f"predefined macro {builtin} is not supported during concrete preprocessing",
-                                SourceLocation(current_line),
-                            ))
+                            diagnostics.append(
+                                PreprocessDiagnostic(
+                                    ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
+                                    f"predefined macro {builtin} is not supported during concrete preprocessing",
+                                    SourceLocation(current_line),
+                                )
+                            )
                             break
                         terms = [semantics]
                         for name in names:
                             state = environment.get(name)
-                            for atom, value in ((DefinedVariable(name), state.defined),
-                                                (Variable(name), state.value)):
+                            for atom, value in (
+                                (DefinedVariable(name), state.defined),
+                                (Variable(name), state.value),
+                            ):
                                 if value is not None:
                                     terms.append(atom if value else negate(atom))
                         context_expression = conjunction(*terms)
                         condition = branch.expression if branch.expression is not None else TRUE
                         if bdd.satisfiable(conjunction(context_expression, condition)):
-                            ambiguous = bdd.satisfiable(conjunction(context_expression, negate(condition)))
+                            ambiguous = bdd.satisfiable(
+                                conjunction(context_expression, negate(condition))
+                            )
                             selected: bool | None = None
-                            if (ambiguous and branch.expression_text is not None
-                                    and branch.directive not in _DEFINEDNESS_DIRECTIVES):
+                            if (
+                                ambiguous
+                                and branch.expression_text is not None
+                                and branch.directive not in _DEFINEDNESS_DIRECTIVES
+                            ):
                                 try:
                                     selected = evaluate_numeric_condition(
                                         branch.expression_text,
@@ -504,23 +528,31 @@ def preprocess_source(
                                         unsupported_identifiers=_PREDEFINED_MACROS,
                                     )
                                 except NumericConditionError as error:
-                                    diagnostics.append(PreprocessDiagnostic(
-                                        ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION,
-                                        str(error), SourceLocation(current_line),
-                                    ))
+                                    diagnostics.append(
+                                        PreprocessDiagnostic(
+                                            ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION,
+                                            str(error),
+                                            SourceLocation(current_line),
+                                        )
+                                    )
                                     break
                                 except ExpansionError as error:
-                                    diagnostics.append(PreprocessDiagnostic(
-                                        ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
-                                        str(error), SourceLocation(current_line),
-                                    ))
+                                    diagnostics.append(
+                                        PreprocessDiagnostic(
+                                            ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
+                                            str(error),
+                                            SourceLocation(current_line),
+                                        )
+                                    )
                                     break
                             if ambiguous and selected is None:
-                                diagnostics.append(PreprocessDiagnostic(
-                                    ErrorCode.UNRESOLVED_CONDITION,
-                                    "condition is not determined by the current macro state",
-                                    SourceLocation(current_line),
-                                ))
+                                diagnostics.append(
+                                    PreprocessDiagnostic(
+                                        ErrorCode.UNRESOLVED_CONDITION,
+                                        "condition is not determined by the current macro state",
+                                        SourceLocation(current_line),
+                                    )
+                                )
                                 break
                             if not ambiguous or selected:
                                 active = True
@@ -533,7 +565,7 @@ def preprocess_source(
                 r"^\s*#\s*(endif|define|undef|line|include|include_next|import)\b(.*)$",
                 line.text,
             )
-            if match and match[1] == 'endif':
+            if match and match[1] == "endif":
                 stack.pop()
                 active = stack[-1][2] if stack else True
                 blank(current_line, ends[current_line])
@@ -548,7 +580,7 @@ def preprocess_source(
                     concrete = expansion.directive_text(
                         offsets[current_line - 1], offsets[ends[current_line]]
                     )
-                    if kind == 'line':
+                    if kind == "line":
                         expansion.current_offset = offsets[current_line - 1]
                         next_line, next_file_literal = _parse_line_directive(
                             concrete,
@@ -561,22 +593,29 @@ def preprocess_source(
                             logical_file_literal = next_file_literal
                         blank(current_line, ends[current_line])
                         continue
-                    if kind not in {'define', 'undef'}:
-                        raise ValueError('include processing is not supported')
-                    definition_match = re.fullmatch(r"#\s*(define|undef)\b(.*)", concrete, re.DOTALL)
+                    if kind not in {"define", "undef"}:
+                        raise ValueError("include processing is not supported")
+                    definition_match = re.fullmatch(
+                        r"#\s*(define|undef)\b(.*)", concrete, re.DOTALL
+                    )
                     if definition_match is None or definition_match[1] != kind:
-                        raise ValueError('ambiguous directive after physical line splicing')
+                        raise ValueError("ambiguous directive after physical line splicing")
                     remainder = definition_match[2]
-                    _apply_macro_directive(environment, kind, remainder, SourceLocation(current_line))
-                    if kind == 'define':
+                    _apply_macro_directive(
+                        environment, kind, remainder, SourceLocation(current_line)
+                    )
+                    if kind == "define":
                         name_match = re.match(r"\s*([A-Za-z_]\w*)", remainder)
                         assert name_match is not None
                         definition = environment.get(name_match[1]).definition
                 except ValueError as error:
-                    diagnostics.append(PreprocessDiagnostic(
-                        ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE, str(error),
-                        SourceLocation(current_line),
-                    ))
+                    diagnostics.append(
+                        PreprocessDiagnostic(
+                            ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
+                            str(error),
+                            SourceLocation(current_line),
+                        )
+                    )
                     break
                 if definition is not None:
                     expansion.current_offset = offsets[current_line - 1]
@@ -597,11 +636,13 @@ def preprocess_source(
                     )
                 else:
                     message = "nonconditional preprocessing directive is not supported"
-                diagnostics.append(PreprocessDiagnostic(
-                    ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
-                    message,
-                    SourceLocation(current_line),
-                ))
+                diagnostics.append(
+                    PreprocessDiagnostic(
+                        ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
+                        message,
+                        SourceLocation(current_line),
+                    )
+                )
                 break
             else:
                 environment.logical_override = None
@@ -610,31 +651,44 @@ def preprocess_source(
             environment.logical_override = None
             expansion.flush(environment)
     except ExpansionError as error:
-        diagnostics.append(PreprocessDiagnostic(
-            ErrorCode.UNSUPPORTED_MACRO_EXPANSION, str(error),
-            expansion.location(expansion.current_offset),
-        ))
+        diagnostics.append(
+            PreprocessDiagnostic(
+                ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
+                str(error),
+                expansion.location(expansion.current_offset),
+            )
+        )
     except AnalysisLimitExceeded as error:
         limit_line = error.line if error.line is not None else current_line
-        diagnostics.append(AnalysisIncomplete(
-            ErrorCode.ANALYSIS_LIMIT_EXCEEDED, error.resource, error.limit,
-            error.observed, str(error),
-            SourceLocation(limit_line) if limit_line is not None else None,
-        ))
+        diagnostics.append(
+            AnalysisIncomplete(
+                ErrorCode.ANALYSIS_LIMIT_EXCEEDED,
+                error.resource,
+                error.limit,
+                error.observed,
+                str(error),
+                SourceLocation(limit_line) if limit_line is not None else None,
+            )
+        )
 
     if diagnostics:
         diagnostics.sort(key=lambda item: item.location.line if item.location else 0)
         return PreprocessResult(None, filename, tuple(diagnostics))
-    output = "".join(line if keep else "".join(
-        char if char in "\r\n" else " " for char in line
-    ) for line, keep in zip(physical, retained))
+    output = "".join(
+        line if keep else "".join(char if char in "\r\n" else " " for char in line)
+        for line, keep in zip(physical, retained)
+    )
     characters = list(output)
     char_kept = bytearray()
     for line, keep in zip(physical, retained):
         char_kept.extend(bytes([keep]) * len(line))
     for token in expansion.tokens:
-        if token.kind == "comment" and token.text.startswith("/*") and any(char_kept[token.start:token.end]):
-            characters[token.start:token.end] = source[token.start:token.end]
+        if (
+            token.kind == "comment"
+            and token.text.startswith("/*")
+            and any(char_kept[token.start : token.end])
+        ):
+            characters[token.start : token.end] = source[token.start : token.end]
     restored = "".join(characters)
     restored_lines = restored.splitlines(keepends=True)
     removed_lines = frozenset(
@@ -646,11 +700,17 @@ def preprocess_source(
     builtin = _unexpanded_predefined_macro(output, source_map, expansion)
     if builtin is not None:
         name, location = builtin
-        return PreprocessResult(None, filename, (PreprocessDiagnostic(
-            ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
-            f"predefined macro {name} is not supported during concrete preprocessing",
-            location,
-        ),))
+        return PreprocessResult(
+            None,
+            filename,
+            (
+                PreprocessDiagnostic(
+                    ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
+                    f"predefined macro {name} is not supported during concrete preprocessing",
+                    location,
+                ),
+            ),
+        )
     return PreprocessResult(
         output,
         filename,

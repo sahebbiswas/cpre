@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 import cpre
-
 
 PROFILE_PATH = Path(__file__).parent / "compatibility" / "cgull-symbolic-profile.json"
 
@@ -146,9 +145,7 @@ def _branch_semantics(source: str):
                     local = _require_simplification(condition)
                     contextual = _simplify_under_context(local, remaining)
                     candidates = [
-                        item
-                        for item in (local, contextual)
-                        if item not in (cpre.TRUE, cpre.FALSE)
+                        item for item in (local, contextual) if item not in (cpre.TRUE, cpre.FALSE)
                     ]
                     if candidates:
                         candidate = min(
@@ -162,9 +159,8 @@ def _branch_semantics(source: str):
                             cpre.conjunction(remaining, condition),
                             cpre.conjunction(remaining, candidate),
                         )
-                        if (
-                            _expression_size(candidate) < original_size
-                            and _require_proof(equivalent)
+                        if _expression_size(candidate) < original_size and _require_proof(
+                            equivalent
                         ):
                             status = "simplified"
                             simplified = candidate
@@ -212,9 +208,7 @@ def test_symbolic_profile_is_pinned_and_inventory_is_explicit():
         "validated_on": "2026-09-17",
     }
     assert profile["cpre"]["version"] == cpre.__version__ == "0.12.0"
-    assert profile["cpre"]["implementation_commit"] == (
-        "88e14949e594c1739467b40ea53210e56bb56771"
-    )
+    assert profile["cpre"]["implementation_commit"] == ("88e14949e594c1739467b40ea53210e56bb56771")
     assert profile["cpre"]["first_suitable_release"] == "0.12.0"
 
     readiness = profile["readiness"]
@@ -234,12 +228,8 @@ def test_symbolic_profile_is_pinned_and_inventory_is_explicit():
         "cgull/preprocessor/configuration_space.py",
         "cgull/preprocessor/profile_reduction.py",
     ]
-    assert "cgull/rules/preprocessor_reachability.py" in profile["inventory"][
-        "direct_consumers"
-    ]
-    assert "tests/test_config_profile_reduction.py" in profile["inventory"][
-        "representative_tests"
-    ]
+    assert "cgull/rules/preprocessor_reachability.py" in profile["inventory"]["direct_consumers"]
+    assert "tests/test_config_profile_reduction.py" in profile["inventory"]["representative_tests"]
 
 
 def test_public_expression_surface_matches_cgull_semantics():
@@ -307,9 +297,7 @@ def test_lossless_structure_covers_cgull_ranges_c23_and_recovery():
         "endif",
     ]
     outer = tree.blocks[0]
-    assert outer.branches[0].directive.condition_range.text(source) == (
-        "ROOT && \\\n    OTHER"
-    )
+    assert outer.branches[0].directive.condition_range.text(source) == ("ROOT && \\\n    OTHER")
     assert outer.branches[0].directive.logical_condition.split() == ["ROOT", "&&", "OTHER"]
     nested = outer.branches[0].children[0]
     assert nested.branches[0].body_range.text(source) == "child\n"
@@ -433,13 +421,7 @@ def test_representative_cgull_branch_analysis_is_semantically_equivalent():
 
 
 def test_representative_cgull_configuration_witness_uses_effective_context():
-    source = (
-        "#ifdef FEATURE\n"
-        "#if !FEATURE && VERSION >= 4\n"
-        "enabled\n"
-        "#endif\n"
-        "#endif\n"
-    )
+    source = "#ifdef FEATURE\n#if !FEATURE && VERSION >= 4\nenabled\n#endif\n#endif\n"
     tree, analyses = _branch_semantics(source)
     assert not tree.diagnostics
     assert len(analyses) == 2
@@ -471,6 +453,8 @@ print(json.dumps([(item.kind.value, item.symbol, item.value) for item in result.
     for seed in ("1", "7", "101"):
         env = dict(os.environ, PYTHONHASHSEED=seed)
         outputs.append(
-            subprocess.check_output([sys.executable, "-c", script], env=env, text=True, stdin=subprocess.DEVNULL)
+            subprocess.check_output(
+                [sys.executable, "-c", script], env=env, text=True, stdin=subprocess.DEVNULL
+            )
         )
     assert len(set(outputs)) == 1

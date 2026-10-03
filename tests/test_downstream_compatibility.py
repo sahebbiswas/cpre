@@ -8,7 +8,6 @@ from pycparser import c_parser
 
 from cpre import ErrorCode, preprocess_source
 
-
 FIXTURES = Path(__file__).parent / "compatibility" / "fixtures"
 
 
@@ -31,24 +30,32 @@ CASES = (
     CompatibilityCase("incomplete_numeric_condition.c", "supported"),
     CompatibilityCase("divergent_builtin_line.c", "supported", expanded_lines=(1,)),
     CompatibilityCase(
-        "configured_conditional.c", "supported",
+        "configured_conditional.c",
+        "supported",
         assumptions=(("FEATURE", True),),
     ),
     CompatibilityCase(
-        "configured_conditional.c", "supported",
+        "configured_conditional.c",
+        "supported",
         assumptions=(("FEATURE", False),),
     ),
     CompatibilityCase(
-        "unsupported_include.c", "unsupported",
-        ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE, 1,
+        "unsupported_include.c",
+        "unsupported",
+        ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
+        1,
     ),
     CompatibilityCase(
-        "incomplete_unknown_condition.c", "incomplete",
-        ErrorCode.UNRESOLVED_CONDITION, 1,
+        "incomplete_unknown_condition.c",
+        "incomplete",
+        ErrorCode.UNRESOLVED_CONDITION,
+        1,
     ),
     CompatibilityCase(
-        "divergent_pragma.c", "unsupported",
-        ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE, 1,
+        "divergent_pragma.c",
+        "unsupported",
+        ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
+        1,
     ),
 )
 
@@ -79,13 +86,14 @@ def test_compatibility_corpus_has_explicit_stable_classification(case):
     assert first.source is first.source_map is first.macros is None
     assert second.source is second.source_map is second.macros is None
     assert first.incomplete == second.incomplete
-    diagnostic, = first.incomplete
+    (diagnostic,) = first.incomplete
     assert diagnostic.code is case.code
     assert diagnostic.location.line == case.line
 
 
 @pytest.mark.parametrize(
-    "case", [case for case in CASES if case.status == "supported"],
+    "case",
+    [case for case in CASES if case.status == "supported"],
     ids=lambda case: case.name,
 )
 def test_supported_corpus_remains_parseable_by_pycparser(case):
@@ -96,7 +104,8 @@ def test_supported_corpus_remains_parseable_by_pycparser(case):
 
 
 @pytest.mark.parametrize(
-    "case", [case for case in CASES if case.expanded_lines],
+    "case",
+    [case for case in CASES if case.expanded_lines],
     ids=lambda case: case.name,
 )
 def test_expanded_source_maps_recover_physical_invocation_lines(case):
@@ -107,8 +116,8 @@ def test_expanded_source_maps_recover_physical_invocation_lines(case):
     expanded = tuple(mapping for mapping in result.source_map if mapping.expanded)
     assert tuple(mapping.start.line for mapping in expanded) == case.expanded_lines
     for mapping in expanded:
-        original = source[mapping.source_start:mapping.source_end]
-        rendered = result.source[mapping.output_start:mapping.output_end]
+        original = source[mapping.source_start : mapping.source_end]
+        rendered = result.source[mapping.output_start : mapping.output_end]
         assert original.strip()
         assert rendered.strip()
         assert mapping.start.line == source.count("\n", 0, mapping.source_start) + 1

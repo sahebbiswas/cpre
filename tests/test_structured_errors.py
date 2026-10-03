@@ -1,5 +1,6 @@
-import cpre
 import pytest
+
+import cpre
 from cpre import cpre as engine
 
 

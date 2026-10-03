@@ -3,8 +3,9 @@ import os
 import subprocess
 import sys
 
-import cpre
 import pytest
+
+import cpre
 
 
 def test_ordinary_expression_completes_below_default_limits():

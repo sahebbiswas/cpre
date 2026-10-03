@@ -29,7 +29,7 @@ def test_simple_tree_has_exact_half_open_physical_ranges():
     end = first.directive.condition_range.end
     assert (start.offset, start.line, start.column) == (13, 2, 7)
     assert (end.offset, end.line, end.column) == (17, 2, 11)
-    assert source[start.offset:end.offset] == "FLAG"
+    assert source[start.offset : end.offset] == "FLAG"
 
 
 def test_nested_blocks_parent_links_and_c23_forms_are_preserved():
@@ -93,8 +93,8 @@ def test_comments_literals_and_raw_strings_do_not_create_false_directives():
     source = (
         "/*\n#if BLOCK_COMMENT\n*/\n"
         "// #if LINE_COMMENT\n"
-        "char *s = \"#if STRING // /*\";\n"
-        "auto raw = R\"tag(\n#if RAW\n)tag\";\n"
+        'char *s = "#if STRING // /*";\n'
+        'auto raw = R"tag(\n#if RAW\n)tag";\n'
         "/* prefix */ #if REAL /* trailing */\n"
         "body\n"
         "#endif // end\n"

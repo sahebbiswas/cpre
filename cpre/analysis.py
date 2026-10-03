@@ -2,25 +2,25 @@
 
 from __future__ import annotations
 
-from typing import Iterator, Sequence
+from collections.abc import Iterator, Sequence
 
 from .expressions import conjunction, disjunction, expression_atoms_in_order, negate, simplify
 from .model import (
+    FALSE,
+    TRUE,
     BooleanAtom,
     BranchAnalysis,
     ConditionalGroup,
     ConditionalTree,
     DefinedVariable,
     Expression,
-    FALSE,
-    TRUE,
     Variable,
 )
 from .parser import parse_source
 from .robdd import (
+    BDD,
     AnalysisBudget,
     AnalysisLimitExceeded,
-    BDD,
     ResourceLimits,
     exact_simplify,
     simplify_under,
@@ -100,7 +100,9 @@ def analyze_tree(
                         if branch.expression is not None
                         else None
                     )
-                    contextual_context = conjunction(proof_context, available) if use_assumptions else available
+                    contextual_context = (
+                        conjunction(proof_context, available) if use_assumptions else available
+                    )
                     contextual = (
                         simplify_under(condition, contextual_context, bdd)
                         if branch.expression is not None and bdd.satisfiable(contextual_context)
@@ -109,11 +111,20 @@ def analyze_tree(
                     if not satisfiable(parent):
                         status, reason = "dead", "enclosing branch is unreachable"
                     elif not satisfiable(available):
-                        status, reason = "dead", "earlier branch conditions cover every remaining case"
+                        status, reason = (
+                            "dead",
+                            "earlier branch conditions cover every remaining case",
+                        )
                     elif not satisfiable(effective):
-                        status, reason = "dead", "condition contradicts its parent or earlier branches"
+                        status, reason = (
+                            "dead",
+                            "condition contradicts its parent or earlier branches",
+                        )
                     elif branch.expression is not None and contextual == TRUE:
-                        status, reason = "redundant", "condition is always true in this branch context"
+                        status, reason = (
+                            "redundant",
+                            "condition is always true in this branch context",
+                        )
                     else:
                         status, reason = "reachable", None
                     branch.analysis = BranchAnalysis(

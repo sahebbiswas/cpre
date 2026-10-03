@@ -1,14 +1,16 @@
 import pytest
+
 from cpre import (
+    ErrorCode,
+    IncompleteConfigurationError,
     MacroConfiguration,
     MacroDefinition,
-    UnknownNamePolicy,
-    PreprocessingContext,
     ParseError,
-    IncompleteConfigurationError,
-    ErrorCode,
+    PreprocessingContext,
+    UnknownNamePolicy,
     preprocess_source,
 )
+
 
 def test_plain_defines_and_undefs():
     text = """
@@ -25,6 +27,7 @@ def test_plain_defines_and_undefs():
     )
     assert config == expected
 
+
 def test_conditional_selection_and_redefinition():
     text = """
 #define FEATURE 1
@@ -37,10 +40,10 @@ def test_conditional_selection_and_redefinition():
 """
     config = MacroConfiguration.from_source(text)
     expected = MacroConfiguration(
-        integers={"FEATURE": 2},
-        definitions=[MacroDefinition("SELECTED", '"yes"')]
+        integers={"FEATURE": 2}, definitions=[MacroDefinition("SELECTED", '"yes"')]
     )
     assert config == expected
+
 
 def test_define_inside_inactive_branch_is_ignored():
     text = """
@@ -51,6 +54,7 @@ def test_define_inside_inactive_branch_is_ignored():
     config = MacroConfiguration.from_source(text)
     expected = MacroConfiguration()
     assert config == expected
+
 
 def test_function_like_and_variadic():
     text = """
@@ -67,6 +71,7 @@ def test_function_like_and_variadic():
         ]
     )
     assert config == expected
+
 
 def test_non_decimal_and_suffixed_integers_stay_definitions():
     text = """
@@ -88,6 +93,7 @@ def test_non_decimal_and_suffixed_integers_stay_definitions():
     )
     assert config == expected
 
+
 def test_context_stripping():
     context = PreprocessingContext(standard_macros={"__STDC__": "1"})
     text = """
@@ -97,6 +103,7 @@ def test_context_stripping():
     expected = MacroConfiguration(integers={"FEATURE": 1})
     assert config == expected
 
+
 def test_context_undef():
     context = PreprocessingContext(standard_macros={"__STDC__": "1"})
     text = """
@@ -105,6 +112,7 @@ def test_context_undef():
     config = MacroConfiguration.from_source(text, context=context)
     expected = MacroConfiguration(undefined={"__STDC__"})
     assert config == expected
+
 
 def test_unknown_names_policy():
     text = """
@@ -118,6 +126,7 @@ def test_unknown_names_policy():
     config = MacroConfiguration.from_source(text, unknown_names=UnknownNamePolicy.UNDEFINED)
     assert config == MacroConfiguration(unknown_names=UnknownNamePolicy.UNDEFINED)
 
+
 def test_incomplete_seed_raises_exception():
     text = """
 #include "missing.h"
@@ -127,12 +136,14 @@ def test_incomplete_seed_raises_exception():
     assert exc_info.value.code == ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE
     assert exc_info.value.filename == "test.h"
 
+
 def test_malformed_conditional_raises_parse_error():
     text = """
 #if 1
 """
     with pytest.raises(ParseError):
         MacroConfiguration.from_source(text)
+
 
 def test_target_override():
     config = MacroConfiguration.from_source("#define NAME 1\\n#define REMOVED 1")

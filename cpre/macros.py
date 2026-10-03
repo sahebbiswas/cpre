@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Mapping
 
 from .api import MacroAssumptions, _normalize_assumptions
 from .errors import SourceLocation
@@ -29,14 +29,14 @@ class MacroDefinition:
         if self.parameters is not None:
             return None
         text = self.replacement.strip()
-        while text.startswith('(') and text.endswith(')'):
+        while text.startswith("(") and text.endswith(")"):
             text = text[1:-1].strip()
         if not re.fullmatch(r"[+-]?\s*(?:0[xX][0-9a-fA-F]+|0[0-7]*|[1-9][0-9]*)[uUlL]*", text):
             return None
         digits = re.sub(r"\s+", "", re.sub(r"[uUlL]+$", "", text))
-        sign = -1 if digits.startswith('-') else 1
-        digits = digits.lstrip('+-')
-        base = 16 if digits.lower().startswith('0x') else (8 if digits.startswith('0') else 10)
+        sign = -1 if digits.startswith("-") else 1
+        digits = digits.lstrip("+-")
+        base = 16 if digits.lower().startswith("0x") else (8 if digits.startswith("0") else 10)
         return sign * int(digits, base)
 
 
@@ -59,16 +59,27 @@ class MacroEnvironment:
             return
         values = dict(normalized.values)
         for name in sorted(normalized.defined | normalized.undefined | values.keys()):
-            defined = (False if name in normalized.undefined else
-                       True if name in normalized.defined or values.get(name) is True else None)
-            self._states[name] = MacroState(defined, False if defined is False else values.get(name))
+            defined = (
+                False
+                if name in normalized.undefined
+                else True
+                if name in normalized.defined or values.get(name) is True
+                else None
+            )
+            self._states[name] = MacroState(
+                defined, False if defined is False else values.get(name)
+            )
 
     def get(self, name: str) -> MacroState:
         return self._states.get(name, MacroState())
 
     def define(self, definition: MacroDefinition) -> None:
         number = definition.numeric_value
-        value = False if definition.parameters is not None else (None if number is None else number != 0)
+        value = (
+            False
+            if definition.parameters is not None
+            else (None if number is None else number != 0)
+        )
         self._states[definition.name] = MacroState(True, value, definition)
 
     def undef(self, name: str) -> None:
@@ -78,37 +89,40 @@ class MacroEnvironment:
         return MappingProxyType(dict(sorted(self._states.items())))
 
 
-def _apply_macro_directive(environment: MacroEnvironment, kind: str,
-                           remainder: str, location: SourceLocation) -> None:
+def _apply_macro_directive(
+    environment: MacroEnvironment, kind: str, remainder: str, location: SourceLocation
+) -> None:
     """Parse a comment-stripped logical directive, or raise ValueError."""
     text = remainder.lstrip()
     match = re.match(_NAME, text)
     if match is None:
-        raise ValueError(f'#{kind} requires a macro name')
+        raise ValueError(f"#{kind} requires a macro name")
     name = match.group()
-    tail = text[match.end():]
-    if kind == 'undef':
+    tail = text[match.end() :]
+    if kind == "undef":
         if tail.strip():
-            raise ValueError('#undef expects exactly one macro name')
+            raise ValueError("#undef expects exactly one macro name")
         environment.undef(name)
         return
     parameters = None
     variadic = False
-    if tail.startswith('('):
-        end = tail.find(')')
+    if tail.startswith("("):
+        end = tail.find(")")
         if end == -1:
-            raise ValueError('unterminated macro parameter list')
-        parts = [part.strip() for part in tail[1:end].split(',')] if tail[1:end].strip() else []
-        if parts and parts[-1] == '...':
+            raise ValueError("unterminated macro parameter list")
+        parts = [part.strip() for part in tail[1:end].split(",")] if tail[1:end].strip() else []
+        if parts and parts[-1] == "...":
             variadic = True
             parts.pop()
-        if any(not re.fullmatch(_NAME, part) or part == '__VA_ARGS__' for part in parts) or len(set(parts)) != len(parts):
-            raise ValueError('unsupported or invalid macro parameter list')
+        if any(not re.fullmatch(_NAME, part) or part == "__VA_ARGS__" for part in parts) or len(
+            set(parts)
+        ) != len(parts):
+            raise ValueError("unsupported or invalid macro parameter list")
         parameters = tuple(parts)
-        tail = tail[end + 1:]
+        tail = tail[end + 1 :]
     elif tail and not tail[0].isspace():
-        raise ValueError('object-like macro replacement requires whitespace')
+        raise ValueError("object-like macro replacement requires whitespace")
     environment.define(MacroDefinition(name, tail.strip(), parameters, variadic, location))
 
 
-__all__ = ['MacroDefinition', 'MacroState', 'MacroEnvironment']
+__all__ = ["MacroDefinition", "MacroState", "MacroEnvironment"]

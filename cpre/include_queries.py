@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
-from typing import Mapping, Protocol
+from typing import Protocol
 
 from .api import AnalysisIncomplete, AnalysisOptions, MacroAssumptions
 from .configuration import MacroConfiguration
@@ -14,9 +15,11 @@ from .expansion import Expansion, ExpansionError, tokenize
 from .macros import MacroEnvironment
 from .parser import DIRECTIVE_RE, logical_lines
 from .preprocessing import (
-    PreprocessingContext,
     PreprocessDiagnostic,
+    PreprocessingContext,
     PreprocessResult,
+)
+from .preprocessing import (
     preprocess_source as _core_preprocess_source,
 )
 from .robdd import AnalysisBudget, AnalysisLimitExceeded
@@ -167,14 +170,16 @@ def _scan_occurrences(
             start_offset = _offset(starts, start_location)
             end_offset = _offset(starts, end_location) + 1
             placeholder = _placeholder(len(found), source, blocked_names)
-            found.append(_Occurrence(
-                len(found),
-                placeholder,
-                operand,
-                start_offset,
-                end_offset,
-                start_location,
-            ))
+            found.append(
+                _Occurrence(
+                    len(found),
+                    placeholder,
+                    operand,
+                    start_offset,
+                    end_offset,
+                    start_location,
+                )
+            )
             index = next_index
 
     return tuple(found)
@@ -188,8 +193,10 @@ def _render_source(
     characters = list(source)
     for occurrence in occurrences:
         replacement = (
-            "1" if resolved.get(occurrence.index) is True
-            else "0" if resolved.get(occurrence.index) is False
+            "1"
+            if resolved.get(occurrence.index) is True
+            else "0"
+            if resolved.get(occurrence.index) is False
             else occurrence.placeholder
         )
         writable: list[int] = []
@@ -280,15 +287,9 @@ def _expanded_header(
         occurrence.operand,
         AnalysisBudget(resolved_options._resource_limits().max_work),
     )
-    significant = [
-        token
-        for token in fragment.tokens
-        if token.kind not in {"space", "comment"}
-    ]
+    significant = [token for token in fragment.tokens if token.kind not in {"space", "comment"}]
     expanded = [
-        token
-        for token in fragment._expand(significant, environment)
-        if token.kind != "empty"
+        token for token in fragment._expand(significant, environment) if token.kind != "empty"
     ]
 
     form: IncludeForm
@@ -308,9 +309,7 @@ def _expanded_header(
         if not header:
             raise _HeaderOperandError("empty angle-bracket header name in __has_include")
     else:
-        raise _HeaderOperandError(
-            "__has_include operand must macro-expand to \"header\" or <header>"
-        )
+        raise _HeaderOperandError('__has_include operand must macro-expand to "header" or <header>')
 
     return IncludeQuery(header, form, occurrence.location, filename)
 
@@ -399,8 +398,7 @@ def preprocess_source(
             }:
                 continue
             if any(
-                occurrence.index not in resolved
-                and occurrence.line == diagnostic.location.line
+                occurrence.index not in resolved and occurrence.line == diagnostic.location.line
                 for occurrence in occurrences
             ):
                 trigger_line = diagnostic.location.line
@@ -409,9 +407,7 @@ def preprocess_source(
             return result
 
         occurrence = next(
-            item
-            for item in occurrences
-            if item.index not in resolved and item.line == trigger_line
+            item for item in occurrences if item.index not in resolved and item.line == trigger_line
         )
         if occurrence.operand is None:
             return _diagnostic_result(
@@ -480,9 +476,7 @@ def preprocess_source(
         available = include_query(query)
         if available is None:
             delimiter = (
-                f'"{query.header}"'
-                if query.form is IncludeForm.QUOTED
-                else f"<{query.header}>"
+                f'"{query.header}"' if query.form is IncludeForm.QUOTED else f"<{query.header}>"
             )
             return _diagnostic_result(
                 filename,

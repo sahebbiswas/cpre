@@ -14,17 +14,19 @@ def _provider(answers):
 
 def test_has_include_distinguishes_quoted_and_angle_forms():
     source = (
-        '#if __has_include(<optional.h>)\n'
-        'int angle;\n'
-        '#endif\n'
+        "#if __has_include(<optional.h>)\n"
+        "int angle;\n"
+        "#endif\n"
         '#if __has_include("local/config.h")\n'
-        'int quoted;\n'
-        '#endif\n'
+        "int quoted;\n"
+        "#endif\n"
     )
-    provider, seen = _provider({
-        (IncludeForm.ANGLE, "optional.h"): True,
-        (IncludeForm.QUOTED, "local/config.h"): True,
-    })
+    provider, seen = _provider(
+        {
+            (IncludeForm.ANGLE, "optional.h"): True,
+            (IncludeForm.QUOTED, "local/config.h"): True,
+        }
+    )
 
     result = preprocess_source(source, filename="unit.c", include_query=provider)
 
@@ -68,9 +70,7 @@ def test_has_include_unknown_is_atomic_incomplete():
 
 
 def test_has_include_without_provider_is_incomplete_not_false():
-    result = preprocess_source(
-        "#if __has_include(<optional.h>)\nint yes;\n#endif\n"
-    )
+    result = preprocess_source("#if __has_include(<optional.h>)\nint yes;\n#endif\n")
 
     assert not result.complete
     assert result.source is None
@@ -79,12 +79,7 @@ def test_has_include_without_provider_is_incomplete_not_false():
 
 
 def test_has_include_macro_expands_header_operand_from_active_state():
-    source = (
-        "#define HEADER <optional.h>\n"
-        "#if __has_include(HEADER)\n"
-        "int yes;\n"
-        "#endif\n"
-    )
+    source = "#define HEADER <optional.h>\n#if __has_include(HEADER)\nint yes;\n#endif\n"
     provider, seen = _provider({(IncludeForm.ANGLE, "optional.h"): True})
 
     result = preprocess_source(source, include_query=provider)
@@ -106,10 +101,12 @@ def test_has_include_uses_source_order_macro_state():
         "int second;\n"
         "#endif\n"
     )
-    provider, seen = _provider({
-        (IncludeForm.QUOTED, "first.h"): True,
-        (IncludeForm.QUOTED, "second.h"): True,
-    })
+    provider, seen = _provider(
+        {
+            (IncludeForm.QUOTED, "first.h"): True,
+            (IncludeForm.QUOTED, "second.h"): True,
+        }
+    )
 
     result = preprocess_source(source, include_query=provider)
 
@@ -233,6 +230,4 @@ def test_has_include_offsets_follow_parser_splitlines_semantics():
     assert result.complete
     assert "int before;" in result.source
     assert "int yes;" in result.source
-    assert seen == [
-        IncludeQuery("optional.h", IncludeForm.ANGLE, SourceLocation(2, 5), None)
-    ]
+    assert seen == [IncludeQuery("optional.h", IncludeForm.ANGLE, SourceLocation(2, 5), None)]

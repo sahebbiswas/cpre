@@ -5,10 +5,11 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
-from . import __version__, cpre as _engine
+from . import __version__
+from . import cpre as _engine
 from .api import AnalysisIncomplete, AnalysisResult, CpreError, ErrorCode, analyze_source
 from .sarif import ToolNotification, sarif_log
 
@@ -46,9 +47,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     output_group.add_argument(
         "--json", action="store_true", help="write the conditional tree as JSON"
     )
-    output_group.add_argument(
-        "--sarif", action="store_true", help="write findings as SARIF 2.1.0"
-    )
+    output_group.add_argument("--sarif", action="store_true", help="write findings as SARIF 2.1.0")
     parser.add_argument(
         "--verbose",
         action="store_true",
@@ -133,23 +132,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         color = sys.stdout.isatty()
         reports = []
         for path, tree in results:
-            report, has_entries = _engine._render_report(
-                tree, verbose=args.verbose, color=color
-            )
+            report, has_entries = _engine._render_report(tree, verbose=args.verbose, color=color)
             if args.verbose or has_entries:
                 reports.append(
-                    "\n".join(
-                        (_engine._colored(f"== {path} ==", "cyan", color), report)
-                    )
+                    "\n".join((_engine._colored(f"== {path} ==", "cyan", color), report))
                 )
         if reports:
             print("\n\n".join(reports))
     elif results:
-        print(
-            _engine.format_report(
-                results[0][1], verbose=args.verbose, color=sys.stdout.isatty()
-            )
-        )
+        print(_engine.format_report(results[0][1], verbose=args.verbose, color=sys.stdout.isatty()))
 
     if had_errors:
         return 2

@@ -1,7 +1,7 @@
 """Regression tests for the internal module boundaries introduced by issue #6."""
 
-from cpre import cpre as compatibility
 from cpre import analysis, discovery, expressions, model, parser, reporting, robdd
+from cpre import cpre as compatibility
 
 
 def test_core_subsystems_live_in_focused_modules():

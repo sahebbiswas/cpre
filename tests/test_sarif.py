@@ -1,8 +1,8 @@
 import json
 
-import cpre
 import pytest
 
+import cpre
 from cpre.cli import main
 from cpre.sarif import sarif_log
 
@@ -51,9 +51,7 @@ def test_sarif_declares_notification_descriptors_for_stable_error_codes():
     )
 
     run = sarif_log([analysis], tool_version="0.6.2")["runs"][0]
-    descriptor_ids = {
-        descriptor["id"] for descriptor in run["tool"]["driver"]["notifications"]
-    }
+    descriptor_ids = {descriptor["id"] for descriptor in run["tool"]["driver"]["notifications"]}
     emitted_id = run["invocations"][0]["toolExecutionNotifications"][0]["descriptor"]["id"]
 
     assert emitted_id == cpre.ErrorCode.ANALYSIS_LIMIT_EXCEEDED.value

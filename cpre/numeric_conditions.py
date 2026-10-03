@@ -28,8 +28,7 @@ _MAX_SHIFT = _INT_BITS - 1
 # Keep this well below Python's recursion limit so our structured bound fires first.
 _MAX_DEPTH = 24
 _BASIC_RAW_CHARACTERS = frozenset(
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
-    "{}[]#()<>%:;.?*+-/^&|~!=, "
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_{}[]#()<>%:;.?*+-/^&|~!=, "
 )
 _SIMPLE_ESCAPES = {
     "'": "'",
@@ -119,8 +118,12 @@ def _resolve_defined(tokens: list[Token], environment: MacroEnvironment) -> list
             continue
         if index + 1 < len(tokens) and tokens[index + 1].kind == "identifier":
             name, end, index = tokens[index + 1].text, tokens[index + 1].end, index + 2
-        elif (index + 3 < len(tokens) and tokens[index + 1].text == "("
-              and tokens[index + 2].kind == "identifier" and tokens[index + 3].text == ")"):
+        elif (
+            index + 3 < len(tokens)
+            and tokens[index + 1].text == "("
+            and tokens[index + 2].kind == "identifier"
+            and tokens[index + 3].text == ")"
+        ):
             name, end, index = tokens[index + 2].text, tokens[index + 3].end, index + 4
         else:
             raise NumericConditionError("malformed defined operator")
@@ -137,9 +140,15 @@ def _integer(text: str) -> _Value:
         raise NumericConditionError(f"unsupported integer constant {text!r}")
     body = match.group("body").replace("'", "")
     suffix = (match.group("suffix") or "").lower()
-    base = (16 if body.lower().startswith("0x") else
-            2 if body.lower().startswith("0b") else
-            8 if len(body) > 1 and body.startswith("0") else 10)
+    base = (
+        16
+        if body.lower().startswith("0x")
+        else 2
+        if body.lower().startswith("0b")
+        else 8
+        if len(body) > 1 and body.startswith("0")
+        else 10
+    )
     value = int(body, base)
     if value > _UINT_MASK:
         raise NumericConditionError("integer constant exceeds concrete-evaluation range")
@@ -159,14 +168,12 @@ def _numeric_character(value: int, text: str) -> _Value:
     # and values in that range do not depend on plain-char signedness when mapped
     # to the #if intmax_t model. Above that boundary both the numeric value and
     # even zero/nonzero truth may depend on target char width/conversion rules.
-    if value <= 0x7f:
+    if value <= 0x7F:
         return _signed(value)
     return _Value(
         None,
         False,
-        reason=(
-            f"ordinary character constant {text!r} depends on target char signedness/width"
-        ),
+        reason=(f"ordinary character constant {text!r} depends on target char signedness/width"),
     )
 
 
@@ -209,7 +216,7 @@ def _character(text: str) -> _Value:
             end = index + 2
             while end < len(body) and end < index + 4 and body[end] in "01234567":
                 end += 1
-            units.append(("number", int(body[index + 1:end], 8)))
+            units.append(("number", int(body[index + 1 : end], 8)))
             index = end
             continue
         if escaped == "x":
@@ -217,20 +224,29 @@ def _character(text: str) -> _Value:
             while end < len(body) and body[end] in "0123456789abcdefABCDEF":
                 end += 1
             if end == index + 2:
-                raise NumericConditionError("hex escape in character constant requires at least one digit")
-            units.append(("number", int(body[index + 2:end], 16)))
+                raise NumericConditionError(
+                    "hex escape in character constant requires at least one digit"
+                )
+            units.append(("number", int(body[index + 2 : end], 16)))
             index = end
             continue
         if escaped in {"u", "U"}:
             digits = 4 if escaped == "u" else 8
             end = index + 2 + digits
-            spelling = body[index + 2:end]
-            if (end > len(body) or len(spelling) != digits
-                    or any(part not in "0123456789abcdefABCDEF" for part in spelling)):
-                raise NumericConditionError("malformed universal character name in character constant")
+            spelling = body[index + 2 : end]
+            if (
+                end > len(body)
+                or len(spelling) != digits
+                or any(part not in "0123456789abcdefABCDEF" for part in spelling)
+            ):
+                raise NumericConditionError(
+                    "malformed universal character name in character constant"
+                )
             codepoint = int(spelling, 16)
-            if codepoint > 0x10ffff or 0xd800 <= codepoint <= 0xdfff:
-                raise NumericConditionError("invalid universal character name in character constant")
+            if codepoint > 0x10FFFF or 0xD800 <= codepoint <= 0xDFFF:
+                raise NumericConditionError(
+                    "invalid universal character name in character constant"
+                )
             units.append(("universal", codepoint))
             index = end
             continue
@@ -301,7 +317,9 @@ class _Parser:
     def parse(self) -> _Value:
         value = self.conditional(True)
         if self.peek() is not None:
-            raise NumericConditionError(f"unsupported token {self.peek().text!r} in concrete condition")
+            raise NumericConditionError(
+                f"unsupported token {self.peek().text!r} in concrete condition"
+            )
         return value
 
     def primary(self, evaluate: bool) -> _Value:
@@ -375,6 +393,7 @@ class _Parser:
                 quotient = _divide(left_value, right_value)
                 result = quotient if op == "/" else left_value - quotient * right_value
             return _unsigned(result) if unsigned else _signed(result)
+
         return self.binary(self.unary, {"*", "/", "%"}, evaluate, apply)
 
     def additive(self, evaluate: bool) -> _Value:
@@ -385,6 +404,7 @@ class _Parser:
             left_value, right_value = _numeric(left), _numeric(right)
             result = left_value + right_value if op == "+" else left_value - right_value
             return _unsigned(result) if unsigned else _signed(result)
+
         return self.binary(self.multiplicative, {"+", "-"}, evaluate, apply)
 
     def shift(self, evaluate: bool) -> _Value:
@@ -397,7 +417,12 @@ class _Parser:
             if op == "<<":
                 result = left_value << right_value
                 return _unsigned(result) if left.unsigned else _signed(result)
-            return _unsigned(left_value >> right_value) if left.unsigned else _signed(left_value >> right_value)
+            return (
+                _unsigned(left_value >> right_value)
+                if left.unsigned
+                else _signed(left_value >> right_value)
+            )
+
         return self.binary(self.additive, {"<<", ">>"}, evaluate, apply)
 
     def relational(self, evaluate: bool) -> _Value:
@@ -406,8 +431,17 @@ class _Parser:
                 return _Value(None)
             left, right, _ = _convert(left, right)
             left_value, right_value = _numeric(left), _numeric(right)
-            return _Value(int({"<": left_value < right_value, "<=": left_value <= right_value,
-                               ">": left_value > right_value, ">=": left_value >= right_value}[op]))
+            return _Value(
+                int(
+                    {
+                        "<": left_value < right_value,
+                        "<=": left_value <= right_value,
+                        ">": left_value > right_value,
+                        ">=": left_value >= right_value,
+                    }[op]
+                )
+            )
+
         return self.binary(self.shift, {"<", "<=", ">", ">="}, evaluate, apply)
 
     def equality(self, evaluate: bool) -> _Value:
@@ -426,6 +460,7 @@ class _Parser:
             else:
                 raise NumericConditionError(_unknown_reason(left, right))
             return _Value(int(equal if op == "==" else not equal))
+
         return self.binary(self.relational, {"==", "!="}, evaluate, apply)
 
     def bitand(self, evaluate: bool) -> _Value:
@@ -443,9 +478,11 @@ class _Parser:
         if not active:
             return _Value(None, unsigned)
         left_value, right_value = _numeric(left), _numeric(right)
-        result = {"&": left_value & right_value,
-                  "^": left_value ^ right_value,
-                  "|": left_value | right_value}[op]
+        result = {
+            "&": left_value & right_value,
+            "^": left_value ^ right_value,
+            "|": left_value | right_value,
+        }[op]
         return _unsigned(result) if unsigned else _signed(result)
 
     def logical_and(self, evaluate: bool) -> _Value:
@@ -505,8 +542,11 @@ def evaluate_numeric_condition(
         return None
     expanded = expansion._expand(resolved, environment)
     for token in expanded:
-        if (token.kind == "identifier" and token.text in unsupported_identifiers
-                and environment.get(token.text).definition is None):
+        if (
+            token.kind == "identifier"
+            and token.text in unsupported_identifiers
+            and environment.get(token.text).definition is None
+        ):
             raise ExpansionError(
                 f"predefined macro {token.text} is not supported during concrete preprocessing"
             )
@@ -514,7 +554,9 @@ def evaluate_numeric_condition(
     try:
         return _Parser(significant, budget).parse().truth()
     except RecursionError as error:
-        raise NumericConditionError("expression nesting exceeds concrete-evaluation bound") from error
+        raise NumericConditionError(
+            "expression nesting exceeds concrete-evaluation bound"
+        ) from error
     except NumericConditionError as error:
         if str(error).startswith("unresolved identifier"):
             return None
