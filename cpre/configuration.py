@@ -127,17 +127,43 @@ class MacroConfiguration:
         context: PreprocessingContext | None = None,
         unknown_names: UnknownNamePolicy | str = UnknownNamePolicy.OPEN,
         options: AnalysisOptions | None = None,
+        base: MacroConfiguration | None = None,
     ) -> MacroConfiguration:
+        """Derive a configuration from the final macro state of a seed source.
+
+        When ``base`` is supplied, the seed is evaluated on top of the base's
+        definitions and undefined names, and the last definition wins: names
+        the seed never touches keep their base state, a seed ``#define``
+        replaces whatever category the base used, and a seed ``#undef`` leaves
+        the name only undefined. Evaluation and the returned configuration
+        always use the explicit ``unknown_names`` argument, never
+        ``base.unknown_names``.
+        """
         if type(text) is not str:
             raise AnalysisError(
                 "text must be a string",
+                code=ErrorCode.INVALID_CONFIGURATION,
+            )
+        if base is not None and not isinstance(base, MacroConfiguration):
+            raise AnalysisError(
+                "base must be a MacroConfiguration instance or None",
                 code=ErrorCode.INVALID_CONFIGURATION,
             )
 
         from .errors import IncompleteConfigurationError
         from .pragmas import preprocess_source
 
-        seed_config = cls(unknown_names=unknown_names)
+        if base is None:
+            seed_config = cls(unknown_names=unknown_names)
+        else:
+            # Pass base definitions through ``definitions=`` so presence and
+            # integer replacement text is preserved exactly; the policy comes
+            # from the explicit argument so base's policy cannot leak.
+            seed_config = cls(
+                definitions=base.definitions,
+                undefined=base.undefined,
+                unknown_names=unknown_names,
+            )
         result = preprocess_source(
             text,
             filename=filename,

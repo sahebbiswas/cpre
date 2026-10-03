@@ -59,6 +59,23 @@ config = cpre.MacroConfiguration.from_source(
 
 The string is evaluated as a normal preprocessing run. The resulting definitions are categorized into `presence`, `integers`, `undefined`, and `definitions` according to their replacement text. If the seed source is incomplete (e.g. contains an active `#include`), an `IncompleteConfigurationError` is raised.
 
+### Layering on a base configuration
+
+Pass `base=` to evaluate a seed on top of an existing concrete configuration:
+
+```python
+base = cpre.MacroConfiguration(integers={"FEATURE": 1}, undefined={"LEGACY"})
+config = cpre.MacroConfiguration.from_source(seed_text, base=base)
+```
+
+The last definition wins across categories, and each name ends up in exactly one category:
+
+- a base name the seed never touches keeps its base state;
+- a seed `#define` replaces whatever category the base used (for example, a base function-like `FOO` followed by `#define FOO 3` becomes integers only);
+- a seed `#undef` leaves the name only undefined.
+
+The unknown-name policy used for evaluation and stored on the result is always the explicit `unknown_names=` argument, never `base.unknown_names`. Context-injected standard macros that the seed leaves unchanged are still omitted. `base` must be `None` or a `MacroConfiguration`; any other value raises `AnalysisError` with `ErrorCode.INVALID_CONFIGURATION` before preprocessing.
+
 Note: Guard macros (such as `#ifndef FLAGS_H`) are currently retained as presence definitions. Self-preprocessing the seed using this derived configuration is not useful until include-guard handling is available in a future update.
 
 ## Standard predefined preprocessing context
