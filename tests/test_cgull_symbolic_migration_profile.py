@@ -471,6 +471,6 @@ print(json.dumps([(item.kind.value, item.symbol, item.value) for item in result.
     for seed in ("1", "7", "101"):
         env = dict(os.environ, PYTHONHASHSEED=seed)
         outputs.append(
-            subprocess.check_output([sys.executable, "-c", script], env=env, text=True)
+            subprocess.check_output([sys.executable, "-c", script], env=env, text=True, stdin=subprocess.DEVNULL)
         )
     assert len(set(outputs)) == 1
