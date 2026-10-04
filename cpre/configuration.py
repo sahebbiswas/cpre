@@ -437,8 +437,27 @@ def _detect_include_guard(text: str) -> str | None:
     except Exception:
         return None
 
-    ident_count = sum(1 for t in toks if t.kind == "identifier" and t.text == guard_name)
-    if ident_count != 2:
+    ident_indices = [
+        i for i, t in enumerate(toks) if t.kind == "identifier" and t.text == guard_name
+    ]
+    if len(ident_indices) != 2:
+        return None
+
+    def_idx = ident_indices[1]
+    prev_tokens = [t for t in toks[:def_idx] if t.kind not in {"space", "comment"}]
+    if not (
+        len(prev_tokens) >= 2
+        and prev_tokens[-1].kind == "identifier"
+        and prev_tokens[-1].text == "define"
+        and prev_tokens[-2].kind == "other"
+        and prev_tokens[-2].text == "#"
+    ):
+        return None
+
+    # In C translation phase 2, backslash-newline line continuations are deleted.
+    # A macro definition is function-like if and only if '(' directly follows the
+    # macro name after line splicing without intervening whitespace or comments.
+    if def_idx + 1 < len(toks) and toks[def_idx + 1].text == "(":
         return None
 
     return guard_name

@@ -556,6 +556,64 @@ int x = FLAGS_H;
     assert "FLAGS_H" in {d.name for d in derived_source.definitions}
 
 
+def test_function_like_guard_with_line_splice_not_stripped():
+    seed = """
+#ifndef FLAGS_H
+#define FLAGS_H\\
+(x) 1
+int body = 1;
+#endif
+"""
+    derived = MacroConfiguration.from_source(seed, unknown_names=UnknownNamePolicy.UNDEFINED)
+    assert any(d.name == "FLAGS_H" and d.parameters == ("x",) for d in derived.definitions)
+
+    # Second preprocess of the same source must skip the body
+    result = preprocess_source(seed, configuration=derived)
+    assert "int body = 1;" not in result.source
+
+
+def test_function_like_guard_standard_not_stripped():
+    seed = """
+#ifndef FLAGS_H
+#define FLAGS_H(x) 1
+int body = 1;
+#endif
+"""
+    derived = MacroConfiguration.from_source(seed, unknown_names=UnknownNamePolicy.UNDEFINED)
+    assert any(d.name == "FLAGS_H" and d.parameters == ("x",) for d in derived.definitions)
+
+    result = preprocess_source(seed, configuration=derived)
+    assert "int body = 1;" not in result.source
+
+
+def test_object_like_guard_with_line_splice_and_space_detected():
+    seed = """
+#ifndef FLAGS_H
+#define FLAGS_H\\
+ (x) 1
+int body = 1;
+#endif
+"""
+    derived = MacroConfiguration.from_source(seed, unknown_names=UnknownNamePolicy.UNDEFINED)
+    assert "FLAGS_H" not in {d.name for d in derived.definitions}
+    result = preprocess_source(seed, configuration=derived)
+    assert "int body = 1;" in result.source
+
+
+def test_object_like_guard_with_space_before_line_splice_detected():
+    seed = """
+#ifndef FLAGS_H
+#define FLAGS_H \\
+(x) 1
+int body = 1;
+#endif
+"""
+    derived = MacroConfiguration.from_source(seed, unknown_names=UnknownNamePolicy.UNDEFINED)
+    assert "FLAGS_H" not in {d.name for d in derived.definitions}
+    result = preprocess_source(seed, configuration=derived)
+    assert "int body = 1;" in result.source
+
+
 def test_nested_ifndef_not_stripped():
     seed = """
 #if 1
