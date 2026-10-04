@@ -1,5 +1,7 @@
 # cpre
 
+[![CI](https://github.com/sahebbiswas/cpre/actions/workflows/ci.yml/badge.svg)](https://github.com/sahebbiswas/cpre/actions/workflows/ci.yml)
+
 `cpre` analyzes Boolean conditions in C and C++ preprocessor conditional blocks without parsing the surrounding translation unit. It finds dead and redundant branches, simplifies conditions with bounded ROBDD reasoning, and also exposes a concrete preprocessing API for downstream analyzers that need one selected, macro-expanded source representation.
 
 **Project status: Beta.** The documented CLI and top-level Python API are intended for downstream integration, while broader real-world use may still uncover compatibility, modeling, or performance edges before 1.0.
