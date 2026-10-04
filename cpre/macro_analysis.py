@@ -164,7 +164,7 @@ def analyze_macro(
             code=ErrorCode.ANALYSIS_FAILURE,
         )
 
-    is_candidate, reason, expr, is_wrapped = classify_macro_candidate(definition)
+    is_candidate, reason, expr, _ = classify_macro_candidate(definition)
     if not is_candidate or expr is None:
         return MacroAnalysisResult(
             name=definition.name,
@@ -212,7 +212,7 @@ def analyze_macro(
     differ = expressions_differ(expr, simplified_expr)
     if differ:
         formatted = format_expression(simplified_expr)
-        simplified_replacement = f"({formatted})" if is_wrapped else formatted
+        simplified_replacement = f"({formatted})"
         return MacroAnalysisResult(
             name=definition.name,
             definition=definition,

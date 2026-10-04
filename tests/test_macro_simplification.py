@@ -193,27 +193,36 @@ def test_boolean_identities_and_simplifications():
 
 
 def test_unwrapped_replacements():
-    # If the original macro replacement is not parenthesized, outer parens are not forced
+    # Emitted replacements are always safely parenthesized to prevent precedence hazards
+    # when the macro is expanded in outer expressions (e.g. !M).
     d1 = MacroDefinition("FEAT", "A || (!A && B)")
     r1 = analyze_macro(d1)
     assert r1.candidate is True
     assert r1.simplified is True
-    assert r1.simplified_replacement == "A || B"
+    assert r1.simplified_replacement == "(A || B)"
     assert r1.is_equivalent is True
 
     d2 = MacroDefinition("FEAT", "!!A")
     r2 = analyze_macro(d2)
     assert r2.candidate is True
     assert r2.simplified is True
-    assert r2.simplified_replacement == "A"
+    assert r2.simplified_replacement == "(A)"
     assert r2.is_equivalent is True
 
     d3 = MacroDefinition("FEAT", "!(!(!A))")
     r3 = analyze_macro(d3)
     assert r3.candidate is True
     assert r3.simplified is True
-    assert r3.simplified_replacement == "!A"
+    assert r3.simplified_replacement == "(!A)"
     assert r3.is_equivalent is True
+
+    # Precedence hazard case: #define M A || !A simplifies to (1)
+    d4 = MacroDefinition("M", "A || !A")
+    r4 = analyze_macro(d4)
+    assert r4.candidate is True
+    assert r4.simplified is True
+    assert r4.simplified_replacement == "(1)"
+    assert r4.is_equivalent is True
 
 
 def test_already_simplest_form():
