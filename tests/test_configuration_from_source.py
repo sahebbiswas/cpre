@@ -354,3 +354,359 @@ def test_context_stripping_never_drops_untouched_base_names(base, monkeypatch):
         definitions=[*base.definitions, MacroDefinition("OTHER", "2")],
         undefined=base.undefined,
     )
+
+
+# --- include guard detection and exclude= (#71) -----------------------------
+
+
+def test_guard_detected_enters_body_on_second_preprocess():
+    seed = """
+#ifndef FLAGS_H
+#define FLAGS_H
+#define FEATURE 1
+#endif
+"""
+    derived = MacroConfiguration.from_source(seed, unknown_names=UnknownNamePolicy.UNDEFINED)
+    assert derived == MacroConfiguration(
+        integers={"FEATURE": 1}, unknown_names=UnknownNamePolicy.UNDEFINED
+    )
+    assert "FLAGS_H" not in {d.name for d in derived.definitions}
+    assert "FLAGS_H" not in derived.undefined
+
+    # Second preprocess enters the body because FLAGS_H is not in derived configuration
+    result = preprocess_source(seed, configuration=derived)
+    assert result.complete
+    assert result.macros["FEATURE"].definition.replacement == "1"
+    assert result.macros["FLAGS_H"].defined is True
+
+
+def test_guard_not_detected_and_not_excluded_skips_body_on_second_preprocess():
+    # Code after #endif causes include guard detection not to match
+    seed = """
+#ifndef FLAGS_H
+#define FLAGS_H
+#define FEATURE 1
+#endif
+int after_guard = 1;
+"""
+    derived = MacroConfiguration.from_source(seed, unknown_names=UnknownNamePolicy.UNDEFINED)
+    assert "FLAGS_H" in {d.name for d in derived.definitions}
+    assert derived == MacroConfiguration(
+        presence={"FLAGS_H"},
+        integers={"FEATURE": 1},
+        unknown_names=UnknownNamePolicy.UNDEFINED,
+    )
+
+    # Second preprocess of a seed expecting FEATURE 2 skips body because FLAGS_H is present
+    target = """
+#ifndef FLAGS_H
+#define FLAGS_H
+#define FEATURE 2
+#endif
+"""
+    result = preprocess_source(target, configuration=derived)
+    assert result.complete
+    # FEATURE remains the value from derived configuration (1), body was skipped
+    assert result.macros["FEATURE"].definition.replacement == "1"
+
+
+def test_exclude_removes_guard_when_detector_does_not_match():
+    seed = """
+#ifndef FLAGS_H
+#define FLAGS_H
+#define FEATURE 1
+#endif
+int after_guard = 1;
+"""
+    # Detector does not match because of trailing code, but exclude overrides it
+    derived = MacroConfiguration.from_source(
+        seed, unknown_names=UnknownNamePolicy.UNDEFINED, exclude=("FLAGS_H",)
+    )
+    assert derived == MacroConfiguration(
+        integers={"FEATURE": 1}, unknown_names=UnknownNamePolicy.UNDEFINED
+    )
+    assert "FLAGS_H" not in {d.name for d in derived.definitions}
+
+    target = """
+#ifndef FLAGS_H
+#define FLAGS_H
+#define FEATURE 2
+#endif
+"""
+    result = preprocess_source(target, configuration=derived)
+    assert result.complete
+    # Enters body because FLAGS_H was excluded, updating FEATURE to 2
+    assert result.macros["FEATURE"].definition.replacement == "2"
+
+
+@pytest.mark.parametrize(
+    "condition",
+    [
+        "#if !defined(FLAGS_H)",
+        "#if !defined FLAGS_H",
+        "#if !(defined(FLAGS_H))",
+        "#if (!defined(FLAGS_H))",
+        "#if ! defined ( FLAGS_H )",
+    ],
+)
+def test_guard_detected_across_if_not_defined_variants(condition):
+    seed = f"""
+{condition}
+#define FLAGS_H
+#define FEATURE 1
+#endif
+"""
+    derived = MacroConfiguration.from_source(seed, unknown_names=UnknownNamePolicy.UNDEFINED)
+    assert derived == MacroConfiguration(
+        integers={"FEATURE": 1}, unknown_names=UnknownNamePolicy.UNDEFINED
+    )
+
+
+def test_guard_detected_with_comments_and_whitespace():
+    seed = """
+/* Leading file comment */
+// Another comment line
+
+#ifndef FLAGS_H
+/* Internal comment */
+#define FLAGS_H
+#define FEATURE 1
+#endif /* FLAGS_H */
+// Trailing file comment
+"""
+    derived = MacroConfiguration.from_source(seed, unknown_names=UnknownNamePolicy.UNDEFINED)
+    assert derived == MacroConfiguration(
+        integers={"FEATURE": 1}, unknown_names=UnknownNamePolicy.UNDEFINED
+    )
+
+
+def test_guard_with_integer_definition_stripped():
+    seed = """
+#ifndef FLAGS_H
+#define FLAGS_H 1
+#define FEATURE 2
+#endif
+"""
+    derived = MacroConfiguration.from_source(seed, unknown_names=UnknownNamePolicy.UNDEFINED)
+    assert derived == MacroConfiguration(
+        integers={"FEATURE": 2}, unknown_names=UnknownNamePolicy.UNDEFINED
+    )
+
+
+def test_guard_macro_used_as_later_condition_stays():
+    seed_if = """
+#ifndef FLAGS_H
+#define FLAGS_H 1
+#if FLAGS_H
+#define FEATURE 1
+#endif
+#endif
+"""
+    derived_if = MacroConfiguration.from_source(seed_if, unknown_names=UnknownNamePolicy.UNDEFINED)
+    assert "FLAGS_H" in {d.name for d in derived_if.definitions}
+
+    seed_ifdef = """
+#ifndef FLAGS_H
+#define FLAGS_H
+#ifdef FLAGS_H
+#define FEATURE 1
+#endif
+#endif
+"""
+    derived_ifdef = MacroConfiguration.from_source(
+        seed_ifdef, unknown_names=UnknownNamePolicy.UNDEFINED
+    )
+    assert "FLAGS_H" in {d.name for d in derived_ifdef.definitions}
+
+    seed_defined = """
+#ifndef FLAGS_H
+#define FLAGS_H
+#if defined(FLAGS_H)
+#define FEATURE 1
+#endif
+#endif
+"""
+    derived_defined = MacroConfiguration.from_source(
+        seed_defined, unknown_names=UnknownNamePolicy.UNDEFINED
+    )
+    assert "FLAGS_H" in {d.name for d in derived_defined.definitions}
+
+
+def test_guard_macro_used_as_later_replacement_stays():
+    seed_macro_rep = """
+#ifndef FLAGS_H
+#define FLAGS_H
+#define FEATURE FLAGS_H
+#endif
+"""
+    derived = MacroConfiguration.from_source(
+        seed_macro_rep, unknown_names=UnknownNamePolicy.UNDEFINED
+    )
+    assert "FLAGS_H" in {d.name for d in derived.definitions}
+
+    seed_source_rep = """
+#ifndef FLAGS_H
+#define FLAGS_H
+int x = FLAGS_H;
+#endif
+"""
+    derived_source = MacroConfiguration.from_source(
+        seed_source_rep, unknown_names=UnknownNamePolicy.UNDEFINED
+    )
+    assert "FLAGS_H" in {d.name for d in derived_source.definitions}
+
+
+def test_nested_ifndef_not_stripped():
+    seed = """
+#if 1
+#ifndef NESTED_H
+#define NESTED_H
+#define FEATURE 1
+#endif
+#endif
+"""
+    derived = MacroConfiguration.from_source(seed, unknown_names=UnknownNamePolicy.UNDEFINED)
+    assert "NESTED_H" in {d.name for d in derived.definitions}
+
+
+def test_pragma_once_not_treated_as_guard():
+    seed = """
+#pragma once
+#define FEATURE 1
+"""
+    with pytest.raises(IncompleteConfigurationError) as exc_info:
+        MacroConfiguration.from_source(seed)
+    assert exc_info.value.code == ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE
+
+
+def test_exclude_removes_name_that_came_only_from_base():
+    base = MacroConfiguration(
+        integers={"BASE_KEPT": 1, "BASE_REMOVED": 2},
+        undefined={"BASE_UNDEF"},
+    )
+    seed = "#define SEED_KEPT 3\n"
+    derived = MacroConfiguration.from_source(
+        seed, base=base, exclude=("BASE_REMOVED", "BASE_UNDEF")
+    )
+    assert derived == MacroConfiguration(integers={"BASE_KEPT": 1, "SEED_KEPT": 3})
+
+
+def test_exclude_removes_from_all_categories():
+    base = MacroConfiguration(
+        presence={"PRES"},
+        integers={"INT": 42},
+        undefined={"UNDEF"},
+        definitions=[MacroDefinition("FN", "(a)", parameters=("a",))],
+    )
+    derived = MacroConfiguration.from_source("", base=base, exclude=("PRES", "INT", "UNDEF", "FN"))
+    assert derived == MacroConfiguration()
+
+
+def test_exclude_does_not_hide_macro_during_seed_derivation():
+    seed = """
+#define SEED_GUARD 1
+#if SEED_GUARD
+#define CHOSEN 42
+#else
+#define CHOSEN 0
+#endif
+"""
+    derived = MacroConfiguration.from_source(seed, exclude=("SEED_GUARD",))
+    assert derived == MacroConfiguration(integers={"CHOSEN": 42})
+    assert "SEED_GUARD" not in {d.name for d in derived.definitions}
+
+
+@pytest.mark.parametrize(
+    "bad_name",
+    ["123BAD", "FOO-BAR", "WITH SPACE", "", None, 42],
+)
+def test_exclude_rejects_invalid_names_before_preprocessing(bad_name, monkeypatch):
+    import cpre.pragmas
+
+    def fail(*args, **kwargs):  # pragma: no cover - must not be reached
+        raise AssertionError("preprocessing ran before exclude validation")
+
+    monkeypatch.setattr(cpre.pragmas, "preprocess_source", fail)
+    with pytest.raises(AnalysisError) as exc_info:
+        MacroConfiguration.from_source("#define X 1\n", exclude=[bad_name])
+    assert exc_info.value.code == ErrorCode.INVALID_CONFIGURATION
+
+
+def test_exclude_rejects_non_iterable(monkeypatch):
+    import cpre.pragmas
+
+    def fail(*args, **kwargs):  # pragma: no cover - must not be reached
+        raise AssertionError("preprocessing ran before exclude validation")
+
+    monkeypatch.setattr(cpre.pragmas, "preprocess_source", fail)
+    with pytest.raises(AnalysisError) as exc_info:
+        MacroConfiguration.from_source("#define X 1\n", exclude=123)
+    assert exc_info.value.code == ErrorCode.INVALID_CONFIGURATION
+
+
+def test_exclude_ignores_duplicates_and_unmentioned_names():
+    seed = "#define KEPT 1\n#define REMOVED 2\n"
+    derived = MacroConfiguration.from_source(seed, exclude=("REMOVED", "REMOVED", "NOT_IN_RESULT"))
+    assert derived == MacroConfiguration(integers={"KEPT": 1})
+
+
+def test_guard_with_other_directive_before_define_not_stripped():
+    seed = """
+#ifndef FLAGS_H
+#define OTHER 1
+#define FLAGS_H
+#endif
+"""
+    derived = MacroConfiguration.from_source(seed, unknown_names=UnknownNamePolicy.UNDEFINED)
+    assert "FLAGS_H" in {d.name for d in derived.definitions}
+
+
+def test_guard_with_code_before_ifndef_not_stripped():
+    seed = """
+int prefix = 1;
+#ifndef FLAGS_H
+#define FLAGS_H
+#endif
+"""
+    derived = MacroConfiguration.from_source(seed, unknown_names=UnknownNamePolicy.UNDEFINED)
+    assert "FLAGS_H" in {d.name for d in derived.definitions}
+
+
+def test_guard_with_else_or_elif_branch_not_stripped():
+    seed_else = """
+#ifndef FLAGS_H
+#define FLAGS_H
+#else
+#define OTHER 1
+#endif
+"""
+    derived_else = MacroConfiguration.from_source(
+        seed_else, unknown_names=UnknownNamePolicy.UNDEFINED
+    )
+    assert "FLAGS_H" in {d.name for d in derived_else.definitions}
+
+    seed_elif = """
+#ifndef FLAGS_H
+#define FLAGS_H
+#elif 1
+#define OTHER 1
+#endif
+"""
+    derived_elif = MacroConfiguration.from_source(
+        seed_elif, unknown_names=UnknownNamePolicy.UNDEFINED
+    )
+    assert "FLAGS_H" in {d.name for d in derived_elif.definitions}
+
+
+def test_multiple_top_level_groups_not_stripped():
+    seed = """
+#ifndef A_H
+#define A_H
+#endif
+#ifndef B_H
+#define B_H
+#endif
+"""
+    derived = MacroConfiguration.from_source(seed, unknown_names=UnknownNamePolicy.UNDEFINED)
+    assert "A_H" in {d.name for d in derived.definitions}
+    assert "B_H" in {d.name for d in derived.definitions}

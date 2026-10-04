@@ -154,7 +154,7 @@ result = cpre.preprocess_source(source, configuration=config)
 
 `UnknownNamePolicy.UNDEFINED` is explicit opt-in behavior for callers that want otherwise-unmentioned names to behave as undefined/zero during concrete evaluation. The default remains open-world.
 
-See [Concrete macro configuration](concrete-configuration.md) for presence, integer values, explicit undefined names, arbitrary macro definitions, and unknown-name policy. `MacroConfiguration` can also be derived from a seed source (such as `flags.h`) using `MacroConfiguration.from_source()`.
+See [Concrete macro configuration](concrete-configuration.md) for presence, integer values, explicit undefined names, arbitrary macro definitions, and unknown-name policy. `MacroConfiguration` can also be derived from a seed source (such as `flags.h`) using `MacroConfiguration.from_source()`. Include guard detection is enabled by default to strip enclosing header guards so subsequent preprocessing enters the guarded body, while `exclude=` provides an explicit override to remove any macro name. Names the detector is not sure about stay in the configuration. `MacroConfiguration.from_source()` is not GCC `-imacros`; it processes self-contained macro definitions and refuses active include directives rather than pulling includes from the filesystem.
 
 ## Macro state and source-order updates
 
