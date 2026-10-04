@@ -46,6 +46,7 @@ def test_top_level_public_api_exposes_supported_symbols_only():
         "FindingKind",
         "FixConfidence",
         "IncompleteConfigurationError",
+        "MacroAnalysisResult",
         "MacroAssumptions",
         "MacroConfiguration",
         "MacroDefinition",
@@ -79,6 +80,8 @@ def test_top_level_public_api_exposes_supported_symbols_only():
         "WitnessAtomKind",
         "WitnessResult",
         "__version__",
+        "analyze_macro",
+        "analyze_macros",
         "analyze_source",
         "compact",
         "conjunction",
@@ -308,3 +311,22 @@ def test_exact_simplification_formatting_is_deterministic_across_ordering():
     right_finding = _by_kind(right, cpre.FindingKind.SIMPLIFIABLE_CONDITION)[0]
     assert left_finding.exact_simplification.replacement == "A"
     assert right_finding.exact_simplification.replacement == "A"
+
+
+def test_public_api_macro_analysis_exports():
+    definition = cpre.MacroDefinition("FEAT_1", "(A || (!A && B))")
+    result = cpre.analyze_macro(definition)
+
+    assert isinstance(result, cpre.MacroAnalysisResult)
+    assert result.name == "FEAT_1"
+    assert result.candidate is True
+    assert result.simplified is True
+    assert result.simplified_replacement == "(A || B)"
+    assert result.is_equivalent is True
+
+    source_results = cpre.analyze_macros("#define FEAT_1 (A || (!A && B))\n#define BUF 1024\n")
+    assert len(source_results) == 2
+    assert source_results[0].name == "FEAT_1"
+    assert source_results[0].candidate is True
+    assert source_results[1].name == "BUF"
+    assert source_results[1].candidate is False
