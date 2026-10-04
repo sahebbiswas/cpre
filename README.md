@@ -6,6 +6,18 @@
 
 **Project status: Beta.** The documented CLI and top-level Python API are intended for downstream integration, while broader real-world use may still uncover compatibility, modeling, or performance edges before 1.0.
 
+## What cpre provides
+
+cpre has grown beyond a conditional-linting CLI into a set of focused, integration-oriented C/C++ preprocessing primitives. The surfaces are deliberately separate so callers can choose the level of interpretation they need:
+
+- **Symbolic conditional analysis** — finds dead and redundant branches and distinguishes exact from contextual simplifications using bounded, deterministic ROBDD-backed reasoning. Known macro assumptions can constrain proofs without silently turning unknown macros into false.
+- **Exact Boolean proofs and witnesses** — public APIs support satisfiability, implication, equivalence, exact simplification, and deterministic witness assignments, with explicit incomplete results when proof budgets are exhausted.
+- **Lossless conditional structure** — `parse_conditionals()` exposes source-preserving blocks, directives, tokens, physical ranges, recovery diagnostics, and C23 `#elifdef`/`#elifndef` structure for refactoring and source-aware tools.
+- **Concrete preprocessing** — `preprocess_source()` selects one configuration, tracks source-order macro state, performs bounded macro expansion (including variadics, stringification, token pasting, and `__VA_OPT__`), and preserves physical provenance through source mappings. External state is explicit through `MacroConfiguration`, deterministic preprocessing context, `__has_include` queries, and host-owned pragma handling.
+- **Conservative integration contracts** — structured errors and diagnostics, deterministic ordering, atomic incomplete results, SARIF 2.1.0 findings, and downstream compatibility tests make it practical to embed cpre in analyzers and CI without parsing human-readable output or guessing about partial results.
+
+The [documentation index](https://github.com/sahebbiswas/cpre/blob/main/docs/README.md) keeps the detailed contracts separate from this overview; the README is intentionally focused on the capabilities a new user should understand first.
+
 ## Installation
 
 ```bash
