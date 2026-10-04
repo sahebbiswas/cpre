@@ -26,6 +26,16 @@ class DefinedVariable(Variable):
 
 
 @dataclass(frozen=True)
+class SymbolicLiteral(Variable):
+    """An integer literal deliberately treated as a free Boolean atom.
+
+    Only produced by opt-in symbolic-literal macro analysis. ``name`` holds the
+    canonical decimal spelling of the literal (for example ``"0"``), which can
+    never collide with a C identifier.
+    """
+
+
+@dataclass(frozen=True)
 class Predicate:
     """A value-bearing expression treated as one opaque Boolean fact."""
 
@@ -47,9 +57,16 @@ class Disjunction:
     operands: tuple[Expression, ...]
 
 
-BooleanAtom = typing.Union[Variable, DefinedVariable, Predicate]
+BooleanAtom = typing.Union[Variable, DefinedVariable, SymbolicLiteral, Predicate]
 Expression = typing.Union[
-    Constant, Variable, DefinedVariable, Predicate, Negation, Conjunction, Disjunction
+    Constant,
+    Variable,
+    DefinedVariable,
+    SymbolicLiteral,
+    Predicate,
+    Negation,
+    Conjunction,
+    Disjunction,
 ]
 TRUE = Constant(True)
 FALSE = Constant(False)
@@ -161,6 +178,7 @@ __all__ = [
     "Negation",
     "Predicate",
     "SourceLocation",
+    "SymbolicLiteral",
     "TRUE",
     "Variable",
 ]
