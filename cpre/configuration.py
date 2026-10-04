@@ -128,6 +128,7 @@ class MacroConfiguration:
         unknown_names: UnknownNamePolicy | str = UnknownNamePolicy.OPEN,
         options: AnalysisOptions | None = None,
         base: MacroConfiguration | None = None,
+        exclude: Iterable[str] = (),
     ) -> MacroConfiguration:
         """Derive a configuration from the final macro state of a seed source.
 
@@ -138,6 +139,12 @@ class MacroConfiguration:
         the name only undefined. Evaluation and the returned configuration
         always use the explicit ``unknown_names`` argument, never
         ``base.unknown_names``.
+
+        Standard file include guards (outermost ``#ifndef`` or ``#if !defined``
+        whose matching ``#define`` is the first directive and whose ``#endif``
+        closes the file, without reuse of the name as a condition or replacement)
+        are detected and stripped by default. Pass ``exclude=`` to strip
+        additional macro names or override names the detector does not touch.
         """
         if type(text) is not str:
             raise AnalysisError(
@@ -149,6 +156,17 @@ class MacroConfiguration:
                 "base must be a MacroConfiguration instance or None",
                 code=ErrorCode.INVALID_CONFIGURATION,
             )
+
+        try:
+            excluded_names = frozenset(exclude)
+        except TypeError as error:
+            raise AnalysisError(
+                "exclude must be an iterable of macro names",
+                code=ErrorCode.INVALID_CONFIGURATION,
+            ) from error
+
+        for name in excluded_names:
+            cls._validate_name(name)
 
         from .errors import IncompleteConfigurationError
         from .pragmas import preprocess_source
@@ -234,6 +252,17 @@ class MacroConfiguration:
                     "invalid macro state snapshot",
                     code=ErrorCode.INVALID_CONFIGURATION,
                 )
+
+        detected_guard = _detect_include_guard(text)
+        strip_names = set(excluded_names)
+        if detected_guard is not None:
+            strip_names.add(detected_guard)
+
+        if strip_names:
+            presence = [name for name in presence if name not in strip_names]
+            undefined = [name for name in undefined if name not in strip_names]
+            integers = {name: val for name, val in integers.items() if name not in strip_names}
+            definitions = [defn for defn in definitions if defn.name not in strip_names]
 
         return cls(
             presence=presence,
@@ -324,6 +353,114 @@ def _condition_environment(environment: MacroEnvironment) -> MacroEnvironment:
     # The wrapper intentionally implements the MacroEnvironment read contract
     # without mutating the caller-visible final snapshot.
     return _ConditionMacroEnvironment(environment)  # type: ignore[return-value]
+
+
+def _detect_include_guard(text: str) -> str | None:
+    """Detect if source text has an idempotent file include guard.
+
+    Returns the macro name if all four conditions hold:
+    1. It is the subject of an outermost #ifndef or #if !defined.
+    2. The matching #define of that same name is the first directive in that branch.
+    3. The #endif closes the file.
+    4. The name is not used again as a condition or as a replacement.
+    Otherwise returns None.
+    """
+    from .expansion import tokenize
+    from .model import DefinedVariable, Negation
+    from .parser import logical_lines, parse_source
+
+    try:
+        tree = parse_source(text, distinguish_defined=True)
+    except Exception:
+        return None
+
+    if len(tree.groups) != 1:
+        return None
+
+    group = tree.groups[0]
+    if len(group.branches) != 1:
+        return None
+
+    branch = group.branches[0]
+    if branch.directive not in {"ifndef", "if"}:
+        return None
+
+    if not (
+        isinstance(branch.expression, Negation)
+        and isinstance(branch.expression.operand, DefinedVariable)
+    ):
+        return None
+
+    guard_name = branch.expression.operand.name
+
+    try:
+        lines = list(logical_lines(text))
+    except Exception:
+        return None
+
+    if group.end_line is None:
+        return None
+
+    # Lines before the guard must be empty (comments and whitespace only)
+    for line in lines:
+        if line.start_line < group.line and line.text.strip():
+            return None
+        # The #endif closes the file: lines after #endif must be empty
+        if line.start_line > group.end_line and line.text.strip():
+            return None
+
+    first_directive = None
+    for line in lines:
+        if branch.line < line.start_line < group.end_line:
+            match = re.match(r"\s*#\s*([A-Za-z_]\w*)\b", line.text)
+            if match:
+                first_directive = (match.group(1), line.text[match.end() :])
+                break
+
+    if first_directive is None:
+        return None
+
+    kind, remainder = first_directive
+    if kind != "define":
+        return None
+
+    name_match = re.match(r"\s*([A-Za-z_]\w*)", remainder)
+    if not name_match or name_match.group(1) != guard_name:
+        return None
+
+    tail = remainder.lstrip()[len(guard_name) :]
+    if tail.startswith("("):
+        return None
+
+    try:
+        toks = tokenize(text)
+    except Exception:
+        return None
+
+    ident_indices = [
+        i for i, t in enumerate(toks) if t.kind == "identifier" and t.text == guard_name
+    ]
+    if len(ident_indices) != 2:
+        return None
+
+    def_idx = ident_indices[1]
+    prev_tokens = [t for t in toks[:def_idx] if t.kind not in {"space", "comment"}]
+    if not (
+        len(prev_tokens) >= 2
+        and prev_tokens[-1].kind == "identifier"
+        and prev_tokens[-1].text == "define"
+        and prev_tokens[-2].kind == "other"
+        and prev_tokens[-2].text == "#"
+    ):
+        return None
+
+    # In C translation phase 2, backslash-newline line continuations are deleted.
+    # A macro definition is function-like if and only if '(' directly follows the
+    # macro name after line splicing without intervening whitespace or comments.
+    if def_idx + 1 < len(toks) and toks[def_idx + 1].text == "(":
+        return None
+
+    return guard_name
 
 
 __all__ = ["MacroConfiguration", "UnknownNamePolicy"]

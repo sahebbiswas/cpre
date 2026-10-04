@@ -76,7 +76,38 @@ The last definition wins across categories, and each name ends up in exactly one
 
 The unknown-name policy used for evaluation and stored on the result is always the explicit `unknown_names=` argument, never `base.unknown_names`. Context-injected standard macros that the seed leaves unchanged are still omitted. `base` must be `None` or a `MacroConfiguration`; any other value raises `AnalysisError` with `ErrorCode.INVALID_CONFIGURATION` before preprocessing.
 
-Note: Guard macros (such as `#ifndef FLAGS_H`) are currently retained as presence definitions. Self-preprocessing the seed using this derived configuration is not useful until include-guard handling is available in a future update.
+### Automatic include guard detection and `exclude=`
+
+Standard idempotent include guards (such as `#ifndef FLAGS_H` / `#define FLAGS_H` ... `#endif`) are stripped automatically from derived configurations so callers do not have to name them. Automatic detection is on by default.
+
+A macro name is stripped automatically only when all of the following hold:
+
+1. It is the subject of an outermost `#ifndef` or `#if !defined`.
+2. The matching `#define` of that same name is the first directive in that branch.
+3. The `#endif` closes the file (no directives or non-whitespace code follow).
+4. The name is not used again as a condition or as a replacement.
+
+Anything that does not match is left in the configuration. The detector does not guess or apply a broader "first `#ifndef` wins" rule:
+- A macro used both as a guard and as a later condition or replacement stays.
+- A nested `#ifndef` that is not the file guard stays.
+- `#pragma once` is not treated as a guard; if pragma handling is unsupported, that seed fails as incomplete rather than being guessed.
+- A name the detector is not sure about stays.
+
+Use `exclude=` as an explicit override for names the detector will not touch, or for any name that should be removed even when it is not a guard:
+
+```python
+config = cpre.MacroConfiguration.from_source(
+    seed_text,
+    exclude=("FLAGS_H", "INTERNAL_MACRO"),
+)
+```
+
+- `exclude=` accepts an iterable of macro names (default empty).
+- Invalid names raise `AnalysisError` with `ErrorCode.INVALID_CONFIGURATION` before preprocessing. Duplicates are ignored, and names not present in the result are no-ops.
+- `exclude=` is applied after classification, after `base=` layering, and after automatic detection, removing matching names from every category (`presence`, `integers`, `definitions`, `undefined`), whether they originated from the seed, from `base`, or from both.
+- `exclude=` does not change seed evaluation. The seed's own `#define` directives remain visible while the seed is preprocessed, so guarded bodies and later conditions on that derivation pass are evaluated normally.
+
+Note that `MacroConfiguration.from_source()` is not GCC `-imacros`. `-imacros` also pulls nested header includes from the filesystem, whereas `from_source()` processes self-contained macro definitions and refuses active `#include` directives.
 
 ## Standard predefined preprocessing context
 
