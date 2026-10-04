@@ -16,7 +16,7 @@ result = cpre.analyze_source(source_text, filename="src/example.c")
 
 The names exported by `cpre.__all__` are the supported public boundary. Internal implementation modules such as `cpre.robdd`, `cpre.parser`, `cpre.model`, and `cpre.expressions` are not downstream APIs.
 
-The public surface includes the symbolic expression model/algebra, symbolic analysis result/error model, source locations and edits, macro assumptions/configuration types, and concrete preprocessing types. This guide focuses on `analyze_source()` and the reusable symbolic expression surface; see [Concrete preprocessing](preprocessing.md) for `preprocess_source()`, `PreprocessResult`, `compact()`, macro environments, deterministic preprocessing context, and pragma handling.
+The public surface includes the symbolic expression model/algebra, symbolic analysis result/error model, source locations and edits, macro assumptions/configuration types, concrete preprocessing types, and macro Boolean simplification analysis (`analyze_macro()`, `analyze_macros()`, `MacroAnalysisResult`). This guide focuses on `analyze_source()` and the reusable symbolic expression surface; see [Macro Boolean simplification](macro-simplification.md) for object-like macro analysis, and [Concrete preprocessing](preprocessing.md) for `preprocess_source()`, `PreprocessResult`, `compact()`, macro environments, deterministic preprocessing context, and pragma handling.
 
 ## Symbolic expression API
 

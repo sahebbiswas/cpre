@@ -24,6 +24,7 @@ from .api import (
 )
 from .configuration import MacroConfiguration, UnknownNamePolicy
 from .expansion import SourceMapping
+from .macro_analysis import MacroAnalysisResult, analyze_macro, analyze_macros
 from .macros import MacroDefinition, MacroEnvironment, MacroState
 from .pragmas import (
     Pragma,
@@ -87,7 +88,7 @@ from .symbolic import (
     simplify,
 )
 
-__version__ = "0.12.1"
+__version__ = "0.13.0"
 
 __all__ = [
     "AnalysisError",
@@ -116,6 +117,7 @@ __all__ = [
     "FindingKind",
     "FixConfidence",
     "IncompleteConfigurationError",
+    "MacroAnalysisResult",
     "MacroAssumptions",
     "MacroConfiguration",
     "MacroDefinition",
@@ -149,6 +151,8 @@ __all__ = [
     "WitnessAtomKind",
     "WitnessResult",
     "__version__",
+    "analyze_macro",
+    "analyze_macros",
     "analyze_source",
     "compact",
     "conjunction",
