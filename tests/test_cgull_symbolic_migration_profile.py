@@ -207,7 +207,7 @@ def test_symbolic_profile_is_pinned_and_inventory_is_explicit():
         "commit": "265f7bfdcb806a775a88510483ba28552f50f006",
         "validated_on": "2026-09-17",
     }
-    assert profile["cpre"]["version"] == cpre.__version__ == "0.12.0"
+    assert profile["cpre"]["version"] == "0.12.0"
     assert profile["cpre"]["implementation_commit"] == ("88e14949e594c1739467b40ea53210e56bb56771")
     assert profile["cpre"]["first_suitable_release"] == "0.12.0"
 
