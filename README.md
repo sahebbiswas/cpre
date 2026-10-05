@@ -13,7 +13,7 @@ cpre has grown beyond a conditional-linting CLI into a set of focused, integrati
 - **Symbolic conditional analysis** — finds dead and redundant branches and distinguishes exact from contextual simplifications using bounded, deterministic ROBDD-backed reasoning. Known macro assumptions can constrain proofs without silently turning unknown macros into false.
 - **Exact Boolean proofs and witnesses** — public APIs support satisfiability, implication, equivalence, exact simplification, and deterministic witness assignments, with explicit incomplete results when proof budgets are exhausted.
 - **Lossless conditional structure** — `parse_conditionals()` exposes source-preserving blocks, directives, tokens, physical ranges, recovery diagnostics, and C23 `#elifdef`/`#elifndef` structure for refactoring and source-aware tools.
-- **Macro Boolean simplification** — analyzes object-like `#define` replacements with bounded ROBDD proofs, supporting both ordinary C truth semantics and opt-in symbolic-literal mode (`--symbolic-literal 0` / `--symbolic-zero`) to preserve transient feature-flag controls.
+- **Macro Boolean simplification and rewriting** — analyzes object-like `#define` replacements with bounded ROBDD proofs, supporting both ordinary C truth semantics and opt-in symbolic-literal mode (`--symbolic-literal 0` / `--symbolic-zero`). Dedicated `simplify-macros` / `analyze-macros` CLI commands and Python APIs (`simplify_macros()`, `rewrite_macros()`) report and safely apply proven-equivalent simplifications in-place.
 - **Concrete preprocessing** — `preprocess_source()` selects one configuration, tracks source-order macro state, performs bounded macro expansion (including variadics, stringification, token pasting, and `__VA_OPT__`), and preserves physical provenance through source mappings. External state is explicit through `MacroConfiguration`, deterministic preprocessing context, `__has_include` queries, and host-owned pragma handling.
 - **Conservative integration contracts** — structured errors and diagnostics, deterministic ordering, atomic incomplete results, SARIF 2.1.0 findings, and downstream compatibility tests make it practical to embed cpre in analyzers and CI without parsing human-readable output or guessing about partial results.
 
@@ -63,6 +63,16 @@ The module form is equivalent:
 
 ```bash
 python -m cpre source.c
+```
+
+Inspect simplified macro definitions or rewrite them safely in-place:
+
+```bash
+# Report-only mode (never modifies source)
+cpre simplify-macros source.c
+
+# Explicit in-place rewrite mode
+cpre simplify-macros --rewrite source.c
 ```
 
 By default, text and JSON reports show notable branches and simplified macros; `--verbose` includes unchanged branches and unsimplified macros. `--json` emits structural conditional trees alongside macro simplification results, while `--sarif` emits findings for static-analysis interchange. Specific analyses can be disabled with `--no-macros` or `--no-conditionals`. See the [CLI guide](https://github.com/sahebbiswas/cpre/blob/main/docs/cli.md) for discovery rules, batch output, stderr behavior, and the `0`/`1`/`2` exit-status contract.

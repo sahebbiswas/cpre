@@ -24,7 +24,14 @@ from .api import (
 )
 from .configuration import MacroConfiguration, UnknownNamePolicy
 from .expansion import SourceMapping
-from .macro_analysis import MacroAnalysisResult, analyze_macro, analyze_macros
+from .macro_analysis import (
+    MacroAnalysisResult,
+    MacroSimplificationResult,
+    analyze_macro,
+    analyze_macros,
+    rewrite_macros,
+    simplify_macros,
+)
 from .macros import MacroDefinition, MacroEnvironment, MacroState
 from .pragmas import (
     Pragma,
@@ -88,7 +95,7 @@ from .symbolic import (
     simplify,
 )
 
-__version__ = "0.13.1"
+__version__ = "0.14.0"
 
 __all__ = [
     "AnalysisError",
@@ -122,6 +129,7 @@ __all__ = [
     "MacroConfiguration",
     "MacroDefinition",
     "MacroEnvironment",
+    "MacroSimplificationResult",
     "MacroState",
     "Negation",
     "ParseError",
@@ -169,7 +177,9 @@ __all__ = [
     "ordered_atoms",
     "parse_conditionals",
     "preprocess_source",
+    "rewrite_macros",
     "satisfiable",
     "simplify",
+    "simplify_macros",
     "witness_assignment",
 ]

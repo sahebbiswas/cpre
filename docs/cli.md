@@ -188,6 +188,70 @@ If an integration requires checking only conditional branches or only macro defi
 - `--no-macros`: Disables macro Boolean simplification; only conditional directives are analyzed.
 - `--no-conditionals`: Disables conditional directive analysis; only macro definitions are analyzed.
 
+## Dedicated macro simplification and rewrite workflow
+
+For dedicated macro inspection and in-place source rewriting, `cpre` provides the `simplify-macros` command (with `analyze-macros` as an alias):
+
+```bash
+# Report-only mode: inspect simplifications without modifying source files
+cpre simplify-macros source.c
+cpre analyze-macros source.c
+
+# Explicit rewrite mode: apply only proven-equivalent simplifications in-place
+cpre simplify-macros --rewrite source.c
+cpre simplify-macros --in-place source.c
+```
+
+### Report format
+
+In report mode, each simplified definition distinguishes the original replacement list, simplified replacement list, proof/equivalence status, and source location:
+
+```text
+line 12: #define FEAT_1 (0 && A) || B -> (B) [proven equivalent]
+```
+
+With `--verbose`, unsimplified candidates and skipped non-candidate definitions are also displayed with diagnostic reasons:
+
+```text
+line 4: #define BUFFER_SIZE 1024 skipped: non-Boolean integer literal: '1024'
+line 8: #define FEAT_2 (A || B) (expression is already in simplest equivalent form)
+```
+
+In rewrite mode (`--rewrite`), successfully applied transformations are indicated:
+
+```text
+line 12: #define FEAT_1 (0 && A) || B -> (B) [rewritten, proven equivalent]
+```
+
+### Safety and verification guarantees
+
+- **Report-only by default**: reporting never modifies source files. Source mutation requires the explicit `--rewrite` (or `--in-place`) flag.
+- **Proof-verified transformations**: only transformations proven equivalent under the selected semantic mode are applied.
+- **Reparsing and re-analysis verification**: after rewriting in-place, the resulting definitions are re-parsed and re-analyzed to verify that they parse cleanly, reached the simplest form, and remain semantically equivalent. If verification fails, the rewrite is aborted and reported with exit status `2`.
+- **Formatting and comment preservation**: rewriting operates on exact replacement ranges; leading directive whitespace, macro names, inline comments (`/* ... */` and `// ...`), unrelated code, and original line endings (CRLF / LF) are preserved.
+- **Incomplete expressions protected**: macros that exceed analysis resource limits or contain unmodeled constructs are never emitted as rewrites.
+
+### Symbolic-literal mode in rewrites
+
+Symbolic-literal options are supported in both report and rewrite modes:
+
+```bash
+# Preserve disabled switches such as (0 && A) || B
+cpre simplify-macros --symbolic-zero source.c
+cpre simplify-macros --rewrite --symbolic-zero source.c
+```
+
+### JSON output for macro workflows
+
+Passing `--json` to `simplify-macros` produces structured machine-readable results:
+
+```bash
+cpre simplify-macros --json source.c
+cpre simplify-macros --rewrite --json source.c
+```
+
+The output contains `path`, `rewritten`, `applied_count`, `verified`, `semantics`, `symbolic_literals`, and the array of analyzed `macros`.
+
 ## Full option reference
 
 ```text

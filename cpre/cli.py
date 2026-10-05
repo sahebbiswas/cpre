@@ -13,8 +13,10 @@ from . import cpre as _engine
 from .api import AnalysisIncomplete, AnalysisResult, CpreError, ErrorCode, analyze_source
 from .macro_analysis import (
     MacroAnalysisResult,
+    MacroSimplificationResult,
     _resolve_symbolic_literals,
     analyze_macros,
+    simplify_macros,
 )
 from .sarif import ToolNotification, sarif_log
 
@@ -54,6 +56,7 @@ def _render_macro_report(
     *,
     verbose: bool = True,
     color: bool = False,
+    rewritten: bool = False,
 ) -> tuple[str, bool]:
     lines: list[str] = []
     has_entries = False
@@ -61,7 +64,11 @@ def _render_macro_report(
         loc = f"line {r.location.line}: " if r.location and r.location.line else ""
         if r.simplified:
             has_entries = True
-            line = f"{loc}#define {r.name} {r.original_replacement} -> {r.simplified_replacement}"
+            tag = "rewritten, proven equivalent" if rewritten else "proven equivalent"
+            line = (
+                f"{loc}#define {r.name} {r.original_replacement} -> "
+                f"{r.simplified_replacement} [{tag}]"
+            )
             lines.append(_engine._colored(line, "green", color))
         elif verbose:
             if r.candidate:
@@ -140,7 +147,190 @@ def _build_file_json(
     return f_data, has_visible
 
 
+def _build_simplify_macros_json(
+    path: Path | str,
+    res: MacroSimplificationResult,
+    *,
+    verbose: bool,
+    symbolic_literals: tuple[int, ...],
+) -> tuple[dict[str, object], bool]:
+    visible_macros = [_macro_to_dict(r) for r in res.results if (verbose or r.simplified)]
+    f_data: dict[str, object] = {
+        "path": str(path),
+        "rewritten": res.rewritten,
+        "applied_count": res.applied_count,
+        "verified": res.verified,
+        "semantics": "symbolic-literal" if symbolic_literals else "ordinary",
+        "symbolic_literals": list(symbolic_literals),
+        "macros": visible_macros,
+    }
+    has_visible = res.has_findings
+    return f_data, has_visible
+
+
+def _build_simplify_macros_parser(prog: str) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog=prog,
+        description="Analyze and optionally rewrite simplified object-like macro definitions.",
+    )
+    parser.add_argument(
+        "sources",
+        nargs="+",
+        type=Path,
+        help="C/C++ source files, or directories used with --recursive",
+    )
+    parser.add_argument(
+        "--recursive",
+        action="store_true",
+        help="recursively scan C/C++ source files under directory inputs",
+    )
+    parser.add_argument(
+        "--rewrite",
+        "--in-place",
+        dest="rewrite",
+        action="store_true",
+        help="rewrite source files in-place with proven-equivalent simplified definitions",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="write the analysis results as JSON",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="include unchanged and skipped macros in the report",
+    )
+    parser.add_argument(
+        "--fail-on-findings",
+        action="store_true",
+        help="exit with status 1 when simplifiable macros are found",
+    )
+    parser.add_argument(
+        "--symbolic-literal",
+        dest="symbolic_literals",
+        type=int,
+        action="append",
+        metavar="N",
+        help="treat integer literal N as a symbolic Boolean atom in macro analysis (e.g. 0)",
+    )
+    parser.add_argument(
+        "--symbolic-zero",
+        action="store_true",
+        help="convenience shorthand for --symbolic-literal 0",
+    )
+    return parser
+
+
+def simplify_macros_main(
+    argv: Sequence[str] | None = None,
+    prog: str = "cpre simplify-macros",
+) -> int:
+    parser = _build_simplify_macros_parser(prog)
+    args = parser.parse_args(argv)
+
+    symbolic_literals: tuple[int, ...] = ()
+    if args.symbolic_zero or args.symbolic_literals:
+        raw_literals: list[int] = []
+        if args.symbolic_zero:
+            raw_literals.append(0)
+        if args.symbolic_literals:
+            raw_literals.extend(args.symbolic_literals)
+        try:
+            symbolic_literals = _resolve_symbolic_literals(raw_literals)
+        except CpreError as error:
+            parser.error(error.message)
+
+    try:
+        paths = _engine._source_paths(args.sources, args.recursive)
+    except _engine.ConditionError as error:
+        parser.error(str(error))
+
+    batch_mode = len(args.sources) > 1 or any(path.is_dir() for path in args.sources)
+    file_results: list[tuple[Path, MacroSimplificationResult]] = []
+    had_errors = False
+
+    for path in paths:
+        try:
+            with open(path, encoding="utf-8", newline="") as f:
+                source = f.read()
+            res = simplify_macros(
+                source,
+                filename=str(path),
+                rewrite=args.rewrite,
+                symbolic_literals=symbolic_literals,
+            )
+            for r in res.results:
+                if not r.complete and r.incomplete:
+                    print(f"{path}: {_format_incomplete(r.incomplete)}", file=sys.stderr)
+                    had_errors = True
+            if args.rewrite and res.rewritten:
+                with open(path, "w", encoding="utf-8", newline="") as f:
+                    f.write(res.rewritten_source)
+            file_results.append((path, res))
+        except CpreError as error:
+            print(f"{path}: {_format_error(error)}", file=sys.stderr)
+            had_errors = True
+        except (OSError, UnicodeDecodeError) as error:
+            print(f"{path}: {error}", file=sys.stderr)
+            had_errors = True
+
+    if args.json:
+        if batch_mode:
+            files = []
+            for path, res in file_results:
+                f_data, has_visible = _build_simplify_macros_json(
+                    path, res, verbose=args.verbose, symbolic_literals=symbolic_literals
+                )
+                if args.verbose or has_visible:
+                    files.append(f_data)
+            print(json.dumps({"files": files}, indent=2))
+        elif file_results:
+            f_data, _ = _build_simplify_macros_json(
+                file_results[0][0],
+                file_results[0][1],
+                verbose=args.verbose,
+                symbolic_literals=symbolic_literals,
+            )
+            print(json.dumps(f_data, indent=2))
+    elif batch_mode:
+        color = sys.stdout.isatty()
+        reports = []
+        for path, res in file_results:
+            report, has_entries = _render_macro_report(
+                res.results,
+                verbose=args.verbose,
+                color=color,
+                rewritten=args.rewrite,
+            )
+            if args.verbose or has_entries:
+                reports.append(
+                    "\n".join((_engine._colored(f"== {path} ==", "cyan", color), report))
+                )
+        if reports:
+            print("\n\n".join(reports))
+    elif file_results:
+        report, _ = _render_macro_report(
+            file_results[0][1].results,
+            verbose=args.verbose,
+            color=sys.stdout.isatty(),
+            rewritten=args.rewrite,
+        )
+        print(report)
+
+    if had_errors:
+        return 2
+    has_findings = any(res.has_findings for _, res in file_results)
+    return 1 if args.fail_on_findings and has_findings else 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+
+    if argv and argv[0] in ("simplify-macros", "analyze-macros"):
+        return simplify_macros_main(argv[1:], prog=f"cpre {argv[0]}")
+
     parser = argparse.ArgumentParser(
         description="Analyze Boolean C/C++ preprocessor conditional directives and macros."
     )

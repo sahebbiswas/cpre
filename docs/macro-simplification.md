@@ -181,10 +181,69 @@ Each analyzed macro produces a structured `MacroAnalysisResult`:
 | `is_equivalent` | `bool \| None` | ROBDD proof-of-equivalence status |
 | `incomplete` | `AnalysisIncomplete \| None` | Resource limit diagnostic (if limits exceeded) |
 | `replacement_range` | `SourceRange \| None` | Exact 1-based source range of the replacement text |
+| `edit` | `SuggestedEdit \| None` (property) | Structured edit suggestion when a simpler equivalent expression is proven |
 | `symbolic_literals` | `tuple[int, ...]` | Literals treated as symbolic atoms; `()` in ordinary mode |
 | `semantics` | `str` (property) | `"ordinary"` or `"symbolic-literal"` |
 | `simplified` | `bool` (property) | `True` if a simpler equivalent expression was found |
 | `complete` | `bool` (property) | `True` if analysis completed within resource limits |
 | `location` | `SourceLocation \| None` (property) | Source location of the `#define` directive |
 
-The `replacement_range` provides exact source coordinates suitable for downstream automated reporting and safe source rewriting workflows.
+The `replacement_range` and `edit` provide exact source coordinates suitable for automated reporting and safe source rewriting workflows.
+
+## User-facing report and rewrite workflow
+
+To safely discover and apply macro simplifications without conflating analysis with mutation, `cpre` provides dedicated Python and CLI surfaces:
+
+### Python API: `simplify_macros()` and `rewrite_macros()`
+
+```python
+import cpre
+
+source = """
+#define FEAT_1 (0 && A) || B
+#define BUFFER_SIZE 1024
+#define FEAT_2 ((A && B) || (A && !B))
+"""
+
+# Report mode (default): inspect simplifications without modifying source
+result = cpre.simplify_macros(source)
+assert result.rewritten is False
+assert result.has_findings is True
+for simp in result.simplifications:
+    print(f"{simp.name}: {simp.original_replacement} -> {simp.simplified_replacement}")
+
+# Explicit rewrite mode: returns MacroSimplificationResult with rewritten_source
+rw_result = cpre.simplify_macros(source, rewrite=True)
+assert rw_result.rewritten is True
+assert rw_result.applied_count == 2
+assert rw_result.verified is True
+
+# Direct convenience wrapper
+rewritten_source = cpre.rewrite_macros(source)
+```
+
+### CLI workflow: `cpre simplify-macros`
+
+```bash
+# Report-only mode (never modifies source)
+cpre simplify-macros src/example.c
+cpre analyze-macros src/example.c
+
+# Explicit rewrite mode (modifies files in-place)
+cpre simplify-macros --rewrite src/example.c
+cpre simplify-macros --in-place src/example.c
+
+# Symbolic-literal mode
+cpre simplify-macros --rewrite --symbolic-zero src/example.c
+
+# Machine-readable JSON output
+cpre simplify-macros --json src/example.c
+```
+
+### Safety and verification contract
+
+1. **Reporting never mutates source**: running without `--rewrite` (or `rewrite=True`) is strictly read-only.
+2. **Rewriting requires an explicit flag**: source mutation must be requested intentionally.
+3. **Only proven-equivalent transformations are applied**: transformations must be verified equivalent under the active semantic mode (`ordinary` or `symbolic-literal`).
+4. **Reparsing and re-analysis verification**: after applying edits, the resulting source is reparsed and reanalyzed to ensure it remains syntactically valid, reached simplest form, and preserves semantic equivalence.
+5. **Formatting and comment preservation**: rewriting preserves directive indentation, macro names, inline comments, unrelated code, and native line endings (CRLF / LF).

@@ -51,6 +51,7 @@ def test_top_level_public_api_exposes_supported_symbols_only():
         "MacroConfiguration",
         "MacroDefinition",
         "MacroEnvironment",
+        "MacroSimplificationResult",
         "MacroState",
         "Negation",
         "ParseError",
@@ -98,8 +99,10 @@ def test_top_level_public_api_exposes_supported_symbols_only():
         "ordered_atoms",
         "parse_conditionals",
         "preprocess_source",
+        "rewrite_macros",
         "satisfiable",
         "simplify",
+        "simplify_macros",
         "witness_assignment",
     ]
 

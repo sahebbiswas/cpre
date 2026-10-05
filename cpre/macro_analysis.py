@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from .api import AnalysisIncomplete, AnalysisOptions, SourceRange
+from .api import (
+    AnalysisIncomplete,
+    AnalysisOptions,
+    FixConfidence,
+    SourceRange,
+    SuggestedEdit,
+)
 from .errors import AnalysisError, ErrorCode, SourceLocation
 from .expressions import (
     ExpressionParser,
@@ -92,6 +98,23 @@ class MacroAnalysisResult:
     def equivalent(self) -> bool | None:
         """Alias for is_equivalent."""
         return self.is_equivalent
+
+    @property
+    def edit(self) -> SuggestedEdit | None:
+        """Structured edit suggestion when a simpler equivalent expression is proven."""
+        if (
+            self.simplified
+            and self.is_equivalent is True
+            and self.complete
+            and self.replacement_range is not None
+            and self.simplified_replacement is not None
+        ):
+            return SuggestedEdit(
+                range=self.replacement_range,
+                replacement=self.simplified_replacement,
+                confidence=FixConfidence.EXACT,
+            )
+        return None
 
 
 def classify_macro_candidate(
@@ -446,9 +469,247 @@ def analyze_macros(
     return tuple(results)
 
 
+@dataclass(frozen=True)
+class MacroSimplificationResult:
+    """Result of macro simplification analysis and optional source rewriting."""
+
+    source: str
+    rewritten_source: str
+    results: tuple[MacroAnalysisResult, ...]
+    rewritten: bool
+    applied_count: int
+    verified: bool
+    filename: str | None = None
+
+    @property
+    def simplifications(self) -> tuple[MacroAnalysisResult, ...]:
+        """Tuple of results that represent simplified macros."""
+        return tuple(r for r in self.results if r.simplified)
+
+    @property
+    def has_findings(self) -> bool:
+        """True if any simplifiable macro was found."""
+        return any(r.simplified for r in self.results)
+
+
+def _compute_line_starts(source: str) -> list[int]:
+    starts = [0]
+    for idx, ch in enumerate(source):
+        if ch == "\n":
+            starts.append(idx + 1)
+    return starts
+
+
+def _location_to_offset(line_starts: list[int], source_len: int, location: SourceLocation) -> int:
+    line_idx = location.line - 1
+    if line_idx < 0:
+        return 0
+    if line_idx >= len(line_starts):
+        return source_len
+    start = line_starts[line_idx]
+    col = location.column or 1
+    return min(start + max(0, col - 1), source_len)
+
+
+def _apply_and_verify_rewrites(
+    source: str,
+    results: Sequence[MacroAnalysisResult],
+    *,
+    symbolic_literals: tuple[int, ...],
+    options: AnalysisOptions | None,
+    filename: str | None,
+) -> tuple[str, bool, int, bool]:
+    """Apply proven-equivalent simplifications to source and verify the result.
+
+    Returns (rewritten_source, was_rewritten, applied_count, verified).
+    """
+    candidates_to_rewrite = [
+        (idx, r)
+        for idx, r in enumerate(results)
+        if r.simplified
+        and r.is_equivalent is True
+        and r.complete
+        and r.edit is not None
+        and r.replacement_range is not None
+        and r.simplified_replacement is not None
+    ]
+
+    if not candidates_to_rewrite:
+        return source, False, 0, True
+
+    line_starts = _compute_line_starts(source)
+    source_len = len(source)
+    edits_with_offsets: list[tuple[MacroAnalysisResult, int, int]] = []
+
+    for _idx, r in candidates_to_rewrite:
+        edit = r.edit
+        assert edit is not None
+        start_offset = _location_to_offset(line_starts, source_len, edit.range.start)
+        end_offset = _location_to_offset(line_starts, source_len, edit.range.end)
+        if not (0 <= start_offset < end_offset <= source_len):
+            raise AnalysisError(
+                f"Invalid source range for macro '{r.name}': {edit.range}",
+                code=ErrorCode.ANALYSIS_FAILURE,
+            )
+        edits_with_offsets.append((r, start_offset, end_offset))
+
+    # Sort descending by start offset so applying earlier edits does not shift subsequent ranges
+    edits_with_offsets.sort(key=lambda item: item[1], reverse=True)
+
+    # Check for overlapping ranges
+    for i in range(len(edits_with_offsets) - 1):
+        curr_r, curr_start, curr_end = edits_with_offsets[i]
+        next_r, next_start, next_end = edits_with_offsets[i + 1]
+        if next_end > curr_start:
+            raise AnalysisError(
+                f"Overlapping macro replacements between '{next_r.name}' and '{curr_r.name}'",
+                code=ErrorCode.ANALYSIS_FAILURE,
+            )
+
+    rewritten = source
+    for r, start_offset, end_offset in edits_with_offsets:
+        assert r.simplified_replacement is not None
+        rewritten = rewritten[:start_offset] + r.simplified_replacement + rewritten[end_offset:]
+
+    # Reparse and reanalyze the resulting definition for verification
+    re_results = analyze_macros(
+        rewritten,
+        options=options,
+        filename=filename,
+        symbolic_literals=symbolic_literals,
+    )
+
+    if len(re_results) != len(results):
+        raise AnalysisError(
+            f"Rewrite verification failed: expected {len(results)} macros after rewrite, found {len(re_results)}",
+            code=ErrorCode.ANALYSIS_FAILURE,
+        )
+
+    for idx, r in candidates_to_rewrite:
+        re_r = re_results[idx]
+        if re_r.name != r.name:
+            raise AnalysisError(
+                f"Rewrite verification failed: macro '{r.name}' not found after rewrite",
+                code=ErrorCode.ANALYSIS_FAILURE,
+            )
+        if not re_r.complete or re_r.incomplete is not None:
+            raise AnalysisError(
+                f"Rewrite verification failed for '{r.name}': re-analysis was incomplete ({re_r.reason})",
+                code=ErrorCode.ANALYSIS_FAILURE,
+            )
+        if re_r.simplified:
+            raise AnalysisError(
+                f"Rewrite verification failed for '{r.name}': definition is still simplifiable "
+                f"({re_r.original_replacement} -> {re_r.simplified_replacement})",
+                code=ErrorCode.ANALYSIS_FAILURE,
+            )
+        if re_r.original_replacement != r.simplified_replacement:
+            raise AnalysisError(
+                f"Rewrite verification failed for '{r.name}': expected replacement "
+                f"{r.simplified_replacement!r}, found {re_r.original_replacement!r}",
+                code=ErrorCode.ANALYSIS_FAILURE,
+            )
+        if r.original_expression is not None and re_r.original_expression is not None:
+            atoms = tuple(
+                dict.fromkeys(
+                    list(expression_atoms_in_order(r.original_expression))
+                    + list(expression_atoms_in_order(re_r.original_expression))
+                )
+            )
+            limits = (options or AnalysisOptions())._resource_limits()
+            budget = AnalysisBudget(limits.max_work)
+            bdd = BDD(atoms, limits=limits, budget=budget)
+            if not bdd.equivalent_under(TRUE, r.original_expression, re_r.original_expression):
+                raise AnalysisError(
+                    f"Rewrite verification failed: '{r.name}' rewritten expression is not equivalent to original",
+                    code=ErrorCode.ANALYSIS_FAILURE,
+                )
+
+    return rewritten, True, len(candidates_to_rewrite), True
+
+
+def simplify_macros(
+    source: str,
+    *,
+    filename: str | None = None,
+    rewrite: bool = False,
+    symbolic_literals: Iterable[int] | None = None,
+    options: AnalysisOptions | None = None,
+) -> MacroSimplificationResult:
+    """Analyze macro definitions for Boolean simplification, and optionally rewrite source.
+
+    When ``rewrite=False`` (the default), source is never modified.
+    When ``rewrite=True``, only transformations proven equivalent under the
+    selected semantic mode are applied, and the result is verified by
+    re-parsing and re-analyzing the rewritten source.
+    """
+    resolved_options = options or AnalysisOptions()
+    literals = _resolve_symbolic_literals(symbolic_literals)
+    results = analyze_macros(
+        source,
+        options=resolved_options,
+        filename=filename,
+        symbolic_literals=literals,
+    )
+
+    if not rewrite:
+        return MacroSimplificationResult(
+            source=source,
+            rewritten_source=source,
+            results=results,
+            rewritten=False,
+            applied_count=0,
+            verified=True,
+            filename=filename,
+        )
+
+    rewritten_source, was_rewritten, count, verified = _apply_and_verify_rewrites(
+        source,
+        results,
+        symbolic_literals=literals,
+        options=resolved_options,
+        filename=filename,
+    )
+
+    return MacroSimplificationResult(
+        source=source,
+        rewritten_source=rewritten_source,
+        results=results,
+        rewritten=was_rewritten,
+        applied_count=count,
+        verified=verified,
+        filename=filename,
+    )
+
+
+def rewrite_macros(
+    source: str,
+    *,
+    filename: str | None = None,
+    symbolic_literals: Iterable[int] | None = None,
+    options: AnalysisOptions | None = None,
+) -> str:
+    """Convenience function to rewrite simplifiable macros in source text.
+
+    Requires all applied transformations to be proven equivalent and verified.
+    Returns the rewritten source string.
+    """
+    result = simplify_macros(
+        source,
+        filename=filename,
+        rewrite=True,
+        symbolic_literals=symbolic_literals,
+        options=options,
+    )
+    return result.rewritten_source
+
+
 __all__ = [
     "MacroAnalysisResult",
+    "MacroSimplificationResult",
     "analyze_macro",
     "analyze_macros",
     "classify_macro_candidate",
+    "rewrite_macros",
+    "simplify_macros",
 ]
