@@ -212,7 +212,7 @@ Incomplete preprocessing never emits partial transformed source. Diagnostics are
 
 `cpre preprocess` currently accepts one source file. Directory/batch processing is intentionally not inherited from the symbolic analysis CLI. Reachable `#include` directives, unsupported pragmas, unresolved `__has_include` queries, and other constructs outside the documented concrete-preprocessing contract remain governed by the library's atomic incomplete-result behavior.
 
-For the full transformation, configuration, mapping, deterministic-context, and host-callback contract, see [Concrete preprocessing](preprocessing.md) and [Concrete macro configuration](concrete-configuration.md).
+For the full transformation, configuration, mapping, deterministic-context, and host-callback contract, see [Concrete preprocessing](preprocessing.md) and [Concrete macro configuration](concrete-configuration.md). For canonical versus compact output semantics, see [Compact preprocessing output](compact-preprocessing.md).
 
 ## Dedicated macro simplification and rewrite workflow
 
