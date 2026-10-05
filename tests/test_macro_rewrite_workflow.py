@@ -446,3 +446,38 @@ def test_rewrite_verification_name_mismatch(monkeypatch):
         )
     assert "Rewrite verification failed: macro 'FOO' not found after rewrite" in str(excinfo.value)
     assert excinfo.value.code == cpre.ErrorCode.ANALYSIS_FAILURE
+
+
+def test_rewrite_verification_non_equivalent_expression(monkeypatch):
+    source = "#define FOO (A && A)\n"
+    results = cpre.analyze_macros(source)
+    assert len(results) == 1
+    assert results[0].simplified_replacement is not None
+
+    # Return a complete macro result matching the expected name and replacement,
+    # but with a semantically non-equivalent Boolean expression.
+    fake_re_result = cpre.MacroAnalysisResult(
+        name="FOO",
+        definition=results[0].definition,
+        candidate=True,
+        original_replacement=results[0].simplified_replacement,
+        original_expression=cpre.Variable(name="B"),
+    )
+    monkeypatch.setattr(
+        "cpre.macro_analysis.analyze_macros",
+        lambda *args, **kwargs: (fake_re_result,),
+    )
+
+    with pytest.raises(cpre.AnalysisError) as excinfo:
+        cpre.macro_analysis._apply_and_verify_rewrites(
+            source,
+            results,
+            symbolic_literals=(),
+            options=None,
+            filename=None,
+        )
+    assert (
+        "Rewrite verification failed: 'FOO' rewritten expression is not equivalent to original"
+        in str(excinfo.value)
+    )
+    assert excinfo.value.code == cpre.ErrorCode.ANALYSIS_FAILURE
