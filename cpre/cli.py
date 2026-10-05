@@ -329,6 +329,7 @@ def simplify_macros_main(
 
 
 def _parse_name_value(value: str, option: str) -> tuple[str, str]:
+    """Parse a CLI macro assignment into a name and replacement text."""
     if "=" in value:
         name, replacement = value.split("=", 1)
     else:
@@ -343,7 +344,7 @@ def _parse_name_value(value: str, option: str) -> tuple[str, str]:
 
 
 def _build_preprocess_parser(prog: str) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    """Build the argument parser for the concrete preprocessing command."""    parser = argparse.ArgumentParser(
         prog=prog,
         description=(
             "Select one concrete preprocessing configuration and emit the transformed source."
@@ -410,6 +411,7 @@ def preprocess_main(
     argv: Sequence[str] | None = None,
     prog: str = "cpre preprocess",
 ) -> int:
+    """Run the concrete preprocessing CLI workflow for one source file."""
     parser = _build_preprocess_parser(prog)
     args = parser.parse_args(argv)
     if len(args.sources) != 1:
@@ -484,6 +486,7 @@ def preprocess_main(
     return 0
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the cpre command-line interface."""
     if argv is None:
         argv = sys.argv[1:]
 
