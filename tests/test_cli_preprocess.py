@@ -6,7 +6,7 @@ from cpre.cli import main
 
 def test_preprocess_cli_emits_canonical_source_from_explicit_configuration(tmp_path, capsys):
     source = tmp_path / "source.c"
-    source.write_text("#if FEATURE\nint enabled;\n#else\nint disabled;\n#endif\n", encoding="utf-8")
+    source.write_text(\n        "#if FEATURE\nint enabled;\n#else\nint disabled;\n#endif\n",\n        encoding="utf-8",\n    )
     expected = cpre.preprocess_source(
         source.read_text(encoding="utf-8"),
         filename=str(source),
@@ -19,7 +19,7 @@ def test_preprocess_cli_emits_canonical_source_from_explicit_configuration(tmp_p
 
 def test_preprocess_cli_rejects_equals_in_undef_argument(tmp_path, capsys):
     source = tmp_path / "source.c"
-    source.write_text("#ifdef DISABLED\nint no;\n#endif\n", encoding="utf-8")
+    source.write_text(\n        "#ifdef DISABLED\nint no;\n#endif\n",\n        encoding="utf-8",\n    )
     assert main(["preprocess", str(source), "-U", "DISABLED="]) == 2
     assert "--undef accepts only a macro name" in capsys.readouterr().err
 
@@ -33,7 +33,7 @@ def test_preprocess_cli_preserves_utf8_and_crlf_output(tmp_path, capsys):
 
 def test_preprocess_cli_supports_integer_replacement_and_undefined(tmp_path, capsys):
     source = tmp_path / "source.c"
-    source.write_text("#if LEVEL == 2\nint level_two;\n#endif\n#ifdef DISABLED\nint no;\n#endif\n", encoding="utf-8")
+    source.write_text(\n        "#if LEVEL == 2\nint level_two;\n#endif\n#ifdef DISABLED\nint no;\n#endif\n",\n        encoding="utf-8",\n    )
     assert main(["preprocess", str(source), "-D", "LEVEL=2", "-U", "DISABLED"]) == 0
     output = capsys.readouterr().out
     assert "int level_two;" in output
@@ -49,7 +49,7 @@ def test_preprocess_cli_supports_deterministic_standard_macro_context(tmp_path, 
 
 def test_preprocess_cli_reports_incomplete_without_partial_output(tmp_path, capsys):
     source = tmp_path / "source.c"
-    source.write_text("#if UNKNOWN_FEATURE\nint selected;\n#endif\n", encoding="utf-8")
+    source.write_text(\n        "#if UNKNOWN_FEATURE\nint selected;\n#endif\n",\n        encoding="utf-8",\n    )
     assert main(["preprocess", str(source)]) == 2
     captured = capsys.readouterr()
     assert captured.out == ""
