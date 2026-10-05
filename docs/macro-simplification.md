@@ -63,10 +63,74 @@ All emitted simplified replacements are enclosed in outer parentheses to ensure 
 
 The analyzer maintains clear semantic boundaries:
 
-- **Distinction from general constant folding**: `cpre` simplifies Boolean expressions, not general C integer expressions. Integer constants `0` and `1` maintain their normal Boolean truth values (`0` = false, `1` = true). Ordinary integer constants such as `1024` or `0x8000` are never reinterpreted as truth-values.
+- **Distinction from general constant folding**: `cpre` simplifies Boolean expressions, not general C integer expressions. Integer constants `0` and `1` maintain their normal Boolean truth values (`0` = false, `1` = true) unless [symbolic-literal mode](#symbolic-literal-mode-opt-in) is explicitly selected. Ordinary integer constants such as `1024` or `0x8000` are never reinterpreted as truth-values.
 - **Local and non-recursive**: Analyzing a replacement list does not expand other macro definitions. Identifiers in the replacement list remain symbolic atoms even if prior lines define them to integer values.
 - **No preprocessor `defined` operator**: Unlike `#if` and `#elif` directives where `defined` queries macro presence in the preprocessor environment, macro Boolean simplification models replacement lists as self-contained Boolean formulas. The `defined` identifier is intentionally unsupported in replacement lists. (This is distinct from the C preprocessor rule where `defined` is permitted as an identifier in `#define` replacement lists and only produces undefined behavior if generated via macro expansion during conditional directive evaluation.)
 - **Deterministic resource bounds**: ROBDD construction respects `AnalysisOptions` resource limits (`max_atoms`, `max_bdd_nodes`, `max_work`). If a resource limit is exceeded, analysis is marked incomplete and no unproven rewrite is emitted.
+
+## Symbolic-literal mode (opt-in)
+
+Some codebases use a literal `0` as a temporarily disabled feature switch:
+
+```c
+#define FEAT_1 (0 && A) || B          /* A-path disabled until A is ready */
+#define FEAT_2 (0 && A) || (0 && B)   /* both experimental paths switched off */
+```
+
+Under ordinary semantics `0 && A` is just false, so the analyzer reports `FEAT_1 -> (B)` and `FEAT_2 -> (0)`. Accepting those rewrites deletes the control point the author left in place on purpose.
+
+Passing `symbolic_literals=(0,)` opts in to **symbolic-literal semantics**: every occurrence of the selected literal is treated as one free Boolean atom instead of a fixed truth value. The ROBDD then reasons about its relationship with the other atoms:
+
+| Replacement | Ordinary (default) | `symbolic_literals=(0,)` |
+|---|---|---|
+| `(0 && A) \|\| B` | `(B)` | unchanged (already simplest) |
+| `(0 && A) \|\| (0 && B)` | `(0)` | `(0 && (A \|\| B))` |
+| `(0 && A) \|\| (!0 && A)` | `(A)` | `(A)` |
+| `0 \|\| !0` | `(1)` | `(1)` |
+| `(A \|\| (!A && B))` | `(A \|\| B)` | `(A \|\| B)` |
+
+```python
+import cpre
+
+definition = cpre.MacroDefinition("FEAT_2", "(0 && A) || (0 && B)")
+result = cpre.analyze_macro(definition, symbolic_literals=(0,))
+
+assert result.semantics == "symbolic-literal"
+assert result.symbolic_literals == (0,)
+assert result.simplified_replacement == "(0 && (A || B))"
+
+# The same keyword is accepted by analyze_macros().
+results = cpre.analyze_macros(source_text, symbolic_literals=(0,))
+```
+
+Via the command line:
+
+```bash
+# Analyze source (runs both conditional directives and macro simplification)
+cpre source.c
+
+# Analyze with symbolic-literal zero semantics
+cpre --symbolic-literal 0 source.c
+
+# Shorthand for --symbolic-literal 0
+cpre --symbolic-zero source.c
+```
+
+### Semantic rules
+
+- **Opt-in only**: the default (`symbolic_literals=None` or `()`) keeps ordinary C semantics and is byte-for-byte identical to earlier behavior.
+- **Supported literals**: currently only `0` may be selected. Any other value, a bare integer instead of an iterable, or a non-integer element raises `AnalysisError` with `ErrorCode.INVALID_CONFIGURATION`. The policy is a set of integer values so more literals can be supported later without an API change.
+- **One atom per value**: all spellings of the selected value (`0`, `00`, `0x0`, `0u`, ...) are the *same* atom. It is named and emitted by its canonical decimal spelling, `0`, so simplified replacements remain valid C.
+- **No aliasing with identifiers**: the literal atom is distinct from every identifier atom (`0` can never collide with a macro named `ZERO`, for example).
+- **Unselected literals stay constant**: in `symbolic_literals=(0,)` mode, `1` keeps its ordinary truth value.
+- **Candidate classification is unchanged**: the mode never makes a non-candidate macro eligible; it only changes how `0` is interpreted inside an already-supported Boolean expression.
+- **Visible mode**: every `MacroAnalysisResult` records `symbolic_literals` and exposes `semantics` (`"ordinary"` or `"symbolic-literal"`), including skipped and resource-limited results.
+
+### Soundness guarantee
+
+A rewrite proven in symbolic-literal mode holds for *every* value of the symbolic atom, so it also holds when the literal takes its real C value. Rewrites emitted in this mode therefore never change the meaning of the macro under ordinary C semantics; they are only *less aggressive* than ordinary-mode rewrites.
+
+> **Warning**: equivalence in symbolic-literal mode is equivalence *within that interpretation*. A result such as "already simplest" for `(0 && A) || B` does not mean the expression is irreducible in C — it means the disabled control point was preserved on request. Use ordinary mode when you want to know what the macro actually evaluates to.
 
 ## Python API
 
@@ -117,6 +181,8 @@ Each analyzed macro produces a structured `MacroAnalysisResult`:
 | `is_equivalent` | `bool \| None` | ROBDD proof-of-equivalence status |
 | `incomplete` | `AnalysisIncomplete \| None` | Resource limit diagnostic (if limits exceeded) |
 | `replacement_range` | `SourceRange \| None` | Exact 1-based source range of the replacement text |
+| `symbolic_literals` | `tuple[int, ...]` | Literals treated as symbolic atoms; `()` in ordinary mode |
+| `semantics` | `str` (property) | `"ordinary"` or `"symbolic-literal"` |
 | `simplified` | `bool` (property) | `True` if a simpler equivalent expression was found |
 | `complete` | `bool` (property) | `True` if analysis completed within resource limits |
 | `location` | `SourceLocation \| None` (property) | Source location of the `#define` directive |

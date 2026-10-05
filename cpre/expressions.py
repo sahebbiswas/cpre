@@ -18,6 +18,7 @@ from .model import (
     Negation,
     Predicate,
     SourceLocation,
+    SymbolicLiteral,
     Variable,
 )
 
@@ -332,6 +333,9 @@ def format_expression(expression: Expression, parent_precedence: int = 0) -> str
         text = "1" if expression.value else "0"
     elif isinstance(expression, DefinedVariable):
         text = f"defined({expression.name})"
+    elif isinstance(expression, SymbolicLiteral):
+        # Emitted with its literal spelling so the rewrite stays valid C.
+        text = expression.name
     elif isinstance(expression, Variable):
         text = expression.name
     elif isinstance(expression, Predicate):
@@ -377,6 +381,8 @@ def expression_comparison_key(expression: Expression) -> tuple[object, ...]:
         return ("constant", expression.value)
     if isinstance(expression, DefinedVariable):
         return ("defined", expression.name)
+    if isinstance(expression, SymbolicLiteral):
+        return ("symbolic_literal", expression.name)
     if isinstance(expression, Variable):
         return ("variable", expression.name)
     if isinstance(expression, Predicate):
