@@ -13,7 +13,8 @@ from . import cpre as _engine
 from .api import AnalysisIncomplete, AnalysisResult, CpreError, ErrorCode, analyze_source
 from .configuration import MacroConfiguration, UnknownNamePolicy
 from .macros import MacroDefinition
-from .preprocessing import PreprocessResult, PreprocessingContext, compact, preprocess_source
+from .preprocessing import PreprocessResult, PreprocessingContext, compact
+from .pragmas import preprocess_source
 from .macro_analysis import (
     MacroAnalysisResult,
     MacroSimplificationResult,
