@@ -1,6 +1,6 @@
 # Command-line interface
 
-The `cpre` CLI analyzes C/C++ preprocessor conditional logic. It reports dead, redundant, and simplifiable conditional branches; it does **not** currently expose the concrete `preprocess_source()` transformation as a command-line subcommand.
+The `cpre` CLI analyzes C/C++ preprocessor conditional logic and object-like macro definitions in a single unified pass. It reports dead, redundant, and simplifiable conditional branches alongside simplifiable macro replacement lists; it does **not** currently expose the concrete `preprocess_source()` transformation as a command-line subcommand.
 
 For Python integrations, use the [Python API guide](api.md). For concrete configuration selection and macro expansion, use the [preprocessing guide](preprocessing.md).
 
@@ -70,18 +70,22 @@ Human-readable text is intended for people, not as a stable machine interface. D
 
 ## JSON output
 
-`--json` writes the structural conditional-tree report as JSON:
+`--json` writes the unified analysis report (both conditional directives and macro simplifications) as JSON:
 
 ```bash
 cpre --json source.c
 cpre --recursive --json src
 ```
 
-For a single non-directory input, stdout contains the tree object directly. In batch mode, stdout contains an object with a `files` array; each entry includes `path` plus the tree fields for that source.
+For a single non-directory input, stdout contains an object with:
+- `groups`: structural conditional-tree groups (or empty array if none/disabled).
+- `macros`: array of macro analysis results, each detailing `name`, `original_replacement`, `simplified`, `simplified_replacement`, `is_equivalent`, `semantics`, and `symbolic_literals`.
 
-The same filtering rule applies as text output: the default JSON view omits unchanged branches, while `--verbose --json` includes the full tree. In filtered batch mode, files whose filtered tree has no groups are omitted.
+In batch mode, stdout contains an object with a `files` array; each entry includes `path` plus the `groups` and `macros` fields for that source.
 
-JSON represents cpre's conditional-tree reporting model. It is useful for inspection and custom consumers that deliberately depend on that structure, but it is not the preferred long-term findings interchange contract. For findings interchange, prefer SARIF. For Python-to-Python integration, prefer the top-level Python API.
+The same filtering rule applies as text output: the default JSON view omits unchanged branches and unsimplified/skipped macros, while `--verbose --json` includes the full tree and all analyzed macros. In filtered batch mode, files whose filtered results have no notable entries are omitted.
+
+JSON represents cpre's reporting model for direct inspection. For static analysis interchange, prefer SARIF. For Python-to-Python integration, prefer the top-level Python API.
 
 ## SARIF output
 
@@ -138,6 +142,52 @@ ROBDD/resource-limit exhaustion and other `AnalysisResult.complete == False` cas
 
 When `--sarif` is active, source/tool errors are also represented as SARIF tool notifications where applicable, while the process still exits with status `2`.
 
+## Unified analysis flow
+
+`cpre` analyzes both C/C++ conditional directives (`#if`, `#elif`) and eligible object-like macro definitions (`#define`) in a single pass:
+
+```bash
+cpre source.c
+cpre --recursive src/
+cpre --fail-on-findings src/
+cpre --json source.c
+```
+
+In default mode, notable conditional branches (dead, redundant, simplifiable) and simplified macro definitions are reported:
+
+```text
+line 12: #elif A [dead]
+  reason: condition contradicts its parent or earlier branches
+line 45: #define FEAT_1 (0 && A) || B -> (B)
+```
+
+Use `--verbose` to include unchanged branches, unsimplified macros, and skipped non-candidate definitions.
+
+### Symbolic-literal mode
+
+By default, integer constants `0` and `1` retain ordinary C truth values (`0` = false). To treat selected literals as symbolic Boolean atoms (preserving disabled control switches such as `(0 && A) || B`), pass `--symbolic-literal`:
+
+```bash
+cpre --symbolic-literal 0 source.c
+```
+
+`--symbolic-zero` is a convenient shorthand for `--symbolic-literal 0`:
+
+```bash
+cpre --symbolic-zero source.c
+```
+
+Currently only `0` is supported as a symbolic literal. Passing an unsupported value terminates with an error and status `2`.
+
+See [Macro Boolean simplification](macro-simplification.md) for full semantic details and warnings.
+
+### Disabling specific analyses
+
+If an integration requires checking only conditional branches or only macro definitions, use the opt-out flags:
+
+- `--no-macros`: Disables macro Boolean simplification; only conditional directives are analyzed.
+- `--no-conditionals`: Disables conditional directive analysis; only macro definitions are analyzed.
+
 ## Full option reference
 
 ```text
@@ -145,17 +195,29 @@ When `--sarif` is active, source/tool errors are also represented as SARIF tool 
     Recursively discover C/C++ source files under directory inputs.
 
 --json
-    Write the structural conditional tree as JSON.
+    Write structural conditional trees and macro analysis results as JSON.
 
 --sarif
-    Write findings and tool notifications as SARIF 2.1.0.
+    Write conditional findings and tool notifications as SARIF 2.1.0.
 
 --verbose
-    Include unchanged conditional branches in text and JSON reports.
+    Include unchanged conditional branches and unsimplified/skipped macros.
 
 --fail-on-findings
-    Exit with status 1 when a dead or redundant branch is found,
+    Exit with status 1 when a dead, redundant, or simplifiable branch or macro is found,
     provided no status-2 error occurred.
+
+--symbolic-literal N
+    Treat integer literal N as a symbolic Boolean atom in macro analysis (e.g. 0).
+
+--symbolic-zero
+    Convenience shorthand for --symbolic-literal 0.
+
+--no-macros
+    Disable macro Boolean simplification analysis.
+
+--no-conditionals
+    Disable conditional directive analysis.
 ```
 
 `--json` and `--sarif` cannot be used together.

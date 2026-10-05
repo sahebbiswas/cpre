@@ -13,6 +13,7 @@ cpre has grown beyond a conditional-linting CLI into a set of focused, integrati
 - **Symbolic conditional analysis** — finds dead and redundant branches and distinguishes exact from contextual simplifications using bounded, deterministic ROBDD-backed reasoning. Known macro assumptions can constrain proofs without silently turning unknown macros into false.
 - **Exact Boolean proofs and witnesses** — public APIs support satisfiability, implication, equivalence, exact simplification, and deterministic witness assignments, with explicit incomplete results when proof budgets are exhausted.
 - **Lossless conditional structure** — `parse_conditionals()` exposes source-preserving blocks, directives, tokens, physical ranges, recovery diagnostics, and C23 `#elifdef`/`#elifndef` structure for refactoring and source-aware tools.
+- **Macro Boolean simplification** — analyzes object-like `#define` replacements with bounded ROBDD proofs, supporting both ordinary C truth semantics and opt-in symbolic-literal mode (`--symbolic-literal 0` / `--symbolic-zero`) to preserve transient feature-flag controls.
 - **Concrete preprocessing** — `preprocess_source()` selects one configuration, tracks source-order macro state, performs bounded macro expansion (including variadics, stringification, token pasting, and `__VA_OPT__`), and preserves physical provenance through source mappings. External state is explicit through `MacroConfiguration`, deterministic preprocessing context, `__has_include` queries, and host-owned pragma handling.
 - **Conservative integration contracts** — structured errors and diagnostics, deterministic ordering, atomic incomplete results, SARIF 2.1.0 findings, and downstream compatibility tests make it practical to embed cpre in analyzers and CI without parsing human-readable output or guessing about partial results.
 
@@ -34,10 +35,16 @@ python -m pip install -e ".[dev]"
 
 ## CLI quick start
 
-Analyze one source file:
+Analyze one source file (evaluates both conditional directives and macro simplifications in a single pass):
 
 ```bash
 cpre source.c
+```
+
+Preserve transient disabled controls with symbolic-zero semantics:
+
+```bash
+cpre --symbolic-zero source.c
 ```
 
 Scan a directory recursively and emit SARIF:
@@ -46,7 +53,7 @@ Scan a directory recursively and emit SARIF:
 cpre --recursive --sarif src > cpre.sarif
 ```
 
-Fail CI when dead or redundant branches are found:
+Fail CI when dead, redundant, or simplifiable branches/macros are found:
 
 ```bash
 cpre --recursive --fail-on-findings src
@@ -58,7 +65,7 @@ The module form is equivalent:
 python -m cpre source.c
 ```
 
-By default, text and JSON reports show notable branches only; `--verbose` includes unchanged branches. `--json` emits the structural conditional tree, while `--sarif` emits findings for static-analysis interchange. See the [CLI guide](https://github.com/sahebbiswas/cpre/blob/main/docs/cli.md) for discovery rules, batch output, stderr behavior, and the `0`/`1`/`2` exit-status contract.
+By default, text and JSON reports show notable branches and simplified macros; `--verbose` includes unchanged branches and unsimplified macros. `--json` emits structural conditional trees alongside macro simplification results, while `--sarif` emits findings for static-analysis interchange. Specific analyses can be disabled with `--no-macros` or `--no-conditionals`. See the [CLI guide](https://github.com/sahebbiswas/cpre/blob/main/docs/cli.md) for discovery rules, batch output, stderr behavior, and the `0`/`1`/`2` exit-status contract.
 
 ## Python analysis quick start
 
@@ -116,6 +123,7 @@ The [documentation index](https://github.com/sahebbiswas/cpre/blob/main/docs/REA
 
 - [Command-line interface](https://github.com/sahebbiswas/cpre/blob/main/docs/cli.md)
 - [Python API integration](https://github.com/sahebbiswas/cpre/blob/main/docs/api.md)
+- [Macro Boolean simplification](https://github.com/sahebbiswas/cpre/blob/main/docs/macro-simplification.md)
 - [Concrete preprocessing](https://github.com/sahebbiswas/cpre/blob/main/docs/preprocessing.md)
 - [Macro expansion](https://github.com/sahebbiswas/cpre/blob/main/docs/macro-expansion.md)
 - [Concrete macro configuration](https://github.com/sahebbiswas/cpre/blob/main/docs/concrete-configuration.md)

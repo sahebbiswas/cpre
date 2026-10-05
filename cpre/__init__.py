@@ -88,7 +88,7 @@ from .symbolic import (
     simplify,
 )
 
-__version__ = "0.13.0"
+__version__ = "0.13.1"
 
 __all__ = [
     "AnalysisError",

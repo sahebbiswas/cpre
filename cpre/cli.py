@@ -11,6 +11,11 @@ from pathlib import Path
 from . import __version__
 from . import cpre as _engine
 from .api import AnalysisIncomplete, AnalysisResult, CpreError, ErrorCode, analyze_source
+from .macro_analysis import (
+    MacroAnalysisResult,
+    _resolve_symbolic_literals,
+    analyze_macros,
+)
 from .sarif import ToolNotification, sarif_log
 
 
@@ -28,9 +33,116 @@ def _format_incomplete(diagnostic: AnalysisIncomplete) -> str:
     return f"line {diagnostic.location.line}: {diagnostic.message}"
 
 
+def _macro_to_dict(result: MacroAnalysisResult) -> dict[str, object]:
+    return {
+        "name": result.name,
+        "line": result.location.line if result.location else None,
+        "column": result.location.column if result.location else None,
+        "candidate": result.candidate,
+        "simplified": result.simplified,
+        "original": result.original_replacement,
+        "replacement": result.simplified_replacement,
+        "equivalent": result.is_equivalent,
+        "reason": result.reason,
+        "semantics": result.semantics,
+        "symbolic_literals": list(result.symbolic_literals),
+    }
+
+
+def _render_macro_report(
+    results: Sequence[MacroAnalysisResult],
+    *,
+    verbose: bool = True,
+    color: bool = False,
+) -> tuple[str, bool]:
+    lines: list[str] = []
+    has_entries = False
+    for r in results:
+        loc = f"line {r.location.line}: " if r.location and r.location.line else ""
+        if r.simplified:
+            has_entries = True
+            line = f"{loc}#define {r.name} {r.original_replacement} -> {r.simplified_replacement}"
+            lines.append(_engine._colored(line, "green", color))
+        elif verbose:
+            if r.candidate:
+                reason = r.reason or "simplest equivalent form"
+                line = f"{loc}#define {r.name} {r.original_replacement} ({reason})"
+                lines.append(_engine._colored(line, "gray", color))
+            else:
+                line = f"{loc}#define {r.name} skipped: {r.reason}"
+                lines.append(_engine._colored(line, "gray", color))
+    if lines:
+        return "\n".join(lines), has_entries
+    if results:
+        return "No simplifiable macro definitions found.", False
+    return "No macro definitions found.", False
+
+
+def _render_combined_report(
+    tree: _engine.ConditionalTree | None,
+    macros: Sequence[MacroAnalysisResult],
+    *,
+    verbose: bool = True,
+    color: bool = False,
+) -> tuple[str, bool]:
+    sections: list[str] = []
+    has_any = False
+    if tree is not None:
+        c_report, c_has = _engine._render_report(tree, verbose=verbose, color=color)
+        if c_has or (verbose and c_report):
+            sections.append(c_report)
+            if c_has:
+                has_any = True
+    if macros:
+        m_report, m_has = _render_macro_report(macros, verbose=verbose, color=color)
+        if m_has or (verbose and m_report):
+            sections.append(m_report)
+            if m_has:
+                has_any = True
+    if sections:
+        return "\n".join(sections), has_any
+    if tree is not None and tree.groups:
+        return "No notable conditional directives or simplifiable macros found.", False
+    if macros:
+        return "No notable conditional directives or simplifiable macros found.", False
+    return "No conditional directives or macro definitions found.", False
+
+
+def _build_file_json(
+    path: Path | str,
+    tree: _engine.ConditionalTree | None,
+    m_results: Sequence[MacroAnalysisResult],
+    *,
+    verbose: bool,
+    enable_macros: bool,
+    symbolic_literals: tuple[int, ...],
+) -> tuple[dict[str, object], bool]:
+    f_data: dict[str, object] = {"path": str(path)}
+    has_visible = False
+    if tree is not None:
+        t_dict = _engine.tree_to_dict(tree, verbose=verbose)
+        f_data["groups"] = t_dict["groups"]
+        if t_dict["groups"]:
+            has_visible = True
+    else:
+        f_data["groups"] = []
+
+    if enable_macros:
+        visible_macros = [_macro_to_dict(r) for r in m_results if (verbose or r.simplified)]
+        if any(r.simplified for r in m_results):
+            has_visible = True
+        f_data["macros"] = visible_macros
+    else:
+        f_data["macros"] = []
+
+    f_data["semantics"] = "symbolic-literal" if symbolic_literals else "ordinary"
+    f_data["symbolic_literals"] = list(symbolic_literals)
+    return f_data, has_visible
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Analyze Boolean C/C++ preprocessor conditional directives."
+        description="Analyze Boolean C/C++ preprocessor conditional directives and macros."
     )
     parser.add_argument(
         "sources",
@@ -45,41 +157,104 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     output_group = parser.add_mutually_exclusive_group()
     output_group.add_argument(
-        "--json", action="store_true", help="write the conditional tree as JSON"
+        "--json", action="store_true", help="write the analysis results as JSON"
     )
     output_group.add_argument("--sarif", action="store_true", help="write findings as SARIF 2.1.0")
     parser.add_argument(
         "--verbose",
         action="store_true",
-        help="include unchanged conditional branches in the report",
+        help="include unchanged conditional branches and macros in the report",
     )
     parser.add_argument(
         "--fail-on-findings",
         action="store_true",
-        help="exit with status 1 when a dead or redundant branch is found",
+        help="exit with status 1 when a dead, redundant, or simplifiable branch/macro is found",
+    )
+    parser.add_argument(
+        "--symbolic-literal",
+        dest="symbolic_literals",
+        type=int,
+        action="append",
+        metavar="N",
+        help="treat integer literal N as a symbolic Boolean atom in macro analysis (e.g. 0)",
+    )
+    parser.add_argument(
+        "--symbolic-zero",
+        action="store_true",
+        help="convenience shorthand for --symbolic-literal 0",
+    )
+    parser.add_argument(
+        "--no-macros",
+        action="store_true",
+        help="disable macro Boolean simplification analysis",
+    )
+    parser.add_argument(
+        "--no-conditionals",
+        action="store_true",
+        help="disable conditional directive analysis",
+    )
+    parser.add_argument(
+        "--macros",
+        action="store_true",
+        help=argparse.SUPPRESS,
     )
     args = parser.parse_args(argv)
+
+    symbolic_literals: tuple[int, ...] = ()
+    if args.symbolic_zero or args.symbolic_literals:
+        raw_literals: list[int] = []
+        if args.symbolic_zero:
+            raw_literals.append(0)
+        if args.symbolic_literals:
+            raw_literals.extend(args.symbolic_literals)
+        try:
+            symbolic_literals = _resolve_symbolic_literals(raw_literals)
+        except CpreError as error:
+            parser.error(error.message)
 
     try:
         paths = _engine._source_paths(args.sources, args.recursive)
     except _engine.ConditionError as error:
         parser.error(str(error))
 
-    results: list[tuple[Path, _engine.ConditionalTree]] = []
+    batch_mode = len(args.sources) > 1 or any(path.is_dir() for path in args.sources)
+    enable_conditionals = not args.no_conditionals
+    enable_macros = not args.no_macros
+
+    file_results: list[
+        tuple[Path, _engine.ConditionalTree | None, tuple[MacroAnalysisResult, ...]]
+    ] = []
     analyses: list[AnalysisResult] = []
     sarif_notifications: list[ToolNotification] = []
     had_errors = False
+
     for path in paths:
         try:
             source = path.read_text(encoding="utf-8")
-            result = analyze_source(source, filename=str(path))
-            analyses.append(result)
-            if not result.complete:
-                for diagnostic in result.incomplete:
-                    print(f"{path}: {_format_incomplete(diagnostic)}", file=sys.stderr)
-                had_errors = True
-                continue
-            results.append((path, result.tree))
+            tree: _engine.ConditionalTree | None = None
+            if enable_conditionals:
+                c_result = analyze_source(source, filename=str(path))
+                analyses.append(c_result)
+                if not c_result.complete:
+                    for diagnostic in c_result.incomplete:
+                        print(f"{path}: {_format_incomplete(diagnostic)}", file=sys.stderr)
+                    had_errors = True
+                else:
+                    tree = c_result.tree
+
+            m_results: tuple[MacroAnalysisResult, ...] = ()
+            if enable_macros:
+                m_results = analyze_macros(
+                    source,
+                    filename=str(path),
+                    symbolic_literals=symbolic_literals,
+                )
+                for r in m_results:
+                    if not r.complete and r.incomplete:
+                        print(f"{path}: {_format_incomplete(r.incomplete)}", file=sys.stderr)
+                        had_errors = True
+
+            file_results.append((path, tree, m_results))
         except CpreError as error:
             print(f"{path}: {_format_error(error)}", file=sys.stderr)
             sarif_notifications.append(
@@ -102,7 +277,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             had_errors = True
 
-    batch_mode = len(args.sources) > 1 or any(path.is_dir() for path in args.sources)
     if args.sarif:
         print(
             json.dumps(
@@ -117,32 +291,56 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.json:
         if batch_mode:
             files = []
-            for path, tree in results:
-                tree_dict = _engine.tree_to_dict(tree, verbose=args.verbose)
-                if args.verbose or tree_dict["groups"]:
-                    files.append({"path": str(path), **tree_dict})
-            output = {"files": files}
-        elif results:
-            output = _engine.tree_to_dict(results[0][1], verbose=args.verbose)
-        else:
-            output = None
-        if output is not None:
-            print(json.dumps(output, indent=2))
+            for path, tree, m_results in file_results:
+                f_data, has_visible = _build_file_json(
+                    path,
+                    tree,
+                    m_results,
+                    verbose=args.verbose,
+                    enable_macros=enable_macros,
+                    symbolic_literals=symbolic_literals,
+                )
+                if args.verbose or has_visible:
+                    files.append(f_data)
+            print(json.dumps({"files": files}, indent=2))
+        elif file_results:
+            f_data, _ = _build_file_json(
+                file_results[0][0],
+                file_results[0][1],
+                file_results[0][2],
+                verbose=args.verbose,
+                enable_macros=enable_macros,
+                symbolic_literals=symbolic_literals,
+            )
+            print(json.dumps(f_data, indent=2))
     elif batch_mode:
         color = sys.stdout.isatty()
         reports = []
-        for path, tree in results:
-            report, has_entries = _engine._render_report(tree, verbose=args.verbose, color=color)
+        for path, tree, m_results in file_results:
+            report, has_entries = _render_combined_report(
+                tree, m_results, verbose=args.verbose, color=color
+            )
             if args.verbose or has_entries:
                 reports.append(
                     "\n".join((_engine._colored(f"== {path} ==", "cyan", color), report))
                 )
         if reports:
             print("\n\n".join(reports))
-    elif results:
-        print(_engine.format_report(results[0][1], verbose=args.verbose, color=sys.stdout.isatty()))
+    elif file_results:
+        report, _ = _render_combined_report(
+            file_results[0][1],
+            file_results[0][2],
+            verbose=args.verbose,
+            color=sys.stdout.isatty(),
+        )
+        print(report)
 
     if had_errors:
         return 2
-    has_findings = any(_engine._has_findings(tree) for _, tree in results)
+    has_findings = False
+    for _, tree, m_results in file_results:
+        if tree is not None and _engine._has_findings(tree):
+            has_findings = True
+        if any(r.simplified for r in m_results):
+            has_findings = True
     return 1 if args.fail_on_findings and has_findings else 0
