@@ -17,6 +17,20 @@ def test_preprocess_cli_emits_canonical_source_from_explicit_configuration(tmp_p
     assert capsys.readouterr().out == expected.source
 
 
+def test_preprocess_cli_rejects_equals_in_undef_argument(tmp_path, capsys):
+    source = tmp_path / "source.c"
+    source.write_text("#ifdef DISABLED\nint no;\n#endif\n", encoding="utf-8")
+    assert main(["preprocess", str(source), "-U", "DISABLED="]) == 2
+    assert "--undef accepts only a macro name" in capsys.readouterr().err
+
+
+def test_preprocess_cli_preserves_utf8_and_crlf_output(tmp_path, capsys):
+    source = tmp_path / "source.c"
+    source.write_bytes("#if FEATURE\r\nconst char *text = \"caf\u00e9\";\r\n#endif\r\n".encode("utf-8"))
+    assert main(["preprocess", str(source), "-DFEATURE"]) == 0
+    assert capsys.readouterr().out == 'const char *text = "caf\u00e9";\r\n'
+
+
 def test_preprocess_cli_supports_integer_replacement_and_undefined(tmp_path, capsys):
     source = tmp_path / "source.c"
     source.write_text("#if LEVEL == 2\nint level_two;\n#endif\n#ifdef DISABLED\nint no;\n#endif\n", encoding="utf-8")
