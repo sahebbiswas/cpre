@@ -12,9 +12,6 @@ from . import __version__
 from . import cpre as _engine
 from .api import AnalysisIncomplete, AnalysisResult, CpreError, ErrorCode, analyze_source
 from .configuration import MacroConfiguration, UnknownNamePolicy
-from .macros import MacroDefinition
-from .preprocessing import PreprocessResult, PreprocessingContext, compact
-from .pragmas import preprocess_source
 from .macro_analysis import (
     MacroAnalysisResult,
     MacroSimplificationResult,
@@ -22,6 +19,9 @@ from .macro_analysis import (
     analyze_macros,
     simplify_macros,
 )
+from .macros import MacroDefinition
+from .preprocessing import PreprocessResult, PreprocessingContext, compact
+from .pragmas import preprocess_source
 from .sarif import ToolNotification, sarif_log
 
 
@@ -327,6 +327,7 @@ def simplify_macros_main(
     has_findings = any(res.has_findings for _, res in file_results)
     return 1 if args.fail_on_findings and has_findings else 0
 
+
 def _parse_name_value(value: str, option: str) -> tuple[str, str]:
     if "=" in value:
         name, replacement = value.split("=", 1)
@@ -372,7 +373,7 @@ def preprocess_main(argv: Sequence[str] | None = None, prog: str = "cpre preproc
         undefined = []
         for value in args.undefined:
             name, replacement = _parse_name_value(value, "--undef")
-            if replacement:
+            if "=" in value or replacement:
                 raise ValueError("--undef accepts only a macro name")
             undefined.append(name)
         standard_macros: dict[str, str] = {}
@@ -412,7 +413,7 @@ def preprocess_main(argv: Sequence[str] | None = None, prog: str = "cpre preproc
             return 2
     else:
         output = result.source
-    sys.stdout.write(output)
+    sys.stdout.buffer.write(output.encode("utf-8"))
     return 0
 
 
