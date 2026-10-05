@@ -391,17 +391,9 @@ def test_reparsing_reanalyzing_verification_rigorous():
 
 
 def test_rewrite_macros_duplicate_macro_names_verified_by_index():
-    source = (
-        "#define FOO (A && A)\n"
-        "#undef FOO\n"
-        "#define FOO (B || 0)\n"
-    )
+    source = "#define FOO (A && A)\n#undef FOO\n#define FOO (B || 0)\n"
     rewritten = cpre.rewrite_macros(source)
-    assert rewritten == (
-        "#define FOO (A)\n"
-        "#undef FOO\n"
-        "#define FOO (B)\n"
-    )
+    assert rewritten == ("#define FOO (A)\n#undef FOO\n#define FOO (B)\n")
 
 
 def test_rewrite_verification_length_mismatch(monkeypatch):
@@ -452,8 +444,5 @@ def test_rewrite_verification_name_mismatch(monkeypatch):
             options=None,
             filename=None,
         )
-    assert "Rewrite verification failed: macro 'FOO' not found after rewrite" in str(
-        excinfo.value
-    )
+    assert "Rewrite verification failed: macro 'FOO' not found after rewrite" in str(excinfo.value)
     assert excinfo.value.code == cpre.ErrorCode.ANALYSIS_FAILURE
-
