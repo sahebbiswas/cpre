@@ -34,6 +34,20 @@ def test_preprocess_cli_preserves_utf8_and_crlf_output(tmp_path, capsys):
     assert capsys.readouterr().out == 'const char *text = "caf\u00e9";\r\n'
 
 
+def test_preprocess_cli_preserves_no_final_newline_and_source_mapping(tmp_path, capsys):
+    """Preserve a source without a final newline while retaining source mappings."""
+    source = tmp_path / "source.c"
+    source.write_text("#if FEATURE\nint value = 42;\n#endif", encoding="utf-8")
+    expected = cpre.preprocess_source(
+        source.read_text(encoding="utf-8"),
+        filename=str(source),
+        configuration=cpre.MacroConfiguration(presence=["FEATURE"]),
+    )
+    assert expected.complete
+    assert expected.source_map is not None
+    assert main(["preprocess", str(source), "-DFEATURE"]) == 0
+    assert capsys.readouterr().out == expected.source
+
 def test_preprocess_cli_supports_integer_replacement_and_undefined(tmp_path, capsys):
     """Resolve integer definitions and explicit undefined macros."""
     source = tmp_path / "source.c"
