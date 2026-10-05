@@ -5,6 +5,7 @@ from cpre.cli import main
 
 
 def test_preprocess_cli_emits_canonical_source_from_explicit_configuration(tmp_path, capsys):
+    """Emit the canonical source selected by an explicit macro configuration."""
     source = tmp_path / "source.c"
     source.write_text(\n        "#if FEATURE\nint enabled;\n#else\nint disabled;\n#endif\n",\n        encoding="utf-8",\n    )
     expected = cpre.preprocess_source(
@@ -18,6 +19,7 @@ def test_preprocess_cli_emits_canonical_source_from_explicit_configuration(tmp_p
 
 
 def test_preprocess_cli_rejects_equals_in_undef_argument(tmp_path, capsys):
+    """Reject an explicit equals sign in an undefined-macro argument."""
     source = tmp_path / "source.c"
     source.write_text(\n        "#ifdef DISABLED\nint no;\n#endif\n",\n        encoding="utf-8",\n    )
     assert main(["preprocess", str(source), "-U", "DISABLED="]) == 2
@@ -25,6 +27,7 @@ def test_preprocess_cli_rejects_equals_in_undef_argument(tmp_path, capsys):
 
 
 def test_preprocess_cli_preserves_utf8_and_crlf_output(tmp_path, capsys):
+    """Preserve UTF-8 text and CRLF line endings in canonical output."""
     source = tmp_path / "source.c"
     source.write_bytes("#if FEATURE\r\nconst char *text = \"caf\u00e9\";\r\n#endif\r\n".encode("utf-8"))
     assert main(["preprocess", str(source), "-DFEATURE"]) == 0
@@ -32,6 +35,7 @@ def test_preprocess_cli_preserves_utf8_and_crlf_output(tmp_path, capsys):
 
 
 def test_preprocess_cli_supports_integer_replacement_and_undefined(tmp_path, capsys):
+    """Resolve integer definitions and explicit undefined macros."""
     source = tmp_path / "source.c"
     source.write_text(\n        "#if LEVEL == 2\nint level_two;\n#endif\n#ifdef DISABLED\nint no;\n#endif\n",\n        encoding="utf-8",\n    )
     assert main(["preprocess", str(source), "-D", "LEVEL=2", "-U", "DISABLED"]) == 0
@@ -41,6 +45,7 @@ def test_preprocess_cli_supports_integer_replacement_and_undefined(tmp_path, cap
 
 
 def test_preprocess_cli_supports_deterministic_standard_macro_context(tmp_path, capsys):
+    """Use caller-supplied deterministic predefined macro values."""
     source = tmp_path / "source.c"
     source.write_text("#if __STDC__\nint hosted;\n#endif\n", encoding="utf-8")
     assert main(["preprocess", str(source), "--standard-macro", "__STDC__=1"]) == 0
@@ -48,6 +53,7 @@ def test_preprocess_cli_supports_deterministic_standard_macro_context(tmp_path, 
 
 
 def test_preprocess_cli_reports_incomplete_without_partial_output(tmp_path, capsys):
+    """Report unresolved conditions without emitting partial output."""
     source = tmp_path / "source.c"
     source.write_text(\n        "#if UNKNOWN_FEATURE\nint selected;\n#endif\n",\n        encoding="utf-8",\n    )
     assert main(["preprocess", str(source)]) == 2
@@ -57,6 +63,7 @@ def test_preprocess_cli_reports_incomplete_without_partial_output(tmp_path, caps
 
 
 def test_preprocess_cli_compact_is_explicit(tmp_path, capsys):
+    """Keep canonical output separate from explicitly requested compact output."""
     source = tmp_path / "source.c"
     source.write_text("#if 0\ndead\n#endif\n\nkept\n", encoding="utf-8")
     assert main(["preprocess", str(source)]) == 0
@@ -69,6 +76,7 @@ def test_preprocess_cli_compact_is_explicit(tmp_path, capsys):
 
 
 def test_preprocess_cli_compact_rejects_negative_limit(tmp_path, capsys):
+    """Reject a negative compact blank-line limit."""
     source = tmp_path / "source.c"
     source.write_text("#if 0\ndead\n#endif\nkept\n", encoding="utf-8")
     assert main(["preprocess", str(source), "--compact", "--max-blank-lines", "-1"]) == 2
@@ -78,6 +86,7 @@ def test_preprocess_cli_compact_rejects_negative_limit(tmp_path, capsys):
 
 
 def test_preprocess_cli_rejects_batch_inputs(tmp_path, capsys):
+    """Reject multiple source files rather than implicitly enabling batch mode."""
     first = tmp_path / "one.c"
     second = tmp_path / "two.c"
     first.write_text("int one;\n", encoding="utf-8")
@@ -87,6 +96,7 @@ def test_preprocess_cli_rejects_batch_inputs(tmp_path, capsys):
 
 
 def test_preprocess_cli_help_describes_concrete_workflow(capsys):
+    """Document the concrete preprocessing options in command help.""
     try:
         main(["preprocess", "--help"])
     except SystemExit as exc:
