@@ -388,3 +388,72 @@ def test_reparsing_reanalyzing_verification_rigorous():
         assert r.simplified is False
         assert r.complete is True
         assert r.incomplete is None
+
+
+def test_rewrite_macros_duplicate_macro_names_verified_by_index():
+    source = (
+        "#define FOO (A && A)\n"
+        "#undef FOO\n"
+        "#define FOO (B || 0)\n"
+    )
+    rewritten = cpre.rewrite_macros(source)
+    assert rewritten == (
+        "#define FOO (A)\n"
+        "#undef FOO\n"
+        "#define FOO (B)\n"
+    )
+
+
+def test_rewrite_verification_length_mismatch(monkeypatch):
+    source = "#define FOO (A && A)\n"
+    results = cpre.analyze_macros(source)
+
+    # Mock analyze_macros on re-analysis to return an empty tuple (length mismatch)
+    monkeypatch.setattr(
+        "cpre.macro_analysis.analyze_macros",
+        lambda *args, **kwargs: (),
+    )
+
+    with pytest.raises(cpre.AnalysisError) as excinfo:
+        cpre.macro_analysis._apply_and_verify_rewrites(
+            source,
+            results,
+            symbolic_literals=(),
+            options=None,
+            filename=None,
+        )
+    assert "Rewrite verification failed: expected 1 macros after rewrite, found 0" in str(
+        excinfo.value
+    )
+    assert excinfo.value.code == cpre.ErrorCode.ANALYSIS_FAILURE
+
+
+def test_rewrite_verification_name_mismatch(monkeypatch):
+    source = "#define FOO (A && A)\n"
+    results = cpre.analyze_macros(source)
+    assert len(results) == 1
+
+    # Return a macro result with a mismatched name
+    fake_re_result = cpre.MacroAnalysisResult(
+        name="BAR",
+        definition=results[0].definition,
+        candidate=True,
+    )
+    monkeypatch.setattr(
+        "cpre.macro_analysis.analyze_macros",
+        lambda *args, **kwargs: (fake_re_result,),
+    )
+
+    with pytest.raises(cpre.AnalysisError) as excinfo:
+        cpre.macro_analysis._apply_and_verify_rewrites(
+            source,
+            results,
+            symbolic_literals=(),
+            options=None,
+            filename=None,
+        )
+    assert "Rewrite verification failed: macro 'FOO' not found after rewrite" in str(
+        excinfo.value
+    )
+    assert excinfo.value.code == cpre.ErrorCode.ANALYSIS_FAILURE
+

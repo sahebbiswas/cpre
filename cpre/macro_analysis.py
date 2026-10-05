@@ -524,8 +524,8 @@ def _apply_and_verify_rewrites(
     Returns (rewritten_source, was_rewritten, applied_count, verified).
     """
     candidates_to_rewrite = [
-        r
-        for r in results
+        (idx, r)
+        for idx, r in enumerate(results)
         if r.simplified
         and r.is_equivalent is True
         and r.complete
@@ -541,7 +541,7 @@ def _apply_and_verify_rewrites(
     source_len = len(source)
     edits_with_offsets: list[tuple[MacroAnalysisResult, int, int]] = []
 
-    for r in candidates_to_rewrite:
+    for _idx, r in candidates_to_rewrite:
         edit = r.edit
         assert edit is not None
         start_offset = _location_to_offset(line_starts, source_len, edit.range.start)
@@ -579,14 +579,19 @@ def _apply_and_verify_rewrites(
         symbolic_literals=symbolic_literals,
     )
 
-    re_map = {r.name: r for r in re_results}
-    for r in candidates_to_rewrite:
-        if r.name not in re_map:
+    if len(re_results) != len(results):
+        raise AnalysisError(
+            f"Rewrite verification failed: expected {len(results)} macros after rewrite, found {len(re_results)}",
+            code=ErrorCode.ANALYSIS_FAILURE,
+        )
+
+    for idx, r in candidates_to_rewrite:
+        re_r = re_results[idx]
+        if re_r.name != r.name:
             raise AnalysisError(
                 f"Rewrite verification failed: macro '{r.name}' not found after rewrite",
                 code=ErrorCode.ANALYSIS_FAILURE,
             )
-        re_r = re_map[r.name]
         if not re_r.complete or re_r.incomplete is not None:
             raise AnalysisError(
                 f"Rewrite verification failed for '{r.name}': re-analysis was incomplete ({re_r.reason})",
