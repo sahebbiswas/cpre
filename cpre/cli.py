@@ -10,18 +10,40 @@ from pathlib import Path
 
 from . import __version__
 from . import cpre as _engine
-from .api import AnalysisIncomplete, AnalysisResult, CpreError, ErrorCode, analyze_source
+from .api import (
+    AnalysisError,
+    AnalysisIncomplete,
+    AnalysisOptions,
+    AnalysisResult,
+    CpreError,
+    ErrorCode,
+    analyze_source,
+)
 from .configuration import MacroConfiguration, UnknownNamePolicy
+from .expressions import (
+    expression_atoms_in_order,
+    expressions_differ,
+    format_expression,
+    parse_expression,
+)
 from .macro_analysis import (
     MacroAnalysisResult,
     MacroSimplificationResult,
     _resolve_symbolic_literals,
+    _symbolize,
     analyze_macros,
     simplify_macros,
 )
 from .macros import MacroDefinition
+from .model import TRUE, ConditionError, ExpressionSyntaxError
 from .pragmas import preprocess_source
 from .preprocessing import PreprocessingContext, PreprocessResult, compact
+from .robdd import (
+    BDD,
+    AnalysisBudget,
+    AnalysisLimitExceeded,
+    exact_simplify,
+)
 from .sarif import ToolNotification, sarif_log
 
 
@@ -478,6 +500,138 @@ def preprocess_main(
     return 0
 
 
+def _build_test_input_parser(prog: str) -> argparse.ArgumentParser:
+    """Build the argument parser for testing arbitrary Boolean expressions."""
+    parser = argparse.ArgumentParser(
+        prog=prog,
+        description="Parse and simplify an arbitrary Boolean expression using ROBDD.",
+    )
+    parser.add_argument(
+        "expression",
+        help="Boolean expression to simplify",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="write the simplified result as JSON",
+    )
+    parser.add_argument(
+        "--symbolic-literal",
+        dest="symbolic_literals",
+        type=int,
+        action="append",
+        metavar="N",
+        help="treat integer literal N as a symbolic Boolean atom in expression analysis (e.g. 0)",
+    )
+    parser.add_argument(
+        "--symbolic-zero",
+        action="store_true",
+        help="convenience shorthand for --symbolic-literal 0",
+    )
+    parser.add_argument(
+        "--max-atoms",
+        type=int,
+        metavar="N",
+        help="maximum number of distinct Boolean atoms before aborting (default: 64)",
+    )
+    parser.add_argument(
+        "--max-bdd-nodes",
+        type=int,
+        metavar="N",
+        help="maximum number of BDD nodes before aborting (default: 100000)",
+    )
+    parser.add_argument(
+        "--max-work",
+        type=int,
+        metavar="N",
+        help="maximum deterministic BDD operations before aborting (default: 500000)",
+    )
+    return parser
+
+
+def test_input_main(
+    argv: Sequence[str] | None = None,
+    prog: str = "cpre test-input",
+) -> int:
+    """Parse, simplify, and print an arbitrary Boolean expression."""
+    parser = _build_test_input_parser(prog)
+    args = parser.parse_args(argv)
+
+    symbolic_literals: tuple[int, ...] = ()
+    if args.symbolic_zero or args.symbolic_literals:
+        raw_literals: list[int] = []
+        if args.symbolic_zero:
+            raw_literals.append(0)
+        if args.symbolic_literals:
+            raw_literals.extend(args.symbolic_literals)
+        try:
+            symbolic_literals = _resolve_symbolic_literals(raw_literals)
+        except CpreError as error:
+            parser.error(error.message)
+
+    options_kwargs: dict[str, int] = {}
+    if args.max_atoms is not None:
+        options_kwargs["max_atoms"] = args.max_atoms
+    if args.max_bdd_nodes is not None:
+        options_kwargs["max_bdd_nodes"] = args.max_bdd_nodes
+    if args.max_work is not None:
+        options_kwargs["max_work"] = args.max_work
+
+    try:
+        options = AnalysisOptions(**options_kwargs)
+    except (AnalysisError, ValueError) as error:
+        message = getattr(error, "message", str(error))
+        parser.error(message)
+
+    try:
+        parsed = parse_expression(args.expression)
+    except (ConditionError, CpreError) as error:
+        print(f"{prog}: error: {error}", file=sys.stderr)
+        return 2
+
+    expr = _symbolize(parsed, symbolic_literals)
+
+    limits = options._resource_limits()
+    budget = AnalysisBudget(limits.max_work)
+    atoms = tuple(dict.fromkeys(expression_atoms_in_order(expr)))
+
+    try:
+        if len(atoms) > limits.max_atoms:
+            raise AnalysisLimitExceeded("atoms", limits.max_atoms, len(atoms))
+        bdd = BDD(atoms, limits=limits, budget=budget)
+        simplified_expr = exact_simplify(expr, bdd)
+        is_equivalent = bdd.equivalent_under(TRUE, expr, simplified_expr)
+    except AnalysisLimitExceeded as error:
+        print(f"{prog}: error: {error}", file=sys.stderr)
+        return 2
+
+    if not is_equivalent:
+        print(
+            f"{prog}: error: simplified expression could not be proven equivalent",
+            file=sys.stderr,
+        )
+        return 2
+
+    differ = expressions_differ(expr, simplified_expr)
+    simplified_str = format_expression(simplified_expr)
+
+    if args.json:
+        data = {
+            "input": args.expression,
+            "simplified": simplified_str,
+            "equivalent": is_equivalent,
+            "changed": differ,
+            "semantics": "symbolic-literal" if symbolic_literals else "ordinary",
+            "symbolic_literals": list(symbolic_literals),
+        }
+        print(json.dumps(data, indent=2))
+    else:
+        print(f"Input:      {args.expression}")
+        print(f"Simplified: {simplified_str}")
+
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the cpre command-line interface."""
     if argv is None:
@@ -487,6 +641,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return simplify_macros_main(argv[1:], prog=f"cpre {argv[0]}")
     if argv and argv[0] == "preprocess":
         return preprocess_main(argv[1:], prog="cpre preprocess")
+    if argv and argv[0] == "test-input":
+        return test_input_main(argv[1:], prog="cpre test-input")
 
     parser = argparse.ArgumentParser(
         description="Analyze Boolean C/C++ preprocessor conditional directives and macros."

@@ -82,6 +82,13 @@ cpre preprocess source.c -D FEATURE
 cpre preprocess source.c --compact
 ```
 
+Quickly evaluate and simplify arbitrary Boolean expressions:
+
+```bash
+cpre test-input 'A && (A || B)'
+cpre test-input --json '(A && B) || (A && !B)'
+```
+
 By default, text and JSON reports show notable branches and simplified macros; `--verbose` includes unchanged branches and unsimplified macros. `--json` emits structural conditional trees alongside macro simplification results, while `--sarif` emits findings for static-analysis interchange. Specific analyses can be disabled with `--no-macros` or `--no-conditionals`. See the [CLI guide](https://github.com/sahebbiswas/cpre/blob/main/docs/cli.md) for discovery rules, batch output, stderr behavior, and the `0`/`1`/`2` exit-status contract.
 
 ## Python analysis quick start
