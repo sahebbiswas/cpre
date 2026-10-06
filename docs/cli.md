@@ -1,6 +1,6 @@
 # Command-line interface
 
-The `cpre` CLI provides symbolic analysis of C/C++ preprocessor conditions and object-like macros, plus a dedicated `preprocess` command for selecting one explicit concrete configuration and emitting the resulting source.
+The `cpre` CLI provides symbolic analysis of C/C++ preprocessor conditions and object-like macros, a dedicated `preprocess` command for selecting one explicit concrete configuration and emitting the resulting source, and a `test-input` command for quickly evaluating and optimizing arbitrary Boolean expressions.
 
 For Python integrations, use the [Python API guide](api.md). For concrete configuration selection and macro expansion, use the [preprocessing guide](preprocessing.md).
 
@@ -277,6 +277,126 @@ cpre simplify-macros --rewrite --json source.c
 ```
 
 The output contains `path`, `rewritten`, `applied_count`, `verified`, `semantics`, `symbolic_literals`, and the array of analyzed `macros`.
+
+## Arbitrary Boolean expression testing with test-input
+
+The `cpre test-input` subcommand accepts an arbitrary Boolean macro equation or expression, runs it through cpre's Boolean parser and ROBDD simplification machinery, and prints the optimized equivalent expression:
+
+```bash
+cpre test-input 'A && (A || B)'
+```
+
+Output:
+
+```text
+Input:      A && (A || B)
+Simplified: A
+```
+
+The command serves two primary workflows:
+
+1. **Quick experimentation** — test prospective Boolean macro equations without creating a C/C++ source file containing a `#define`.
+2. **Engine-level testing** — provide a convenient black-box CLI interface for exercising ROBDD simplification identities, absorption, contradiction, tautology, and regression cases.
+
+### Examples
+
+Representative Boolean identities and simplifications:
+
+```bash
+# Identity and absorption
+cpre test-input 'A && (A || B)'
+cpre test-input '(A || B) && A'
+cpre test-input '(!A && B) || A'
+
+# Factoring and consensus
+cpre test-input '(A && B) || (A && !B)'
+cpre test-input '(!A || B) && (A || B)'
+cpre test-input '(A && B) || (A && C)'
+
+# Contradiction and tautology
+cpre test-input 'A && !A'
+cpre test-input 'A || !A'
+```
+
+### Expression semantics
+
+`cpre test-input` uses the existing Boolean expression parser and semantics:
+
+- Identifiers as Boolean atoms (`A`, `FEATURE_ENABLED`)
+- `!` for negation
+- `&&` for conjunction
+- `||` for disjunction
+- Parentheses for grouping
+- Integer/Boolean constants (`0`, `1`, `0x1`) according to parser semantics
+
+It does not read or preprocess C/C++ source files, nor evaluate arbitrary C expressions.
+
+### Symbolic-literal mode
+
+By default, integer literals like `0` are evaluated as fixed C truth values (e.g. `A && 0` reduces to `0`). Use `--symbolic-zero` or `--symbolic-literal 0` to treat `0` as a free Boolean atom:
+
+```bash
+# Ordinary semantics: reduces to 0
+cpre test-input 'A && 0'
+
+# Symbolic-zero semantics: preserves the atom
+cpre test-input --symbolic-zero 'A && 0'
+
+# Symbolic-zero simplification
+cpre test-input --symbolic-zero '(A && 0) || (A && !0)'
+```
+
+### Machine-readable JSON output
+
+`--json` emits the simplified result as a documented JSON object:
+
+```bash
+cpre test-input --json 'A && (A || B)'
+```
+
+Output:
+
+```json
+{
+  "input": "A && (A || B)",
+  "simplified": "A",
+  "equivalent": true,
+  "changed": true,
+  "semantics": "ordinary",
+  "symbolic_literals": []
+}
+```
+
+JSON fields:
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `input` | string | Original input expression text supplied on the command line. |
+| `simplified` | string | Optimized equivalent Boolean expression. |
+| `equivalent` | boolean | `true` when the simplified expression is proven equivalent via ROBDD. |
+| `changed` | boolean | `true` if the expression simplified to an algebraically different form, `false` if already in simplest equivalent form. |
+| `semantics` | string | `"ordinary"` or `"symbolic-literal"`. |
+| `symbolic_literals` | array of integer | List of integer literals treated as symbolic atoms (e.g. `[0]`). |
+
+Internal BDD details (node counts, IDs, variable orderings) are intentionally not exposed in the schema.
+
+### Resource limits and error handling
+
+`cpre test-input` preserves bounded ROBDD execution:
+
+- `--max-atoms N`: Maximum number of distinct Boolean atoms (default: 64).
+- `--max-bdd-nodes N`: Maximum number of BDD nodes before aborting (default: 100,000).
+- `--max-work N`: Maximum deterministic BDD operations before aborting (default: 500,000).
+
+Malformed expressions, unmatched parentheses, missing operands, unsupported syntax, or resource exhaustion write a concise diagnostic to stderr and exit with status `2`:
+
+```bash
+cpre test-input 'A &&'
+# Stderr: cpre test-input: error: expected an operand after '&&' at column 3
+# Exit code: 2
+```
+
+An incomplete ROBDD computation is never reported as a successful simplification.
 
 ## Full option reference
 
