@@ -20,8 +20,8 @@ from .macro_analysis import (
     simplify_macros,
 )
 from .macros import MacroDefinition
-from .preprocessing import PreprocessResult, PreprocessingContext, compact
 from .pragmas import preprocess_source
+from .preprocessing import PreprocessingContext, PreprocessResult, compact
 from .sarif import ToolNotification, sarif_log
 
 
@@ -344,7 +344,8 @@ def _parse_name_value(value: str, option: str) -> tuple[str, str]:
 
 
 def _build_preprocess_parser(prog: str) -> argparse.ArgumentParser:
-    """Build the argument parser for the concrete preprocessing command."""    parser = argparse.ArgumentParser(
+    """Build the argument parser for the concrete preprocessing command."""
+    parser = argparse.ArgumentParser(
         prog=prog,
         description=(
             "Select one concrete preprocessing configuration and emit the transformed source."
@@ -378,9 +379,7 @@ def _build_preprocess_parser(prog: str) -> argparse.ArgumentParser:
         "--unknown-names",
         choices=[policy.value for policy in UnknownNamePolicy],
         default=UnknownNamePolicy.OPEN.value,
-        help=(
-            "policy for names absent from the external configuration (default: open)"
-        ),
+        help=("policy for names absent from the external configuration (default: open)"),
     )
     parser.add_argument(
         "--standard-macro",
@@ -399,10 +398,7 @@ def _build_preprocess_parser(prog: str) -> argparse.ArgumentParser:
         type=int,
         default=0,
         metavar="N",
-        help=(
-            "with --compact, retain at most N preprocessing-created blank lines "
-            "(default: 0)"
-        ),
+        help=("with --compact, retain at most N preprocessing-created blank lines (default: 0)"),
     )
     return parser
 
@@ -432,9 +428,9 @@ def preprocess_main(
 
         undefined = []
         for value in args.undefined:
-            name, replacement = _parse_name_value(value, "--undef")
-            if "=" in value or replacement:
+            if "=" in value:
                 raise ValueError("--undef accepts only a macro name")
+            name, _ = _parse_name_value(value, "--undef")
             undefined.append(name)
 
         standard_macros: dict[str, str] = {}
@@ -450,11 +446,7 @@ def preprocess_main(
             definitions=definitions,
             unknown_names=args.unknown_names,
         )
-        context = (
-            PreprocessingContext(standard_macros=standard_macros)
-            if standard_macros
-            else None
-        )
+        context = PreprocessingContext(standard_macros=standard_macros) if standard_macros else None
         with path.open("r", encoding="utf-8", newline="") as handle:
             source = handle.read()
         result: PreprocessResult = preprocess_source(
@@ -484,6 +476,7 @@ def preprocess_main(
 
     sys.stdout.buffer.write(output.encode("utf-8"))
     return 0
+
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the cpre command-line interface."""
