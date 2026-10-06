@@ -75,6 +75,13 @@ cpre simplify-macros source.c
 cpre simplify-macros --rewrite source.c
 ```
 
+Select a concrete configuration and emit preprocessed source:
+
+```bash
+cpre preprocess source.c -D FEATURE
+cpre preprocess source.c --compact
+```
+
 By default, text and JSON reports show notable branches and simplified macros; `--verbose` includes unchanged branches and unsimplified macros. `--json` emits structural conditional trees alongside macro simplification results, while `--sarif` emits findings for static-analysis interchange. Specific analyses can be disabled with `--no-macros` or `--no-conditionals`. See the [CLI guide](https://github.com/sahebbiswas/cpre/blob/main/docs/cli.md) for discovery rules, batch output, stderr behavior, and the `0`/`1`/`2` exit-status contract.
 
 ## Python analysis quick start
@@ -135,6 +142,7 @@ The [documentation index](https://github.com/sahebbiswas/cpre/blob/main/docs/REA
 - [Python API integration](https://github.com/sahebbiswas/cpre/blob/main/docs/api.md)
 - [Macro Boolean simplification](https://github.com/sahebbiswas/cpre/blob/main/docs/macro-simplification.md)
 - [Concrete preprocessing](https://github.com/sahebbiswas/cpre/blob/main/docs/preprocessing.md)
+- [Compact preprocessing output](https://github.com/sahebbiswas/cpre/blob/main/docs/compact-preprocessing.md)
 - [Macro expansion](https://github.com/sahebbiswas/cpre/blob/main/docs/macro-expansion.md)
 - [Concrete macro configuration](https://github.com/sahebbiswas/cpre/blob/main/docs/concrete-configuration.md)
 - [Concrete conditional expressions](https://github.com/sahebbiswas/cpre/blob/main/docs/conditional-expressions.md)

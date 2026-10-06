@@ -11,6 +11,7 @@ from pathlib import Path
 from . import __version__
 from . import cpre as _engine
 from .api import AnalysisIncomplete, AnalysisResult, CpreError, ErrorCode, analyze_source
+from .configuration import MacroConfiguration, UnknownNamePolicy
 from .macro_analysis import (
     MacroAnalysisResult,
     MacroSimplificationResult,
@@ -18,6 +19,9 @@ from .macro_analysis import (
     analyze_macros,
     simplify_macros,
 )
+from .macros import MacroDefinition
+from .pragmas import preprocess_source
+from .preprocessing import PreprocessingContext, PreprocessResult, compact
 from .sarif import ToolNotification, sarif_log
 
 
@@ -324,12 +328,165 @@ def simplify_macros_main(
     return 1 if args.fail_on_findings and has_findings else 0
 
 
+def _parse_name_value(value: str, option: str) -> tuple[str, str]:
+    """Parse a CLI macro assignment into a name and replacement text."""
+    if "=" in value:
+        name, replacement = value.split("=", 1)
+    else:
+        name, replacement = value, ""
+    if (
+        not name
+        or not (name[0].isalpha() or name[0] == "_")
+        or not all(ch.isalnum() or ch == "_" for ch in name)
+    ):
+        raise ValueError(f"{option}: invalid macro name {name!r}")
+    return name, replacement
+
+
+def _build_preprocess_parser(prog: str) -> argparse.ArgumentParser:
+    """Build the argument parser for the concrete preprocessing command."""
+    parser = argparse.ArgumentParser(
+        prog=prog,
+        description=(
+            "Select one concrete preprocessing configuration and emit the transformed source."
+        ),
+    )
+    parser.add_argument(
+        "sources",
+        nargs="+",
+        type=Path,
+        help="C/C++ source files; directory inputs are not supported",
+    )
+    parser.add_argument(
+        "--define",
+        "-D",
+        dest="defines",
+        action="append",
+        default=[],
+        metavar="NAME[=VALUE]",
+        help="define an external object-like macro; NAME alone defines an empty macro",
+    )
+    parser.add_argument(
+        "--undef",
+        "-U",
+        dest="undefined",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="explicitly mark an external macro as undefined",
+    )
+    parser.add_argument(
+        "--unknown-names",
+        choices=[policy.value for policy in UnknownNamePolicy],
+        default=UnknownNamePolicy.OPEN.value,
+        help=("policy for names absent from the external configuration (default: open)"),
+    )
+    parser.add_argument(
+        "--standard-macro",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help="supply a deterministic value for a supported standard predefined macro",
+    )
+    parser.add_argument(
+        "--compact",
+        action="store_true",
+        help="emit the explicit compact presentation of the successful canonical result",
+    )
+    parser.add_argument(
+        "--max-blank-lines",
+        type=int,
+        default=0,
+        metavar="N",
+        help=("with --compact, retain at most N preprocessing-created blank lines (default: 0)"),
+    )
+    return parser
+
+
+def preprocess_main(
+    argv: Sequence[str] | None = None,
+    prog: str = "cpre preprocess",
+) -> int:
+    """Run the concrete preprocessing CLI workflow for one source file."""
+    parser = _build_preprocess_parser(prog)
+    args = parser.parse_args(argv)
+    if len(args.sources) != 1:
+        parser.error("preprocess currently accepts exactly one source file")
+    path = args.sources[0]
+    if path.is_dir():
+        parser.error("directory inputs are not supported by cpre preprocess")
+
+    try:
+        definitions: list[MacroDefinition] = []
+        presence: list[str] = []
+        for value in args.defines:
+            name, replacement = _parse_name_value(value, "--define")
+            if replacement:
+                definitions.append(MacroDefinition(name, replacement))
+            else:
+                presence.append(name)
+
+        undefined = []
+        for value in args.undefined:
+            if "=" in value:
+                raise ValueError("--undef accepts only a macro name")
+            name, _ = _parse_name_value(value, "--undef")
+            undefined.append(name)
+
+        standard_macros: dict[str, str] = {}
+        for value in args.standard_macro:
+            name, replacement = _parse_name_value(value, "--standard-macro")
+            if not replacement:
+                raise ValueError("--standard-macro requires NAME=VALUE")
+            standard_macros[name] = replacement
+
+        configuration = MacroConfiguration(
+            presence=presence,
+            undefined=undefined,
+            definitions=definitions,
+            unknown_names=args.unknown_names,
+        )
+        context = PreprocessingContext(standard_macros=standard_macros) if standard_macros else None
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            source = handle.read()
+        result: PreprocessResult = preprocess_source(
+            source,
+            filename=str(path),
+            configuration=configuration,
+            context=context,
+        )
+    except (CpreError, ValueError, OSError, UnicodeDecodeError) as error:
+        print(f"{path}: {getattr(error, 'message', str(error))}", file=sys.stderr)
+        return 2
+
+    if not result.complete:
+        for diagnostic in result.incomplete:
+            print(f"{path}: {_format_incomplete(diagnostic)}", file=sys.stderr)
+        return 2
+
+    assert result.source is not None
+    if args.compact:
+        try:
+            output = compact(result, max_consecutive_blank_lines=args.max_blank_lines)
+        except ValueError as error:
+            print(f"{path}: {error}", file=sys.stderr)
+            return 2
+    else:
+        output = result.source
+
+    sys.stdout.buffer.write(output.encode("utf-8"))
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the cpre command-line interface."""
     if argv is None:
         argv = sys.argv[1:]
 
     if argv and argv[0] in ("simplify-macros", "analyze-macros"):
         return simplify_macros_main(argv[1:], prog=f"cpre {argv[0]}")
+    if argv and argv[0] == "preprocess":
+        return preprocess_main(argv[1:], prog="cpre preprocess")
 
     parser = argparse.ArgumentParser(
         description="Analyze Boolean C/C++ preprocessor conditional directives and macros."

@@ -1,6 +1,6 @@
 # Command-line interface
 
-The `cpre` CLI analyzes C/C++ preprocessor conditional logic and object-like macro definitions in a single unified pass. It reports dead, redundant, and simplifiable conditional branches alongside simplifiable macro replacement lists; it does **not** currently expose the concrete `preprocess_source()` transformation as a command-line subcommand.
+The `cpre` CLI provides symbolic analysis of C/C++ preprocessor conditions and object-like macros, plus a dedicated `preprocess` command for selecting one explicit concrete configuration and emitting the resulting source.
 
 For Python integrations, use the [Python API guide](api.md). For concrete configuration selection and macro expansion, use the [preprocessing guide](preprocessing.md).
 
@@ -187,6 +187,32 @@ If an integration requires checking only conditional branches or only macro defi
 
 - `--no-macros`: Disables macro Boolean simplification; only conditional directives are analyzed.
 - `--no-conditionals`: Disables conditional directive analysis; only macro definitions are analyzed.
+
+## Concrete preprocessing
+
+Use the dedicated `preprocess` command when a downstream tool needs one concretely selected source representation:
+
+```bash
+cpre preprocess source.c
+cpre preprocess source.c --define FEATURE
+cpre preprocess source.c -D LEVEL=2 -U DISABLED
+cpre preprocess source.c --standard-macro __STDC__=1
+```
+
+The command is deliberately explicit and does not infer compiler or build state from the host. `-D NAME` creates an empty object-like macro, while `-D NAME=VALUE` supplies explicit replacement text. `-U NAME` records an explicit undefined macro. `--unknown-names undefined` opts into closed-world handling for names absent from the supplied configuration; the default is `open`.
+
+Canonical coordinate-preserving output is the default and corresponds to `PreprocessResult.source`. Use `--compact` only when a presentation-oriented view is desired:
+
+```bash
+cpre preprocess source.c --define FEATURE --compact
+cpre preprocess source.c --compact --max-blank-lines 1
+```
+
+Incomplete preprocessing never emits partial transformed source. Diagnostics are written to stderr and the command exits with status `2`. A successful preprocessing run exits `0`; this command does not use findings-oriented `--fail-on-findings` semantics.
+
+`cpre preprocess` currently accepts one source file. Directory/batch processing is intentionally not inherited from the symbolic analysis CLI. Reachable `#include` directives, unsupported pragmas, unresolved `__has_include` queries, and other constructs outside the documented concrete-preprocessing contract remain governed by the library's atomic incomplete-result behavior.
+
+For the full transformation, configuration, mapping, deterministic-context, and host-callback contract, see [Concrete preprocessing](preprocessing.md) and [Concrete macro configuration](concrete-configuration.md). For canonical versus compact output semantics, see [Compact preprocessing output](compact-preprocessing.md).
 
 ## Dedicated macro simplification and rewrite workflow
 
