@@ -35,7 +35,7 @@ from .macro_analysis import (
     simplify_macros,
 )
 from .macros import MacroDefinition
-from .model import TRUE, ConditionError, ExpressionSyntaxError
+from .model import TRUE, ConditionError, ExpressionSyntaxError, Predicate
 from .pragmas import preprocess_source
 from .preprocessing import PreprocessingContext, PreprocessResult, compact
 from .robdd import (
@@ -585,8 +585,13 @@ def test_input_main(
 
     try:
         parsed = parse_expression(args.expression)
-    except (ConditionError, CpreError) as error:
+    except (ConditionError, CpreError, RecursionError) as error:
         print(f"{prog}: error: {error}", file=sys.stderr)
+        return 2
+
+    predicates = [atom for atom in expression_atoms_in_order(parsed) if isinstance(atom, Predicate)]
+    if predicates:
+        print(f"{prog}: error: unsupported syntax: {predicates[0].text!r}", file=sys.stderr)
         return 2
 
     expr = _symbolize(parsed, symbolic_literals)

@@ -167,6 +167,7 @@ def test_cli_test_input_malformed_syntax_errors(capsys):
         ("A && B)", "unexpected ')'"),
         ("A && || B", "expected an operand after '&&'"),
         ("A && && B", "expected an operand"),
+        ("A +", "unsupported syntax"),
     ]
 
     for expr, expected_error in cases:
@@ -176,6 +177,34 @@ def test_cli_test_input_malformed_syntax_errors(capsys):
         assert captured.out == ""
         assert "cpre test-input: error:" in captured.err
         assert expected_error in captured.err
+
+    # Verify A + is also rejected with --json
+    code = main(["test-input", "--json", "A +"])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert captured.out == ""
+    assert "cpre test-input: error: unsupported syntax: 'A +'" in captured.err
+
+
+def test_cli_test_input_deeply_nested_recursion_limit(capsys):
+    """Deeply nested expressions return status 2 through existing error-reporting path."""
+    nested = "(" * 3000 + "A" + ")" * 3000
+    code = main(["test-input", nested])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert captured.out == ""
+    assert "cpre test-input: error:" in captured.err
+    assert "maximum recursion depth exceeded" in captured.err
+
+
+def test_general_expression_api_preserves_predicate():
+    """Verify Predicate support is preserved in the general expression API."""
+    from cpre.expressions import parse_expression
+    from cpre.model import Predicate
+
+    expr = parse_expression("A +")
+    assert isinstance(expr, Predicate)
+    assert expr.text == "A +"
 
 
 def test_cli_test_input_resource_limits(capsys):
