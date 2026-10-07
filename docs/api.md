@@ -236,6 +236,32 @@ if not result.complete:
 
 Downstream tools should preserve this distinction. Converting incomplete analysis into "no findings" creates false confidence.
 
+### Independent components and budget semantics
+
+`analyze_source()` does not build one Boolean model for the whole file. It partitions the analysis into **independent components** and applies the limits as follows:
+
+- **What is coupled.** A top-level conditional group (`#if`/`#ifdef`/`#ifndef` with its `#elif` and `#else` branches) and every conditional nested inside it are analyzed together, because branch reachability depends on earlier branches and on enclosing branches. Two groups belong to the same component when they share a Boolean atom. When macro assumptions are supplied, `defined(X)` and the bare value `X` are distinct atoms that are coupled by C semantics, so groups that mention either form of the same macro are in one component. Assumed macros that no condition mentions are independent of every component.
+- **Per component.** `max_atoms` and `max_bdd_nodes` apply to each component separately. Many unrelated conditionals no longer compete for one file-wide atom budget: a file with hundreds of independent `#ifdef FEATURE_n` blocks completes under the default `max_atoms=64`, while any single connected component with more than `max_atoms` atoms is still incomplete.
+- **Global.** `max_work` is one cap shared by every component (and by the extra baseline pass performed when assumptions are supplied). Partitioning never gives each component a fresh work budget, and it never costs more work than analyzing the same groups one after another. Because creating a BDD node always consumes work, the total number of nodes across components is also bounded by `max_work`.
+- **Diagnostics.** When a component exceeds `max_atoms`, `AnalysisIncomplete.observed` is that component's atom count, not the file total, and `location` stays `None`. If several components are too large, the one whose first atom appears earliest in the source is reported. `bdd_nodes` and `work` diagnostics are located at the branch being analyzed, as before.
+- **Unchanged results.** Within each component, atoms keep the order in which they first appear in the file, so findings, simplifications, and edits for a source that fit the previous file-wide limits are identical. Sources that were incomplete only because unrelated conditionals (or unused assumptions) exhausted the atom budget now complete.
+
+```python
+source = "".join(f"#if FEATURE_{n}\n#endif\n" for n in range(500))
+
+cpre.analyze_source(source).complete                        # True: 500 components of one atom each
+cpre.analyze_source(
+    "#if A && B\n#endif\n#if B && C\n#endif\n",
+    options=cpre.AnalysisOptions(max_atoms=2),
+).complete                                                  # False: A, B, C form one component
+cpre.analyze_source(
+    "#if A && B\n#endif\n#if C && D\n#endif\n",
+    options=cpre.AnalysisOptions(max_atoms=2),
+).complete                                                  # True: two independent components
+```
+
+Partitioning applies to `analyze_source()`. The exact Boolean queries and macro simplification reason about a single expression at a time and apply `max_atoms` to that whole expression.
+
 ## Structured errors
 
 Malformed conditional source and invalid public API input use the `CpreError` hierarchy:

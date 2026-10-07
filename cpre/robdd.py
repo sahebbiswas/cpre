@@ -22,7 +22,13 @@ from .model import (
 
 @dataclass(frozen=True)
 class ResourceLimits:
-    """Deterministic structural limits for one ROBDD-backed analysis session."""
+    """Deterministic structural limits for ROBDD-backed analysis.
+
+    ``max_atoms`` and ``max_bdd_nodes`` constrain each :class:`BDD` manager. The
+    work cap is enforced through an :class:`AnalysisBudget` that callers may
+    share across managers (source analysis creates one manager per independent
+    component and shares one budget).
+    """
 
     max_atoms: int = 64
     max_bdd_nodes: int = 100_000
@@ -72,7 +78,9 @@ class BDD:
         self.unique: dict[tuple[int, int, int], int] = {}
         self._apply_cache: dict[tuple[str, int, int], int] = {}
         self._not_cache: dict[int, int] = {0: 1, 1: 0}
-        self._build_cache: dict[Expression, int] = {}
+        # Constants are free; seeding them keeps work independent of how many
+        # BDD managers share a budget (see cpre.analysis component partitioning).
+        self._build_cache: dict[Expression, int] = {FALSE: 0, TRUE: 1}
         self._expression_cache: dict[int, Expression] = {0: FALSE, 1: TRUE}
 
     def _consume_work(self) -> None:
