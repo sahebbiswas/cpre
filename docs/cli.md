@@ -214,6 +214,7 @@ cpre preprocess source.c
 cpre preprocess source.c --define FEATURE
 cpre preprocess source.c -D LEVEL=2 -U DISABLED
 cpre preprocess source.c --standard-macro __STDC__=1
+cpre preprocess source.c --skip-includes
 ```
 
 The command is deliberately explicit and does not infer compiler or build state from the host. `-D NAME` creates an empty object-like macro, while `-D NAME=VALUE` supplies explicit replacement text. `-U NAME` records an explicit undefined macro. `--unknown-names undefined` opts into closed-world handling for names absent from the supplied configuration; the default is `open`.
@@ -227,7 +228,9 @@ cpre preprocess source.c --compact --max-blank-lines 1
 
 Incomplete preprocessing never emits partial transformed source. Diagnostics are written to stderr and the command exits with status `2`. A successful preprocessing run exits `0`; this command does not use findings-oriented `--fail-on-findings` semantics.
 
-`cpre preprocess` currently accepts one source file. Directory/batch processing is intentionally not inherited from the symbolic analysis CLI. Reachable `#include` directives, unsupported pragmas, unresolved `__has_include` queries, and other constructs outside the documented concrete-preprocessing contract remain governed by the library's atomic incomplete-result behavior.
+`--skip-includes` masks reachable `#include`, `#include_next`, and `#import` directives instead of failing, and reports each one on stderr as `PATH: line N: skipped #include <header.h>` while the transformed source goes to stdout. Skipped headers are never read, so macros and declarations they would supply are not assumed; a condition that depends on them still fails as incomplete. See [Opt-in include skipping](preprocessing.md#opt-in-include-skipping) for the full semantic limitation.
+
+`cpre preprocess` currently accepts one source file. Directory/batch processing is intentionally not inherited from the symbolic analysis CLI. Without `--skip-includes`, reachable `#include` directives, unsupported pragmas, unresolved `__has_include` queries, and other constructs outside the documented concrete-preprocessing contract remain governed by the library's atomic incomplete-result behavior.
 
 For the full transformation, configuration, mapping, deterministic-context, and host-callback contract, see [Concrete preprocessing](preprocessing.md) and [Concrete macro configuration](concrete-configuration.md). For canonical versus compact output semantics, see [Compact preprocessing output](compact-preprocessing.md).
 

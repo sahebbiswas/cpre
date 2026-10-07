@@ -68,6 +68,7 @@ def test_top_level_public_api_exposes_supported_symbols_only():
         "ProofResult",
         "SatisfiabilityResult",
         "SimplificationResult",
+        "SkippedInclude",
         "SourceLocation",
         "SourceMapping",
         "SourceRange",

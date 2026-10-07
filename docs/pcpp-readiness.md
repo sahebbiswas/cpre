@@ -53,7 +53,7 @@ Environment-dependent standard predefined values still require deterministic cal
 The readiness verdict applies to **prepared translation-unit text**, not arbitrary compiler input.
 
 1. C-GULL expands resolvable project headers before cpre and preserves header provenance.
-2. Remaining unresolved `#include`, `#include_next`, or `#import` directives are masked with physical line endings preserved before calling cpre. This matches the information boundary of the current pcpp+pycparser path.
+2. Remaining unresolved `#include`, `#include_next`, or `#import` directives are masked with physical line endings preserved, either before calling cpre or by passing `skip_includes=True` so cpre masks them and reports each one in `PreprocessResult.skipped_includes`. This matches the information boundary of the current pcpp+pycparser path.
 3. C-GULL translates build/profile values into `MacroConfiguration` and deterministic standard-environment values into `PreprocessingContext`, using the closed unknown-name policy where pcpp-compatible concrete behavior is required. Source definitions still override ordinary external macro configuration in source order.
 4. C-GULL consumes `PreprocessResult.source` only when `complete` is true; an incomplete result is coverage degradation, not clean output.
 5. The pycparser typedef prelude remains a parser-integration step after preprocessing.

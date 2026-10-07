@@ -50,7 +50,8 @@ A completed result exposes:
 - `incomplete`: ordered structured diagnostics when preprocessing cannot complete;
 - `macros`: a detached, read-only snapshot of the final explicitly tracked macro state;
 - `source_map`: mappings from canonical output spans back to physical input provenance;
-- `removed_lines`: an immutable set of one-based physical lines wholly masked by preprocessing and eligible for opt-in compaction.
+- `removed_lines`: an immutable set of one-based physical lines wholly masked by preprocessing and eligible for opt-in compaction;
+- `skipped_includes`: `SkippedInclude` records for include directives masked by opt-in [`skip_includes=True`](#opt-in-include-skipping), in source order (empty otherwise).
 
 Always check `complete` before consuming transformed state:
 
@@ -197,9 +198,32 @@ Environment-dependent predefined-macro value uses that lack deterministic config
 
 The host callback answers the already-parsed query. cpre owns condition evaluation and macro expansion; the host owns filesystem/toolchain availability policy. An unanswered query returns an incomplete result rather than being treated as false.
 
-Active `#include`, `#include_next`, and `#import` directives are still outside the concrete transformation contract.
+Active `#include`, `#include_next`, and `#import` directives are outside the default concrete transformation contract; see [Opt-in include skipping](#opt-in-include-skipping).
 
 See [Host-assisted `__has_include`](has-include.md) for query objects, return values, laziness, and the header-search boundary.
+
+## Opt-in include skipping
+
+By default a reachable `#include`, `#include_next`, or `#import` returns an atomic incomplete result with `ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE`. Callers that only need the current translation unit, with external headers treated as opaque, can opt in to masking them instead:
+
+```python
+result = cpre.preprocess_source(source, configuration=config, skip_includes=True)
+if result.complete:
+    for skipped in result.skipped_includes:
+        print(skipped.location.line, skipped.directive, skipped.operand)
+```
+
+In skip mode, each reachable include directive is masked with spaces like other handled directives, preserving its physical line endings, and preprocessing continues with the rest of the source. Each masked directive is reported independently as a `SkippedInclude` with:
+
+- `directive`: `"include"`, `"include_next"`, or `"import"`;
+- `operand`: the operand as written (after line splicing and comment removal), such as `"config.h"`, `<stdio.h>`, or a computed-include macro name; it is never macro expanded or resolved;
+- `location`: the physical source location of the directive.
+
+Include directives in discarded branches are not reported. A reachable include with no operand still returns an incomplete result.
+
+**Semantic limitation.** Skipping is not header resolution. cpre never reads the skipped header, so the result does **not** contain any macros, declarations, types, pragmas, or nested includes the header would have supplied, and `result.macros` attributes nothing to it. Under the default open unknown-name policy, a later condition that depends on a macro the header might define (such as `#ifdef FROM_HEADER`) remains unresolved and returns an incomplete result rather than being guessed. Retained source that uses such a macro is emitted unexpanded. If you supply a closed-world `MacroConfiguration`, its explicit assertion that unconfigured names are undefined also applies to names a skipped header might have defined. A complete skip-mode result therefore certifies the translation unit only *relative to opaque headers*; it is not equivalent to compiler preprocessing with those headers available.
+
+Recursive include resolution is not implemented.
 
 ## Host-owned pragma semantics
 
@@ -225,7 +249,7 @@ See [Pragma handling](pragma-handling.md) for `Pragma`, origins, destringization
 
 The concrete preprocessor handles conditional directives, source-order macro definitions/undefinitions, standard supported `#line`, and the documented host extension points above.
 
-A null `#` directive is harmless and masked. Reachable directives outside the supported/host-accounted surface return structured incomplete diagnostics rather than being silently ignored. This includes active include directives and implementation-specific preprocessing behavior not covered by an explicit cpre contract.
+A null `#` directive is harmless and masked. Reachable directives outside the supported/host-accounted surface return structured incomplete diagnostics rather than being silently ignored. This includes active include directives (unless [`skip_includes=True`](#opt-in-include-skipping) is requested) and implementation-specific preprocessing behavior not covered by an explicit cpre contract.
 
 The exact compatibility boundary is intentionally conservative: `complete=True` certifies the documented cpre operations for the provided deterministic inputs. It does **not** claim general GCC/Clang/MSVC/pcpp equivalence.
 

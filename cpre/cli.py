@@ -523,6 +523,14 @@ def _build_preprocess_parser(prog: str) -> argparse.ArgumentParser:
         metavar="N",
         help=("with --compact, retain at most N preprocessing-created blank lines (default: 0)"),
     )
+    parser.add_argument(
+        "--skip-includes",
+        action="store_true",
+        help=(
+            "mask active #include/#include_next/#import directives instead of failing; "
+            "skipped headers are not read and their macros are not assumed"
+        ),
+    )
     return parser
 
 
@@ -577,6 +585,7 @@ def preprocess_main(
             filename=str(path),
             configuration=configuration,
             context=context,
+            skip_includes=args.skip_includes,
         )
     except (CpreError, ValueError, OSError, UnicodeDecodeError) as error:
         print(f"{path}: {getattr(error, 'message', str(error))}", file=sys.stderr)
@@ -586,6 +595,12 @@ def preprocess_main(
         for diagnostic in result.incomplete:
             print(f"{path}: {_format_incomplete(diagnostic)}", file=sys.stderr)
         return 2
+
+    for skipped in result.skipped_includes:
+        print(
+            f"{path}: line {skipped.location.line}: skipped #{skipped.directive} {skipped.operand}",
+            file=sys.stderr,
+        )
 
     assert result.source is not None
     if args.compact:

@@ -43,7 +43,7 @@ Queries are lazy. A `__has_include` in an unreachable `#elif`, nested inactive b
 
 ## Boundary
 
-This feature does **not** make `#include`, `#include_next`, or `#import` generally supported by concrete preprocessing. Active include directives remain owned by the host or prepared-translation-unit integration boundary.
+This feature does **not** make `#include`, `#include_next`, or `#import` generally supported by concrete preprocessing. Active include directives remain owned by the host or prepared-translation-unit integration boundary; callers that want them treated as opaque can opt in to [include skipping](preprocessing.md#opt-in-include-skipping).
 
 cpre also does not:
 
