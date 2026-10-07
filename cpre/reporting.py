@@ -23,6 +23,11 @@ def branch_is_notable(branch: ConditionalBranch) -> bool:
     return branch.analysis.status in {"dead", "redundant"} or branch_differs_from_source(branch)
 
 
+def analyzed(group: ConditionalGroup) -> bool:
+    """Whether ``group`` was analyzed; groups of an incomplete component are not."""
+    return all(branch.analysis is not None for branch in group.branches)
+
+
 @dataclass(frozen=True)
 class Visibility:
     branches: frozenset[int]
@@ -36,6 +41,8 @@ def compute_visibility(tree: ConditionalTree, verbose: bool) -> Visibility:
     detailed_branches: set[int] = set()
 
     def visit_group(group: ConditionalGroup) -> bool:
+        if not analyzed(group):
+            return False
         group_visible = False
         for branch in group.branches:
             notable = branch_is_notable(branch)
@@ -214,6 +221,8 @@ def format_report(tree: ConditionalTree, *, verbose: bool = True, color: bool = 
 
 def has_findings(tree: ConditionalTree) -> bool:
     for group in tree.groups:
+        if not analyzed(group):
+            continue
         for branch in group.branches:
             assert branch.analysis is not None
             if branch.analysis.status in {"dead", "redundant"}:
@@ -225,6 +234,7 @@ def has_findings(tree: ConditionalTree) -> bool:
 
 __all__ = [
     "Visibility",
+    "analyzed",
     "branch_differs_from_source",
     "branch_is_notable",
     "colored",

@@ -17,6 +17,7 @@ from .api import (
     AnalysisResult,
     CpreError,
     ErrorCode,
+    IncompleteComponent,
     analyze_source,
 )
 from .configuration import MacroConfiguration, UnknownNamePolicy
@@ -59,6 +60,97 @@ def _format_incomplete(diagnostic: AnalysisIncomplete) -> str:
     if diagnostic.location is None:
         return diagnostic.message
     return f"line {diagnostic.location.line}: {diagnostic.message}"
+
+
+def _group_span(component: IncompleteComponent) -> str:
+    return ", ".join(
+        f"{group.location.line}-{group.end_line}"
+        if group.end_line is not None and group.end_line != group.location.line
+        else str(group.location.line)
+        for group in component.groups
+    )
+
+
+def _format_incomplete_component(component: IncompleteComponent) -> str:
+    """One stderr line per incomplete component of an otherwise analyzed source."""
+    first = component.groups[0].location.line
+    reasons = "; ".join(diagnostic.message for diagnostic in component.diagnostics)
+    noun = "conditionals" if len(component.groups) > 1 else "conditional"
+    return (
+        f"line {first}: {noun} at lines {_group_span(component)} "
+        f"not analyzed ({reasons}); findings cover only the rest of the file"
+    )
+
+
+def _incomplete_lines(
+    components: Sequence[IncompleteComponent], *, color: bool = False
+) -> list[str]:
+    if not components:
+        return []
+    lines = [
+        _engine._colored(
+            "Incomplete analysis (no findings are reported for these conditionals):",
+            "yellow",
+            color,
+        )
+    ]
+    for component in components:
+        reasons = "; ".join(diagnostic.message for diagnostic in component.diagnostics)
+        for group in component.groups:
+            span = (
+                f"{group.location.line}-{group.end_line}"
+                if group.end_line is not None
+                else str(group.location.line)
+            )
+            condition = f" {group.condition}" if group.condition else ""
+            lines.append(
+                _engine._colored(
+                    f"  {span}: #{group.directive}{condition} [incomplete: {reasons}]",
+                    "yellow",
+                    color,
+                )
+            )
+    return lines
+
+
+def _incomplete_to_dict(diagnostic: AnalysisIncomplete) -> dict[str, object]:
+    return {
+        "code": diagnostic.code.value,
+        "resource": diagnostic.resource,
+        "limit": diagnostic.limit,
+        "observed": diagnostic.observed,
+        "message": diagnostic.message,
+        "line": diagnostic.location.line if diagnostic.location else None,
+        "component": diagnostic.component,
+    }
+
+
+def _incomplete_component_to_dict(component: IncompleteComponent) -> dict[str, object]:
+    return {
+        "index": component.index,
+        "groups": [
+            {
+                "line": group.location.line,
+                "end_line": group.end_line,
+                "directive": group.directive,
+                "condition": group.condition,
+            }
+            for group in component.groups
+        ],
+        "atoms": list(component.atoms),
+        "diagnostics": [_incomplete_to_dict(d) for d in component.diagnostics],
+    }
+
+
+def _analysis_status_dict(analysis: AnalysisResult) -> dict[str, object]:
+    return {
+        "complete": analysis.complete,
+        "partial": analysis.partial,
+        "incomplete": [_incomplete_to_dict(d) for d in analysis.incomplete],
+        "incomplete_components": [
+            _incomplete_component_to_dict(c) for c in analysis.incomplete_components
+        ],
+    }
 
 
 def _macro_to_dict(result: MacroAnalysisResult) -> dict[str, object]:
@@ -117,6 +209,7 @@ def _render_combined_report(
     *,
     verbose: bool = True,
     color: bool = False,
+    incomplete_components: Sequence[IncompleteComponent] = (),
 ) -> tuple[str, bool]:
     sections: list[str] = []
     has_any = False
@@ -126,6 +219,9 @@ def _render_combined_report(
             sections.append(c_report)
             if c_has:
                 has_any = True
+    if incomplete_components:
+        sections.append("\n".join(_incomplete_lines(incomplete_components, color=color)))
+        has_any = True
     if macros:
         m_report, m_has = _render_macro_report(macros, verbose=verbose, color=color)
         if m_has or (verbose and m_report):
@@ -149,6 +245,7 @@ def _build_file_json(
     verbose: bool,
     enable_macros: bool,
     symbolic_literals: tuple[int, ...],
+    analysis: AnalysisResult | None = None,
 ) -> tuple[dict[str, object], bool]:
     f_data: dict[str, object] = {"path": str(path)}
     has_visible = False
@@ -159,6 +256,10 @@ def _build_file_json(
             has_visible = True
     else:
         f_data["groups"] = []
+    if analysis is not None:
+        f_data.update(_analysis_status_dict(analysis))
+        if not analysis.complete:
+            has_visible = True
 
     if enable_macros:
         visible_macros = [_macro_to_dict(r) for r in m_results if (verbose or r.simplified)]
@@ -730,7 +831,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     enable_macros = not args.no_macros
 
     file_results: list[
-        tuple[Path, _engine.ConditionalTree | None, tuple[MacroAnalysisResult, ...]]
+        tuple[
+            Path,
+            _engine.ConditionalTree | None,
+            tuple[MacroAnalysisResult, ...],
+            AnalysisResult | None,
+        ]
     ] = []
     analyses: list[AnalysisResult] = []
     sarif_notifications: list[ToolNotification] = []
@@ -740,14 +846,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             source = path.read_text(encoding="utf-8")
             tree: _engine.ConditionalTree | None = None
+            c_result: AnalysisResult | None = None
             if enable_conditionals:
                 c_result = analyze_source(source, filename=str(path))
                 analyses.append(c_result)
                 if not c_result.complete:
                     for diagnostic in c_result.incomplete:
-                        print(f"{path}: {_format_incomplete(diagnostic)}", file=sys.stderr)
+                        if diagnostic.component is None:
+                            message = _format_incomplete(diagnostic)
+                        else:
+                            component = c_result.incomplete_components[diagnostic.component]
+                            message = _format_incomplete_component(component)
+                        print(f"{path}: {message}", file=sys.stderr)
                     had_errors = True
-                else:
+                if c_result.complete or c_result.partial:
+                    # A partial result still proves its findings for every other group.
                     tree = c_result.tree
 
             m_results: tuple[MacroAnalysisResult, ...] = ()
@@ -762,7 +875,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                         print(f"{path}: {_format_incomplete(r.incomplete)}", file=sys.stderr)
                         had_errors = True
 
-            file_results.append((path, tree, m_results))
+            file_results.append((path, tree, m_results, c_result))
         except CpreError as error:
             print(f"{path}: {_format_error(error)}", file=sys.stderr)
             sarif_notifications.append(
@@ -799,7 +912,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif args.json:
         if batch_mode:
             files = []
-            for path, tree, m_results in file_results:
+            for path, tree, m_results, c_result in file_results:
                 f_data, has_visible = _build_file_json(
                     path,
                     tree,
@@ -807,6 +920,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     verbose=args.verbose,
                     enable_macros=enable_macros,
                     symbolic_literals=symbolic_literals,
+                    analysis=c_result,
                 )
                 if args.verbose or has_visible:
                     files.append(f_data)
@@ -819,14 +933,19 @@ def main(argv: Sequence[str] | None = None) -> int:
                 verbose=args.verbose,
                 enable_macros=enable_macros,
                 symbolic_literals=symbolic_literals,
+                analysis=file_results[0][3],
             )
             print(json.dumps(f_data, indent=2))
     elif batch_mode:
         color = sys.stdout.isatty()
         reports = []
-        for path, tree, m_results in file_results:
+        for path, tree, m_results, c_result in file_results:
             report, has_entries = _render_combined_report(
-                tree, m_results, verbose=args.verbose, color=color
+                tree,
+                m_results,
+                verbose=args.verbose,
+                color=color,
+                incomplete_components=c_result.incomplete_components if c_result else (),
             )
             if args.verbose or has_entries:
                 reports.append(
@@ -835,18 +954,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         if reports:
             print("\n\n".join(reports))
     elif file_results:
+        c_result = file_results[0][3]
         report, _ = _render_combined_report(
             file_results[0][1],
             file_results[0][2],
             verbose=args.verbose,
             color=sys.stdout.isatty(),
+            incomplete_components=c_result.incomplete_components if c_result else (),
         )
         print(report)
 
     if had_errors:
         return 2
     has_findings = False
-    for _, tree, m_results in file_results:
+    for _, tree, m_results, _ in file_results:
         if tree is not None and _engine._has_findings(tree):
             has_findings = True
         if any(r.simplified for r in m_results):

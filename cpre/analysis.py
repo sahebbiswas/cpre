@@ -121,6 +121,55 @@ def _unique_atoms(expressions: Sequence[Expression]) -> list[BooleanAtom]:
     )
 
 
+@dataclass
+class PartialAnalysis:
+    """Outcome of :func:`analyze_tree_partial`.
+
+    ``group_components[i]`` is the component id of ``tree.groups[i]``.
+    ``failures`` maps a component id to the per-component limit it exceeded;
+    every branch of a failed component's groups has ``analysis is None``.
+    """
+
+    tree: ConditionalTree
+    group_components: list[int]
+    component_atoms: dict[int, list[BooleanAtom]]
+    failures: dict[int, AnalysisLimitExceeded]
+
+
+def _clear_analysis(groups: Sequence[ConditionalGroup]) -> None:
+    for group in groups:
+        for branch in group.branches:
+            branch.analysis = None
+            _clear_analysis(branch.children)
+
+
+def _clauses_satisfiable(
+    clauses: Sequence[Expression], limits: ResourceLimits, budget: AnalysisBudget
+) -> bool:
+    """Decide satisfiability of ``clauses`` using only the clauses' own atoms.
+
+    Used when a component's full BDD could not be built: the assumption context
+    is usually far smaller than the conditionals it constrains, and a
+    conjunction of atom-disjoint parts is satisfiable iff every part is.
+    """
+    partition = _AtomPartition()
+    clause_atoms = [_unique_atoms([clause]) for clause in clauses]
+    for members in clause_atoms:
+        partition.union_all(members)
+    parts: dict[BooleanAtom, list[Expression]] = {}
+    for clause, members in zip(clauses, clause_atoms):
+        if not members:
+            if clause == FALSE:
+                return False
+            continue
+        parts.setdefault(partition.find(members[0]), []).append(clause)
+    for part in parts.values():
+        bdd = BDD(_unique_atoms(part), limits=limits, budget=budget)
+        if not bdd.satisfiable(conjunction(*part)):
+            return False
+    return True
+
+
 def analyze_tree(
     tree: ConditionalTree,
     *,
@@ -140,10 +189,45 @@ def analyze_tree(
     ``limits.max_bdd_nodes`` apply per component, while ``budget`` (the work
     cap) stays shared by all components. Atom order inside a component is the
     source's first-occurrence order, so results match a single file-wide BDD.
+
+    Any exceeded limit raises :class:`AnalysisLimitExceeded`; see
+    :func:`analyze_tree_partial` to keep the components that did complete.
     """
+    return _analyze(tree, assumptions=assumptions, limits=limits, budget=budget, partial=False).tree
+
+
+def analyze_tree_partial(
+    tree: ConditionalTree,
+    *,
+    assumptions: Expression | None = None,
+    limits: ResourceLimits | None = None,
+    budget: AnalysisBudget | None = None,
+) -> PartialAnalysis:
+    """Like :func:`analyze_tree`, but per-component limits do not stop other components.
+
+    A component that exceeds ``max_atoms`` or ``max_bdd_nodes`` is recorded in
+    :attr:`PartialAnalysis.failures` and its groups are left unanalyzed. The work
+    budget is shared, so exhausting it still raises, as does any limit hit while
+    deciding whether the assumptions themselves are satisfiable (every
+    component's results depend on that).
+    """
+    return _analyze(tree, assumptions=assumptions, limits=limits, budget=budget, partial=True)
+
+
+def _analyze(
+    tree: ConditionalTree,
+    *,
+    assumptions: Expression | None,
+    limits: ResourceLimits | None,
+    budget: AnalysisBudget | None,
+    partial: bool,
+) -> PartialAnalysis:
     use_assumptions = assumptions is not None
     resolved_limits = limits or ResourceLimits()
     resolved_budget = budget or AnalysisBudget(resolved_limits.max_work)
+
+    def recoverable(error: AnalysisLimitExceeded) -> bool:
+        return partial and error.resource != "work"
 
     clauses: list[Expression] = []
     if use_assumptions:
@@ -169,27 +253,57 @@ def analyze_tree(
     for atom in atoms:
         root = partition.find(atom)
         components.setdefault(root, _Component([], [])).atoms.append(atom)
+    component_ids = {root: index for index, root in enumerate(components)}
     context_satisfiable = True
     for clause, members in zip(clauses, clause_atoms):
         if members:
             components[partition.find(members[0])].clauses.append(clause)
         elif clause == FALSE:
             context_satisfiable = False
-    for component in components.values():
-        component.bdd = BDD(component.atoms, limits=resolved_limits, budget=resolved_budget)
+    failures: dict[int, AnalysisLimitExceeded] = {}
+    for root, component in components.items():
+        try:
+            component.bdd = BDD(component.atoms, limits=resolved_limits, budget=resolved_budget)
+        except AnalysisLimitExceeded as error:
+            if not recoverable(error):
+                raise
+            failures[component_ids[root]] = error
         component.context = conjunction(*component.clauses)
 
     if use_assumptions and tree.groups:
         try:
-            for component in components.values():
-                assert component.bdd is not None
-                if component.clauses and not component.bdd.satisfiable(component.context):
+            for root, component in components.items():
+                if not component.clauses:
+                    continue
+                try:
+                    if component.bdd is None:
+                        satisfiable = _clauses_satisfiable(
+                            component.clauses, resolved_limits, resolved_budget
+                        )
+                    else:
+                        satisfiable = component.bdd.satisfiable(component.context)
+                except AnalysisLimitExceeded as error:
+                    if component.bdd is None or not recoverable(error):
+                        raise
+                    failures.setdefault(component_ids[root], error)
+                    satisfiable = _clauses_satisfiable(
+                        component.clauses, resolved_limits, resolved_budget
+                    )
+                if not satisfiable:
                     context_satisfiable = False
         except AnalysisLimitExceeded as error:
             if error.line is None:
                 error.line = tree.groups[0].branches[0].line
             raise
 
+    # Groups without atoms each form their own trivial component.
+    group_components = [
+        component_ids[partition.find(members[0])] if members else len(components) + index
+        for index, members in enumerate(group_atoms)
+    ]
+    component_atoms = {
+        component_ids[root]: list(component.atoms) for root, component in components.items()
+    }
     atom_free_bdd: BDD | None = None
 
     def scope_for(index: int) -> _Scope:
@@ -265,8 +379,19 @@ def analyze_tree(
                     raise
 
     for index, group in enumerate(tree.groups):
-        analyze_groups([group], TRUE, scope_for(index))
-    return tree
+        component_id = group_components[index]
+        if component_id in failures:
+            continue
+        try:
+            analyze_groups([group], TRUE, scope_for(index))
+        except AnalysisLimitExceeded as error:
+            if not recoverable(error):
+                raise
+            failures[component_id] = error
+    for index, group in enumerate(tree.groups):
+        if group_components[index] in failures:
+            _clear_analysis([group])
+    return PartialAnalysis(tree, group_components, component_atoms, failures)
 
 
 def analyze_source(
@@ -284,4 +409,10 @@ def analyze_source(
     )
 
 
-__all__ = ["analyze_source", "analyze_tree", "tree_expressions"]
+__all__ = [
+    "PartialAnalysis",
+    "analyze_source",
+    "analyze_tree",
+    "analyze_tree_partial",
+    "tree_expressions",
+]

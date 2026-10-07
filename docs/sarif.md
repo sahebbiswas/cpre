@@ -30,7 +30,7 @@ Failures that prevent a clean analysis are represented as `toolExecutionNotifica
 
 This includes parser/directive failures, bounded-analysis exhaustion, supported analysis failures, invalid assumptions where applicable, and `source_read_error` for CLI file read/UTF-8 decoding failures.
 
-If deterministic ROBDD resource limits stop exact analysis for a source file, cpre does not emit partial findings. The SARIF invocation is marked unsuccessful and the limit diagnostic is emitted as a tool execution notification. Parse/read failures likewise set `executionSuccessful` to `false`. The CLI exits with status 2 for these failure conditions.
+If deterministic ROBDD resource limits stop exact analysis, cpre never emits findings derived from a partial proof. The SARIF invocation is marked unsuccessful and each limit diagnostic is emitted as a tool execution notification. Its `properties` carry `resource`, `limit`, `observed` and `scope`. `scope` is `"source"` when the whole file was curtailed, and then no findings are emitted for it. It is `"component"` when only some independent conditionals hit a limit (see [Partial results and incomplete components](api.md#partial-results-and-incomplete-components)). Findings for the rest of the file are then still emitted. The notification is located at the component's first conditional, and its `properties.component` lists the unanalyzed `groups` (`startLine`, `endLine`) and `atoms`. Parse/read failures likewise set `executionSuccessful` to `false`. The CLI exits with status 2 for these failure conditions.
 
 ## Artifact locations
 

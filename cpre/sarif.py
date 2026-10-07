@@ -221,19 +221,40 @@ def _location(
 
 def _incomplete_notification(
     diagnostic: AnalysisIncomplete,
-    filename: str | None,
+    analysis: AnalysisResult,
 ) -> dict[str, object]:
+    properties: dict[str, object] = {
+        "resource": diagnostic.resource,
+        "limit": diagnostic.limit,
+        "observed": diagnostic.observed,
+        "scope": "source" if diagnostic.component is None else "component",
+    }
+    message = diagnostic.message
+    location = diagnostic.location
+    if diagnostic.component is not None:
+        component = analysis.incomplete_components[diagnostic.component]
+        properties["component"] = {
+            "index": component.index,
+            "groups": [
+                {"startLine": group.location.line, "endLine": group.end_line}
+                for group in component.groups
+            ],
+            "atoms": list(component.atoms),
+        }
+        message = (
+            f"{message}; conditionals starting at line "
+            f"{', '.join(str(group.location.line) for group in component.groups)} "
+            "were not analyzed"
+        )
+        if location is None:
+            location = component.groups[0].location
     notification: dict[str, object] = {
         "level": "error",
-        "message": {"text": diagnostic.message},
+        "message": {"text": message},
         "descriptor": {"id": diagnostic.code.value},
-        "properties": {
-            "resource": diagnostic.resource,
-            "limit": diagnostic.limit,
-            "observed": diagnostic.observed,
-        },
+        "properties": properties,
     }
-    locations = _location(filename, diagnostic.location)
+    locations = _location(analysis.filename, location)
     if locations is not None:
         notification["locations"] = locations
     return notification
@@ -267,7 +288,7 @@ def sarif_log(
         for finding in analysis.findings
     ]
     execution_notifications = [
-        _incomplete_notification(diagnostic, analysis.filename)
+        _incomplete_notification(diagnostic, analysis)
         for analysis in analyses
         for diagnostic in analysis.incomplete
     ]

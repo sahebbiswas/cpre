@@ -78,12 +78,17 @@ cpre --recursive --json src
 ```
 
 For a single non-directory input, stdout contains an object with:
-- `groups`: structural conditional-tree groups (or empty array if none/disabled).
+- `groups`: structural conditional-tree groups (or empty array if none/disabled). Groups of an incomplete component are not listed here.
 - `macros`: array of macro analysis results, each detailing `name`, `original_replacement`, `simplified`, `simplified_replacement`, `is_equivalent`, `semantics`, and `symbolic_literals`.
+- When conditional analysis is enabled, the completeness of that analysis:
+  - `complete`: `true` only if every conditional was analyzed.
+  - `partial`: `true` if only some independent components were left unanalyzed, so the listed `groups` are proven.
+  - `incomplete`: the limit diagnostics, each with `code`, `resource`, `limit`, `observed`, `message`, `line` (or `null`), and `component` (an index into `incomplete_components`, or `null` when the whole analysis was curtailed).
+  - `incomplete_components`: one object per unanalyzed component with `index`, `groups` (each with `line`, `end_line`, `directive`, `condition`), `atoms`, and `diagnostics`.
 
 In batch mode, stdout contains an object with a `files` array; each entry includes `path` plus the `groups` and `macros` fields for that source.
 
-The same filtering rule applies as text output: the default JSON view omits unchanged branches and unsimplified/skipped macros, while `--verbose --json` includes the full tree and all analyzed macros. In filtered batch mode, files whose filtered results have no notable entries are omitted.
+The same filtering rule applies as text output: the default JSON view omits unchanged branches and unsimplified/skipped macros, while `--verbose --json` includes the full tree and all analyzed macros. In filtered batch mode, files whose filtered results have no notable entries are omitted. Files whose analysis was incomplete are always included.
 
 JSON represents cpre's reporting model for direct inspection. For static analysis interchange, prefer SARIF. For Python-to-Python integration, prefer the top-level Python API.
 
@@ -139,6 +144,18 @@ The CLI reads source files as UTF-8. Unreadable files and non-UTF-8 input theref
 Malformed conditional directives and other supported `CpreError` failures are rendered on stderr with source location information when available.
 
 ROBDD/resource-limit exhaustion (the atom limit applies per independent conditional component, the work limit to the whole source; see [Independent components and budget semantics](api.md#independent-components-and-budget-semantics)) and other `AnalysisResult.complete == False` cases are also treated as incomplete processing: diagnostics are written to stderr and the process exits with status `2`. cpre never treats an incomplete source as a clean source merely because it has no findings.
+
+When only some independent components exceed a limit, the result is partial (see [Partial results and incomplete components](api.md#partial-results-and-incomplete-components)). The report still shows the proven findings for the rest of the file, followed by a separate section that lists each unanalyzed conditional:
+
+```text
+2: #if A [redundant]
+  reason: condition is always true in this branch context
+  ...
+Incomplete analysis (no findings are reported for these conditionals):
+  6-8: #if W_0 || W_1 || ... [incomplete: analysis limit exceeded for atoms: 70 > 64]
+```
+
+stderr names the same conditionals (`source.c: line 6: conditional at lines 6-8 not analyzed (analysis limit exceeded for atoms: 70 > 64); findings cover only the rest of the file`), and the exit status is still `2`.
 
 When `--sarif` is active, source/tool errors are also represented as SARIF tool notifications where applicable, while the process still exits with status `2`.
 
