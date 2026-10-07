@@ -215,6 +215,7 @@ cpre preprocess source.c --define FEATURE
 cpre preprocess source.c -D LEVEL=2 -U DISABLED
 cpre preprocess source.c --standard-macro __STDC__=1
 cpre preprocess source.c --skip-includes
+cpre preprocess src/main.c -I include --iquote src
 ```
 
 The command is deliberately explicit and does not infer compiler or build state from the host. `-D NAME` creates an empty object-like macro, while `-D NAME=VALUE` supplies explicit replacement text. `-U NAME` records an explicit undefined macro. `--unknown-names undefined` opts into closed-world handling for names absent from the supplied configuration; the default is `open`.
@@ -230,7 +231,9 @@ Incomplete preprocessing never emits partial transformed source. Diagnostics are
 
 `--skip-includes` masks reachable `#include`, `#include_next`, and `#import` directives instead of failing, and reports each one on stderr as `PATH: line N: skipped #include <header.h>` while the transformed source goes to stdout. Skipped headers are never read, so macros and declarations they would supply are not assumed; a condition that depends on them still fails as incomplete. See [Opt-in include skipping](preprocessing.md#opt-in-include-skipping) for the full semantic limitation.
 
-`cpre preprocess` currently accepts one source file. Directory/batch processing is intentionally not inherited from the symbolic analysis CLI. Without `--skip-includes`, reachable `#include` directives, unsupported pragmas, unresolved `__has_include` queries, and other constructs outside the documented concrete-preprocessing contract remain governed by the library's atomic incomplete-result behavior.
+`-I DIR` (`--include-dir DIR`) and `--iquote DIR` turn on include resolution: reachable includes are read from the filesystem and preprocessed recursively, and the output contains their text. Quoted includes search the including file's directory, then the `--iquote` directories, then the `-I` directories. Angle-bracket includes search only the `-I` directories. `#include_next` continues after the directory where the including file was found. Compiler default and system directories are never searched. `--max-include-depth N` limits nesting (default: 200). An include that can't be found fails with `cannot resolve #include <header.h>`, unless `--skip-includes` is also given, in which case it is masked and reported. Diagnostics from inside a header are prefixed with that header's path. See [Include resolution](include-resolution.md).
+
+`cpre preprocess` currently accepts one source file. Directory/batch processing is intentionally not inherited from the symbolic analysis CLI. Without `-I`, `--iquote`, or `--skip-includes`, reachable `#include` directives, unsupported pragmas, unresolved `__has_include` queries, and other constructs outside the documented concrete-preprocessing contract remain governed by the library's atomic incomplete-result behavior.
 
 For the full transformation, configuration, mapping, deterministic-context, and host-callback contract, see [Concrete preprocessing](preprocessing.md) and [Concrete macro configuration](concrete-configuration.md). For canonical versus compact output semantics, see [Compact preprocessing output](compact-preprocessing.md).
 

@@ -34,6 +34,8 @@ class SourceMapping:
 
     Unexpanded spans map one-to-one. Locations are one-based physical positions;
     source_end and end are exclusive. Offsets count Python characters, not bytes.
+    ``source_identity`` is ``None`` for the primary source and otherwise names the
+    resolved included source that the offsets and locations refer to.
     """
 
     output_start: int
@@ -43,6 +45,7 @@ class SourceMapping:
     start: SourceLocation
     end: SourceLocation
     expanded: bool = False
+    source_identity: str | None = None
 
 
 @dataclass(frozen=True)

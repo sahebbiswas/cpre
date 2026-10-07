@@ -27,6 +27,7 @@ from .expressions import (
     format_expression,
     parse_expression,
 )
+from .includes import DEFAULT_MAX_INCLUDE_DEPTH, SearchPathResolver
 from .macro_analysis import (
     MacroAnalysisResult,
     MacroSimplificationResult,
@@ -528,8 +529,39 @@ def _build_preprocess_parser(prog: str) -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "mask active #include/#include_next/#import directives instead of failing; "
-            "skipped headers are not read and their macros are not assumed"
+            "skipped headers are not read and their macros are not assumed; with -I or "
+            "--iquote, only includes that cannot be resolved are skipped"
         ),
+    )
+    parser.add_argument(
+        "-I",
+        "--include-dir",
+        dest="include_dirs",
+        action="append",
+        default=[],
+        metavar="DIR",
+        help=(
+            "resolve and preprocess reachable includes, searching DIR for <...> and "
+            '"..." headers; repeatable, searched in order'
+        ),
+    )
+    parser.add_argument(
+        "--iquote",
+        dest="quote_dirs",
+        action="append",
+        default=[],
+        metavar="DIR",
+        help=(
+            'resolve and preprocess reachable includes, searching DIR for "..." headers '
+            "only; repeatable, searched before -I directories"
+        ),
+    )
+    parser.add_argument(
+        "--max-include-depth",
+        type=int,
+        default=DEFAULT_MAX_INCLUDE_DEPTH,
+        metavar="N",
+        help=f"maximum nesting depth of resolved includes (default: {DEFAULT_MAX_INCLUDE_DEPTH})",
     )
     return parser
 
@@ -580,25 +612,36 @@ def preprocess_main(
         context = PreprocessingContext(standard_macros=standard_macros) if standard_macros else None
         with path.open("r", encoding="utf-8", newline="") as handle:
             source = handle.read()
+        resolver = (
+            SearchPathResolver(args.include_dirs, quote_paths=args.quote_dirs)
+            if args.include_dirs or args.quote_dirs
+            else None
+        )
         result: PreprocessResult = preprocess_source(
             source,
             filename=str(path),
             configuration=configuration,
             context=context,
             skip_includes=args.skip_includes,
+            include_resolver=resolver,
+            max_include_depth=args.max_include_depth,
         )
     except (CpreError, ValueError, OSError, UnicodeDecodeError) as error:
-        print(f"{path}: {getattr(error, 'message', str(error))}", file=sys.stderr)
+        origin = getattr(error, "filename", None) or path
+        print(f"{origin}: {getattr(error, 'message', str(error))}", file=sys.stderr)
         return 2
 
     if not result.complete:
         for diagnostic in result.incomplete:
-            print(f"{path}: {_format_incomplete(diagnostic)}", file=sys.stderr)
+            origin = diagnostic.source_identity or path
+            print(f"{origin}: {_format_incomplete(diagnostic)}", file=sys.stderr)
         return 2
 
     for skipped in result.skipped_includes:
+        origin = skipped.source_identity or path
         print(
-            f"{path}: line {skipped.location.line}: skipped #{skipped.directive} {skipped.operand}",
+            f"{origin}: line {skipped.location.line}: "
+            f"skipped #{skipped.directive} {skipped.operand}",
             file=sys.stderr,
         )
 

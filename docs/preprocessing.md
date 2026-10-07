@@ -36,7 +36,7 @@ else:
 
 Use `analyze_source()` when you want cpre to reason symbolically about conditional structure and report dead, redundant, or simplifiable branches across possible configurations.
 
-Use `preprocess_source()` when you want cpre to choose one configuration and produce source for a downstream consumer. Concrete preprocessing can use explicit external macro definitions, source-order `#define`/`#undef` updates, bounded macro expansion, deterministic predefined-macro context, host-assisted `__has_include`, and host-owned pragma handling.
+Use `preprocess_source()` when you want cpre to choose one configuration and produce source for a downstream consumer. Concrete preprocessing can use explicit external macro definitions, source-order `#define`/`#undef` updates, bounded macro expansion, deterministic predefined-macro context, host-assisted `__has_include`, caller-resolved includes, and host-owned pragma handling.
 
 The two APIs deliberately have different outputs and failure contracts. Do not treat concrete preprocessing as a replacement for symbolic analysis when you need configuration-independent findings.
 
@@ -51,7 +51,8 @@ A completed result exposes:
 - `macros`: a detached, read-only snapshot of the final explicitly tracked macro state;
 - `source_map`: mappings from canonical output spans back to physical input provenance;
 - `removed_lines`: an immutable set of one-based physical lines wholly masked by preprocessing and eligible for opt-in compaction;
-- `skipped_includes`: `SkippedInclude` records for include directives masked by opt-in [`skip_includes=True`](#opt-in-include-skipping), in source order (empty otherwise).
+- `skipped_includes`: `SkippedInclude` records for include directives masked by opt-in [`skip_includes=True`](#opt-in-include-skipping), in source order (empty otherwise);
+- `includes`: `IncludeRecord` provenance for reachable includes resolved by an [`include_resolver`](#caller-resolved-includes) (empty otherwise).
 
 Always check `complete` before consuming transformed state:
 
@@ -198,7 +199,7 @@ Environment-dependent predefined-macro value uses that lack deterministic config
 
 The host callback answers the already-parsed query. cpre owns condition evaluation and macro expansion; the host owns filesystem/toolchain availability policy. An unanswered query returns an incomplete result rather than being treated as false.
 
-Active `#include`, `#include_next`, and `#import` directives are outside the default concrete transformation contract; see [Opt-in include skipping](#opt-in-include-skipping).
+Active `#include`, `#include_next`, and `#import` directives are outside the default concrete transformation contract; see [Caller-resolved includes](#caller-resolved-includes) and [Opt-in include skipping](#opt-in-include-skipping). `__has_include` is answered in the primary source only.
 
 See [Host-assisted `__has_include`](has-include.md) for query objects, return values, laziness, and the header-search boundary.
 
@@ -223,7 +224,13 @@ Include directives in discarded branches are not reported. A reachable include w
 
 **Semantic limitation.** Skipping is not header resolution. cpre never reads the skipped header, so the result does **not** contain any macros, declarations, types, pragmas, or nested includes the header would have supplied, and `result.macros` attributes nothing to it. Under the default open unknown-name policy, a later condition that depends on a macro the header might define (such as `#ifdef FROM_HEADER`) remains unresolved and returns an incomplete result rather than being guessed. Retained source that uses such a macro is emitted unexpanded. If you supply a closed-world `MacroConfiguration`, its explicit assertion that unconfigured names are undefined also applies to names a skipped header might have defined. A complete skip-mode result therefore certifies the translation unit only *relative to opaque headers*; it is not equivalent to compiler preprocessing with those headers available.
 
-Recursive include resolution is not implemented.
+To preprocess headers instead of skipping them, use [caller-resolved includes](#caller-resolved-includes). With both options set, only the includes the resolver can't resolve are skipped.
+
+## Caller-resolved includes
+
+`preprocess_source(..., include_resolver=...)` asks a resolver you supply to map each reachable include to source text and a deterministic identity. cpre then preprocesses that source recursively with shared macro state and inserts its canonical output after the masked directive line. Every mapping in `source_map` records which source it came from in `source_identity`. Cycles, nesting deeper than `max_include_depth` (default 200), and unresolvable headers return atomic incomplete results. `#pragma once`, `#import`, and detected include guards stop a source from being entered again.
+
+When an include is entered, canonical output lines no longer match the primary source's physical lines; `removed_lines` uses output line numbers. See [Include resolution](include-resolution.md) for the resolver interface, `SearchPathResolver`, provenance, diagnostics, and boundaries.
 
 ## Host-owned pragma semantics
 
@@ -249,7 +256,7 @@ See [Pragma handling](pragma-handling.md) for `Pragma`, origins, destringization
 
 The concrete preprocessor handles conditional directives, source-order macro definitions/undefinitions, standard supported `#line`, and the documented host extension points above.
 
-A null `#` directive is harmless and masked. Reachable directives outside the supported/host-accounted surface return structured incomplete diagnostics rather than being silently ignored. This includes active include directives (unless [`skip_includes=True`](#opt-in-include-skipping) is requested) and implementation-specific preprocessing behavior not covered by an explicit cpre contract.
+A null `#` directive is harmless and masked. Reachable directives outside the supported/host-accounted surface return structured incomplete diagnostics rather than being silently ignored. This includes active include directives (unless an [`include_resolver`](#caller-resolved-includes) or [`skip_includes=True`](#opt-in-include-skipping) is supplied) and implementation-specific preprocessing behavior not covered by an explicit cpre contract.
 
 The exact compatibility boundary is intentionally conservative: `complete=True` certifies the documented cpre operations for the provided deterministic inputs. It does **not** claim general GCC/Clang/MSVC/pcpp equivalence.
 
@@ -280,5 +287,5 @@ For coordinate-sensitive downstream analyzers:
 4. Check `result.complete` before consuming any transformed output.
 5. Use canonical `result.source` for parsing/analysis and `result.source_map` for physical provenance.
 6. Use `compact()` only for display/persistence when coordinate mapping is not required.
-7. Treat include availability and pragma meaning as host-owned policies through their explicit callbacks.
+7. Treat include availability, include resolution, and pragma meaning as host-owned policies through their explicit callbacks.
 8. Propagate incomplete diagnostics rather than converting them into a clean result.
