@@ -126,6 +126,21 @@ class PreprocessDiagnostic:
 
 
 @dataclass(frozen=True)
+class SkippedInclude:
+    """An active include directive masked by opt-in ``skip_includes`` preprocessing.
+
+    ``directive`` is ``"include"``, ``"include_next"``, or ``"import"``.
+    ``operand`` is the directive operand as written after physical line splicing
+    and comment removal; it is not macro expanded or resolved. The skipped header's
+    contents, including any macros or declarations it would supply, are unknown.
+    """
+
+    directive: str
+    operand: str
+    location: SourceLocation
+
+
+@dataclass(frozen=True)
 class PreprocessResult:
     """Atomic selection result; incomplete results never expose partial source."""
 
@@ -136,6 +151,7 @@ class PreprocessResult:
     macros: Mapping[str, MacroState] | None = None
     source_map: tuple[SourceMapping, ...] | None = None
     removed_lines: frozenset[int] | None = None
+    skipped_includes: tuple[SkippedInclude, ...] = ()
 
     @property
     def complete(self) -> bool:
@@ -319,6 +335,17 @@ def _unexpanded_predefined_macro(
     return None
 
 
+def _skipped_include(concrete: str, location: SourceLocation) -> SkippedInclude | None:
+    """Describe a spliced include-family directive, or return None for other directives."""
+    match = re.fullmatch(r"#\s*(include_next|include|import)\b(.*)", concrete, re.DOTALL)
+    if match is None:
+        return None
+    operand = match[2].strip()
+    if not operand:
+        raise ValueError(f"#{match[1]} expects a header name")
+    return SkippedInclude(match[1], operand, location)
+
+
 def compact(
     result: PreprocessResult,
     *,
@@ -363,6 +390,7 @@ def preprocess_source(
     configuration: MacroConfiguration | None = None,
     context: PreprocessingContext | None = None,
     options: AnalysisOptions | None = None,
+    skip_includes: bool = False,
 ) -> PreprocessResult:
     """Select conditional branches under an explicit concrete macro state.
 
@@ -387,12 +415,20 @@ def preprocess_source(
     output. Standard ``#line`` directives update only logical line/file state and are
     also masked. Includes, reachable unsupported nonconditional directives, and
     reachable predefined macro value uses without deterministic replacement semantics
-    return atomic incomplete results. Definedness-only checks remain ordinary
-    conditional reasoning. Successful results expose a detached, read-only final
+    return atomic incomplete results. With ``skip_includes=True``, active
+    ``#include``/``#include_next``/``#import`` directives are instead masked like other
+    handled directives and reported in ``skipped_includes``; the skipped headers are
+    never read, so no macros or declarations are attributed to them.
+    Definedness-only checks remain ordinary conditional reasoning. Successful results expose a detached, read-only final
     macro-state snapshot and immutable provenance for physical lines wholly removed
     by preprocessing. Malformed conditionals raise the same structured ParseError
     as analyze_source.
     """
+    if type(skip_includes) is not bool:
+        raise AnalysisError(
+            "skip_includes must be True or False",
+            code=ErrorCode.INVALID_CONFIGURATION,
+        )
     normalized = _normalize_assumptions(assumptions)
     if configuration is not None and normalized is not None:
         raise AnalysisError(
@@ -425,6 +461,7 @@ def preprocess_source(
     }
     retained = [True] * len(physical)
     diagnostics: list[PreprocessDiagnostic | AnalysisIncomplete] = []
+    skipped_includes: list[SkippedInclude] = []
 
     def blank(start: int, end: int) -> None:
         retained[start - 1 : end] = [False] * (end - start + 1)
@@ -594,7 +631,14 @@ def preprocess_source(
                         blank(current_line, ends[current_line])
                         continue
                     if kind not in {"define", "undef"}:
-                        raise ValueError("include processing is not supported")
+                        if not skip_includes:
+                            raise ValueError("include processing is not supported")
+                        skipped = _skipped_include(concrete, SourceLocation(current_line))
+                        if skipped is None or skipped.directive != kind:
+                            raise ValueError("ambiguous directive after physical line splicing")
+                        skipped_includes.append(skipped)
+                        blank(current_line, ends[current_line])
+                        continue
                     definition_match = re.fullmatch(
                         r"#\s*(define|undef)\b(.*)", concrete, re.DOTALL
                     )
@@ -628,6 +672,22 @@ def preprocess_source(
                 if re.fullmatch(r"#\s*", concrete, re.DOTALL):
                     blank(current_line, ends[current_line])
                     continue
+                if skip_includes:
+                    try:
+                        skipped = _skipped_include(concrete, SourceLocation(current_line))
+                    except ValueError as error:
+                        diagnostics.append(
+                            PreprocessDiagnostic(
+                                ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
+                                str(error),
+                                SourceLocation(current_line),
+                            )
+                        )
+                        break
+                    if skipped is not None:
+                        skipped_includes.append(skipped)
+                        blank(current_line, ends[current_line])
+                        continue
                 directive_match = re.match(r"#\s*([A-Za-z_]\w*)\b", concrete)
                 if directive_match is not None:
                     message = (
@@ -717,6 +777,7 @@ def preprocess_source(
         macros=environment.snapshot(),
         source_map=source_map,
         removed_lines=removed_lines,
+        skipped_includes=tuple(skipped_includes),
     )
 
 
@@ -724,6 +785,7 @@ __all__ = [
     "PreprocessingContext",
     "PreprocessDiagnostic",
     "PreprocessResult",
+    "SkippedInclude",
     "compact",
     "preprocess_source",
 ]

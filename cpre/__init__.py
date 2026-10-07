@@ -46,6 +46,7 @@ from .preprocessing import (
     PreprocessDiagnostic,
     PreprocessingContext,
     PreprocessResult,
+    SkippedInclude,
     compact,
 )
 from .proofs import (
@@ -148,6 +149,7 @@ __all__ = [
     "ProofResult",
     "SatisfiabilityResult",
     "SimplificationResult",
+    "SkippedInclude",
     "SourceLocation",
     "SourceMapping",
     "SourceRange",

@@ -247,6 +247,7 @@ def _environment_before_line(
     configuration: MacroConfiguration | None,
     context: PreprocessingContext | None,
     options: AnalysisOptions | None,
+    skip_includes: bool = False,
 ) -> MacroEnvironment | None:
     physical = source.splitlines(keepends=True)
     prefix = "".join(physical[: line - 1])
@@ -260,6 +261,7 @@ def _environment_before_line(
         configuration=configuration,
         context=context,
         options=options,
+        skip_includes=skip_includes,
     )
     if not result.complete or result.macros is None:
         return None
@@ -347,6 +349,7 @@ def preprocess_source(
     context: PreprocessingContext | None = None,
     include_query: IncludeQueryProvider | None = None,
     options: AnalysisOptions | None = None,
+    skip_includes: bool = False,
 ) -> PreprocessResult:
     """Concrete preprocessing with optional host-assisted ``__has_include`` support.
 
@@ -372,6 +375,7 @@ def preprocess_source(
             configuration=configuration,
             context=context,
             options=options,
+            skip_includes=skip_includes,
         )
 
     resolved: dict[int, bool] = {}
@@ -384,6 +388,7 @@ def preprocess_source(
             configuration=configuration,
             context=context,
             options=options,
+            skip_includes=skip_includes,
         )
         if result.complete:
             return result
@@ -436,6 +441,7 @@ def preprocess_source(
             configuration=configuration,
             context=context,
             options=options,
+            skip_includes=skip_includes,
         )
         if environment is None:
             return result

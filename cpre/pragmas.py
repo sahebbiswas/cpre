@@ -331,6 +331,7 @@ def preprocess_source(
     include_query: IncludeQueryProvider | None = None,
     pragma_handler: PragmaHandler | None = None,
     options: AnalysisOptions | None = None,
+    skip_includes: bool = False,
 ) -> PreprocessResult:
     """Concrete preprocessing with caller-owned pragma semantics.
 
@@ -357,6 +358,7 @@ def preprocess_source(
         context=context,
         include_query=include_query,
         options=options,
+        skip_includes=skip_includes,
     )
     if not result.complete or result.source is None or result.source_map is None:
         return result
