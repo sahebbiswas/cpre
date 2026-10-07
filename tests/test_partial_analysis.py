@@ -246,6 +246,45 @@ def test_contradictory_context_in_an_over_budget_component_still_kills_every_gro
     assert outcome.group_components[1] in outcome.failures
 
 
+def test_bdd_node_limit_while_building_the_context_falls_back_to_clause_check(monkeypatch):
+    # The joint context (X_i || Y_i for every i) needs 8 nodes in the component's
+    # BDD, but each atom-disjoint clause fits in its own small manager.
+    import cpre.analysis as engine
+
+    source = "#if X0 && X1 && X2 && X3\n#endif\n#if Z\n#if Z\n#endif\n#endif\n"
+    context = conjunction(
+        *(disjunction(Variable(f"X{index}"), Variable(f"Y{index}")) for index in range(4))
+    )
+    calls = []
+    original = engine._clauses_satisfiable
+
+    def spy(clauses, limits, budget):
+        result = original(clauses, limits, budget)
+        calls.append((len(clauses), result))
+        return result
+
+    monkeypatch.setattr(engine, "_clauses_satisfiable", spy)
+
+    outcome = analyze_tree_partial(
+        parse_source(source, distinguish_defined=True),
+        assumptions=context,
+        limits=ResourceLimits(max_bdd_nodes=7),
+    )
+
+    # Four assumption clauses plus ``!Xi || defined(Xi)`` macro semantics for each Xi.
+    assert calls == [(8, True)]
+    failed = outcome.group_components[0]
+    assert set(outcome.failures) == {failed}
+    error = outcome.failures[failed]
+    assert (error.resource, error.limit, error.observed) == ("bdd_nodes", 7, 8)
+    assert outcome.group_components[1] != failed
+    assert all(branch.analysis is None for branch in _branches(outcome.tree.groups[:1]))
+    assert [branch.analysis.status for branch in _branches(outcome.tree.groups[1:])] == [
+        "reachable",
+        "redundant",
+    ]
+
+
 # --- reporting surfaces ---------------------------------------------------------------
 
 
