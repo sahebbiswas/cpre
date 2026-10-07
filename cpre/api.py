@@ -41,7 +41,12 @@ class FixConfidence(str, Enum):
 
 @dataclass(frozen=True)
 class AnalysisOptions:
-    """Deterministic resource limits for one source analysis."""
+    """Deterministic resource limits for one source analysis.
+
+    ``max_atoms`` and ``max_bdd_nodes`` apply to each independent component of
+    conditional groups (groups that share no Boolean atom are analyzed
+    separately); ``max_work`` is a single cap shared by all components.
+    """
 
     max_atoms: int = 64
     max_bdd_nodes: int = 100_000
@@ -487,7 +492,8 @@ def analyze_source(
     If exact Boolean reasoning reaches a configured limit, the returned result
     is marked incomplete and contains no findings. Callers can therefore
     distinguish a clean analysis from one intentionally curtailed without ever
-    consuming a partial proof as a diagnostic.
+    consuming a partial proof as a diagnostic. Limits are applied per independent
+    component as described on :class:`AnalysisOptions`.
     """
 
     normalized = _normalize_assumptions(assumptions)

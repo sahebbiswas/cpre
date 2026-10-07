@@ -138,7 +138,7 @@ The CLI reads source files as UTF-8. Unreadable files and non-UTF-8 input theref
 
 Malformed conditional directives and other supported `CpreError` failures are rendered on stderr with source location information when available.
 
-ROBDD/resource-limit exhaustion and other `AnalysisResult.complete == False` cases are also treated as incomplete processing: diagnostics are written to stderr and the process exits with status `2`. cpre never treats an incomplete source as a clean source merely because it has no findings.
+ROBDD/resource-limit exhaustion (the atom limit applies per independent conditional component, the work limit to the whole source; see [Independent components and budget semantics](api.md#independent-components-and-budget-semantics)) and other `AnalysisResult.complete == False` cases are also treated as incomplete processing: diagnostics are written to stderr and the process exits with status `2`. cpre never treats an incomplete source as a clean source merely because it has no findings.
 
 When `--sarif` is active, source/tool errors are also represented as SARIF tool notifications where applicable, while the process still exits with status `2`.
 
