@@ -14,7 +14,9 @@ from .api import (
     Finding,
     FindingKind,
     FixConfidence,
+    IncompleteComponent,
     IncompleteConfigurationError,
+    IncompleteGroup,
     MacroAssumptions,
     ParseError,
     SourceLocation,
@@ -95,7 +97,7 @@ from .symbolic import (
     simplify,
 )
 
-__version__ = "0.16.0"
+__version__ = "0.17.0"
 
 __all__ = [
     "AnalysisError",
@@ -123,7 +125,9 @@ __all__ = [
     "Finding",
     "FindingKind",
     "FixConfidence",
+    "IncompleteComponent",
     "IncompleteConfigurationError",
+    "IncompleteGroup",
     "MacroAnalysisResult",
     "MacroAssumptions",
     "MacroConfiguration",

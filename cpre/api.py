@@ -8,6 +8,9 @@ from dataclasses import dataclass
 from enum import Enum
 
 from . import cpre as _engine
+from .analysis import PartialAnalysis as _PartialAnalysis
+from .analysis import _clear_analysis as _engine_clear_analysis
+from .analysis import analyze_tree_partial as _analyze_tree_partial
 from .errors import (
     AnalysisError,
     CpreError,
@@ -71,7 +74,13 @@ class AnalysisOptions:
 
 @dataclass(frozen=True)
 class AnalysisIncomplete:
-    """Structured diagnostic describing intentionally curtailed exact analysis."""
+    """Structured diagnostic describing intentionally curtailed exact analysis.
+
+    ``component`` is ``None`` when the limit curtailed the whole analysis. For
+    :func:`analyze_source` it is otherwise the index of the affected entry in
+    :attr:`AnalysisResult.incomplete_components`; the rest of the source was
+    still analyzed.
+    """
 
     code: ErrorCode
     resource: str
@@ -79,6 +88,48 @@ class AnalysisIncomplete:
     observed: int
     message: str
     location: SourceLocation | None = None
+    component: int | None = None
+
+
+@dataclass(frozen=True)
+class IncompleteGroup:
+    """A top-level conditional group (``#if`` ... ``#endif``) that was not analyzed."""
+
+    location: SourceLocation
+    end_line: int | None
+    directive: str
+    condition: str | None
+
+
+@dataclass(frozen=True)
+class IncompleteComponent:
+    """Independent conditional groups whose exact analysis hit a resource limit.
+
+    ``groups`` lists the top-level conditional groups of the component in source
+    order; nested conditionals belong to their top-level group. ``atoms`` lists
+    the component's Boolean atoms in first-occurrence order. ``diagnostics`` holds
+    the component-local limit diagnostics, which also appear in
+    :attr:`AnalysisResult.incomplete`. No finding is reported for any branch of
+    these groups, and their branches in :attr:`AnalysisResult.tree` carry no
+    analysis.
+    """
+
+    index: int
+    groups: tuple[IncompleteGroup, ...]
+    atoms: tuple[str, ...]
+    diagnostics: tuple[AnalysisIncomplete, ...]
+
+    @property
+    def resource(self) -> str:
+        """The first resource limit the component exceeded."""
+        return self.diagnostics[0].resource
+
+    def contains_line(self, line: int) -> bool:
+        """Whether ``line`` lies inside one of the component's groups."""
+        return any(
+            group.location.line <= line <= (group.end_line or group.location.line)
+            for group in self.groups
+        )
 
 
 @dataclass(frozen=True, init=False)
@@ -213,16 +264,30 @@ class Finding:
 
 @dataclass(frozen=True)
 class AnalysisResult:
-    """Structured result returned by :func:`analyze_source`."""
+    """Structured result returned by :func:`analyze_source`.
+
+    ``complete`` is true only when every conditional was analyzed. An incomplete
+    result is either *partial* (every diagnostic in ``incomplete`` names an entry
+    of ``incomplete_components``; ``findings`` are proven for all other groups)
+    or curtailed as a whole (``findings`` is empty).
+    """
 
     findings: tuple[Finding, ...]
     tree: _engine.ConditionalTree
     filename: str | None = None
     incomplete: tuple[AnalysisIncomplete, ...] = ()
+    incomplete_components: tuple[IncompleteComponent, ...] = ()
 
     @property
     def complete(self) -> bool:
         return not self.incomplete
+
+    @property
+    def partial(self) -> bool:
+        """Incomplete, but only in ``incomplete_components``; other groups were analyzed."""
+        return bool(self.incomplete) and all(
+            diagnostic.component is not None for diagnostic in self.incomplete
+        )
 
 
 def _branches(groups: list[_engine.ConditionalGroup]) -> Iterator[_engine.ConditionalBranch]:
@@ -461,6 +526,20 @@ def _assumption_expression(assumptions: MacroAssumptions) -> _engine.Expression:
     return conjunction(*terms) if terms else TRUE
 
 
+def _incomplete_diagnostic(
+    error: _AnalysisLimitExceeded, component: int | None = None
+) -> AnalysisIncomplete:
+    return AnalysisIncomplete(
+        code=ErrorCode.ANALYSIS_LIMIT_EXCEEDED,
+        resource=error.resource,
+        limit=error.limit,
+        observed=error.observed,
+        message=str(error),
+        location=SourceLocation(error.line) if error.line is not None else None,
+        component=component,
+    )
+
+
 def _incomplete_result(
     source: str,
     *,
@@ -469,15 +548,44 @@ def _incomplete_result(
     error: _AnalysisLimitExceeded,
 ) -> AnalysisResult:
     tree = _engine.parse_source(source, distinguish_defined=distinguish_defined)
-    diagnostic = AnalysisIncomplete(
-        code=ErrorCode.ANALYSIS_LIMIT_EXCEEDED,
-        resource=error.resource,
-        limit=error.limit,
-        observed=error.observed,
-        message=str(error),
-        location=SourceLocation(error.line) if error.line is not None else None,
+    return AnalysisResult(
+        findings=(),
+        tree=tree,
+        filename=filename,
+        incomplete=(_incomplete_diagnostic(error),),
     )
-    return AnalysisResult(findings=(), tree=tree, filename=filename, incomplete=(diagnostic,))
+
+
+def _incomplete_group(group: _engine.ConditionalGroup) -> IncompleteGroup:
+    opening = group.branches[0]
+    return IncompleteGroup(
+        location=SourceLocation(group.line),
+        end_line=group.end_line,
+        directive=opening.directive,
+        condition=opening.expression_text,
+    )
+
+
+def _group_findings(
+    group: _engine.ConditionalGroup,
+    baseline: _engine.ConditionalGroup | None,
+    ranges: dict[tuple[int, str], SourceRange],
+    limits: _ResourceLimits,
+    budget: _AnalysisBudget,
+) -> tuple[Finding, ...]:
+    branches = tuple(_branches([group]))
+    baseline_branches = tuple(_branches([baseline])) if baseline is not None else ()
+    return tuple(
+        finding
+        for index, branch in enumerate(branches)
+        for finding in _finding_for_branch(
+            branch,
+            ranges,
+            limits,
+            budget,
+            baseline_branches[index] if index < len(baseline_branches) else None,
+        )
+    )
 
 
 def analyze_source(
@@ -489,11 +597,13 @@ def analyze_source(
 ) -> AnalysisResult:
     """Analyze source with optional assumptions and deterministic resource limits.
 
-    If exact Boolean reasoning reaches a configured limit, the returned result
-    is marked incomplete and contains no findings. Callers can therefore
-    distinguish a clean analysis from one intentionally curtailed without ever
-    consuming a partial proof as a diagnostic. Limits are applied per independent
-    component as described on :class:`AnalysisOptions`.
+    Limits are applied per independent component as described on
+    :class:`AnalysisOptions`. When a component exceeds ``max_atoms`` or
+    ``max_bdd_nodes``, the result is incomplete and *partial*: that component is
+    described in :attr:`AnalysisResult.incomplete_components` and contributes no
+    findings, while findings for every other component are still reported. When
+    the shared ``max_work`` budget is exhausted, the whole result is incomplete
+    and contains no findings. A partial proof is never reported as a finding.
     """
 
     normalized = _normalize_assumptions(assumptions)
@@ -507,33 +617,45 @@ def analyze_source(
     budget = _AnalysisBudget(limits.max_work)
     assumption_expression = _assumption_expression(normalized) if normalized is not None else None
     try:
-        tree = _engine.analyze_source(
-            source,
+        main = _analyze_tree_partial(
+            _engine.parse_source(source, distinguish_defined=normalized is not None),
             assumptions=assumption_expression,
             limits=limits,
             budget=budget,
         )
-        baseline_tree = (
-            _engine.analyze_source(source, limits=limits, budget=budget)
+        baseline: _PartialAnalysis | None = (
+            _analyze_tree_partial(_engine.parse_source(source), limits=limits, budget=budget)
             if normalized is not None
             else None
         )
+        tree = main.tree
+        failures = dict(main.failures)
+        if baseline is not None:
+            # A finding's ``depends_on_assumptions`` needs the baseline proof too.
+            for index, component in enumerate(baseline.group_components):
+                if component in baseline.failures and index < len(main.group_components):
+                    failures.setdefault(main.group_components[index], baseline.failures[component])
         ranges = _condition_ranges(source)
-        branches = tuple(_branches(tree.groups))
-        baseline_branches = (
-            tuple(_branches(baseline_tree.groups)) if baseline_tree is not None else ()
-        )
-        findings = tuple(
-            finding
-            for index, branch in enumerate(branches)
-            for finding in _finding_for_branch(
-                branch,
-                ranges,
-                limits,
-                budget,
-                baseline_branches[index] if index < len(baseline_branches) else None,
+        group_findings: list[tuple[Finding, ...]] = []
+        for index, group in enumerate(tree.groups):
+            component = main.group_components[index]
+            if component in failures:
+                group_findings.append(())
+                continue
+            baseline_group = (
+                baseline.tree.groups[index]
+                if baseline is not None and index < len(baseline.tree.groups)
+                else None
             )
-        )
+            try:
+                group_findings.append(
+                    _group_findings(group, baseline_group, ranges, limits, budget)
+                )
+            except _AnalysisLimitExceeded as error:
+                if error.resource == "work":
+                    raise
+                failures[component] = error
+                group_findings.append(())
     except _AnalysisLimitExceeded as error:
         return _incomplete_result(
             source,
@@ -544,7 +666,39 @@ def analyze_source(
     except _engine.ConditionError as error:
         raise _translate_parse_error(error, filename) from error
 
-    return AnalysisResult(findings=findings, tree=tree, filename=filename)
+    findings = tuple(
+        finding
+        for index, found in enumerate(group_findings)
+        if main.group_components[index] not in failures
+        for finding in found
+    )
+    failed_groups: dict[int, list[_engine.ConditionalGroup]] = {}
+    for index, group in enumerate(tree.groups):
+        component = main.group_components[index]
+        if component in failures:
+            failed_groups.setdefault(component, []).append(group)
+            _engine_clear_analysis([group])
+    components: list[IncompleteComponent] = []
+    for position, (component, groups) in enumerate(failed_groups.items()):
+        diagnostic = _incomplete_diagnostic(failures[component], position)
+        components.append(
+            IncompleteComponent(
+                index=position,
+                groups=tuple(_incomplete_group(group) for group in groups),
+                atoms=tuple(
+                    _engine.format_expression(atom)
+                    for atom in main.component_atoms.get(component, ())
+                ),
+                diagnostics=(diagnostic,),
+            )
+        )
+    return AnalysisResult(
+        findings=findings,
+        tree=tree,
+        filename=filename,
+        incomplete=tuple(diagnostic for item in components for diagnostic in item.diagnostics),
+        incomplete_components=tuple(components),
+    )
 
 
 ConditionalTree = _engine.ConditionalTree
@@ -564,7 +718,9 @@ __all__ = [
     "Finding",
     "FindingKind",
     "FixConfidence",
+    "IncompleteComponent",
     "IncompleteConfigurationError",
+    "IncompleteGroup",
     "MacroAssumptions",
     "ParseError",
     "SourceLocation",

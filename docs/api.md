@@ -220,7 +220,7 @@ result = cpre.analyze_source(
 )
 ```
 
-If a limit is exceeded, `analyze_source()` returns an incomplete `AnalysisResult` rather than raising solely because the configured proof budget was exhausted or returning partial findings.
+If a limit is exceeded, `analyze_source()` returns an incomplete `AnalysisResult` rather than raising solely because the configured proof budget was exhausted. Findings are never derived from a partial proof; when only some independent components hit a limit, the result is *partial* (see [Partial results and incomplete components](#partial-results-and-incomplete-components)).
 
 ```python
 if not result.complete:
@@ -243,7 +243,7 @@ Downstream tools should preserve this distinction. Converting incomplete analysi
 - **What is coupled.** A top-level conditional group (`#if`/`#ifdef`/`#ifndef` with its `#elif` and `#else` branches) and every conditional nested inside it are analyzed together, because branch reachability depends on earlier branches and on enclosing branches. Two groups belong to the same component when they share a Boolean atom. When macro assumptions are supplied, `defined(X)` and the bare value `X` are distinct atoms that are coupled by C semantics, so groups that mention either form of the same macro are in one component. Assumed macros that no condition mentions are independent of every component.
 - **Per component.** `max_atoms` and `max_bdd_nodes` apply to each component separately. Many unrelated conditionals no longer compete for one file-wide atom budget: a file with hundreds of independent `#ifdef FEATURE_n` blocks completes under the default `max_atoms=64`, while any single connected component with more than `max_atoms` atoms is still incomplete.
 - **Global.** `max_work` is one cap shared by every component (and by the extra baseline pass performed when assumptions are supplied). Partitioning never gives each component a fresh work budget, and it never costs more work than analyzing the same groups one after another. Because creating a BDD node always consumes work, the total number of nodes across components is also bounded by `max_work`.
-- **Diagnostics.** When a component exceeds `max_atoms`, `AnalysisIncomplete.observed` is that component's atom count, not the file total, and `location` stays `None`. If several components are too large, the one whose first atom appears earliest in the source is reported. `bdd_nodes` and `work` diagnostics are located at the branch being analyzed, as before.
+- **Diagnostics.** When a component exceeds `max_atoms`, `AnalysisIncomplete.observed` is that component's atom count, not the file total, and `location` stays `None`. Every too-large component is reported, in source order of its first group, so `result.incomplete[0]` is the one whose first atom appears earliest in the source. `bdd_nodes` and `work` diagnostics are located at the branch being analyzed, as before.
 - **Unchanged results.** Within each component, atoms keep the order in which they first appear in the file, so findings, simplifications, and edits for a source that fit the previous file-wide limits are identical. Sources that were incomplete only because unrelated conditionals (or unused assumptions) exhausted the atom budget now complete.
 
 ```python
@@ -261,6 +261,55 @@ cpre.analyze_source(
 ```
 
 Partitioning applies to `analyze_source()`. The exact Boolean queries and macro simplification reason about a single expression at a time and apply `max_atoms` to that whole expression.
+
+### Partial results and incomplete components
+
+When one component exceeds `max_atoms` or `max_bdd_nodes`, the other components are still analyzed. The result is then **partial**:
+
+| Field | Complete | Partial | Curtailed as a whole |
+| --- | --- | --- | --- |
+| `complete` | `True` | `False` | `False` |
+| `partial` | `False` | `True` | `False` |
+| `findings` | all findings | findings of the components that completed | `()` |
+| `incomplete` | `()` | one `AnalysisIncomplete` per incomplete component, each with `component` set | one `AnalysisIncomplete` with `component=None` |
+| `incomplete_components` | `()` | one `IncompleteComponent` per incomplete component | `()` |
+
+The whole analysis is curtailed (no findings) when the shared `max_work` budget is exhausted, or when a limit is hit while deciding whether the supplied assumptions are satisfiable at all, because every component's results depend on that.
+
+Each `IncompleteComponent` describes one set of coupled conditional groups:
+
+- `index`: its position in `incomplete_components`; `AnalysisIncomplete.component` refers to it.
+- `groups`: the top-level conditional groups (`IncompleteGroup`) in source order, each with the opening directive's `location`, the matching `#endif`'s `end_line`, the `directive` (`if`, `ifdef`, `ifndef`), and its `condition` text. Nested conditionals belong to their top-level group.
+- `atoms`: the component's Boolean atoms (`"A"`, `"defined(A)"`, opaque predicate text) in first-occurrence order.
+- `diagnostics`: the component-local `AnalysisIncomplete` diagnostics (the limit that was exceeded and its `resource`, `limit`, `observed`, `location`). They also appear in `result.incomplete`. `resource` is a shortcut for the first diagnostic's resource.
+- `contains_line(line)`: whether a source line lies inside one of the component's groups.
+
+No finding is reported for any line inside an incomplete component, and the branches of those groups in `result.tree` carry `analysis is None`. In particular, the absence of a dead-branch finding there means "not analyzed", not "reachable".
+
+```python
+source = (
+    "#if A\n#if A\nx;\n#endif\n#endif\n"   # lines 1-5: redundant nested #if A
+    "#if B && C && D\n#endif\n"              # lines 6-7: three atoms
+)
+result = cpre.analyze_source(source, options=cpre.AnalysisOptions(max_atoms=2))
+
+result.complete                                   # False
+result.partial                                    # True
+[f.location.line for f in result.findings]        # [2]
+component = result.incomplete_components[0]
+[g.location.line for g in component.groups]       # [6]
+component.atoms                                   # ('B', 'C', 'D')
+component.resource                                # 'atoms'
+result.incomplete[0].component                    # 0
+```
+
+Interpret results as follows:
+
+1. `result.complete`: every finding is proven and every conditional was analyzed. An empty `findings` means the file is clean.
+2. `result.partial`: every finding is proven and can be acted on, but the file is not clean. Report each `incomplete_components` entry as unanalyzed (for example, as a tool notification), and do not treat its lines as having no findings.
+3. Otherwise the analysis was curtailed as a whole, and `findings` is empty.
+
+`complete` keeps its meaning: it is `True` exactly when `incomplete` is empty, so code written before partial results existed still treats a partial result as incomplete.
 
 ## Structured errors
 
@@ -301,6 +350,13 @@ def analyze_preprocessor_conditions(path: str, source: str):
             "message": error.message,
         }
 
+    if result.partial:
+        return {
+            "status": "partial",
+            "findings": result.findings,
+            "unanalyzed": result.incomplete_components,
+        }
+
     if not result.complete:
         return {
             "status": "incomplete",
@@ -318,7 +374,7 @@ Recommended integration rules:
 1. Let the host own file reading, build-system discovery, and policy.
 2. Call `cpre.analyze_source()` once per source/configuration being analyzed.
 3. Catch `CpreError` for supported cpre failures.
-4. Check `result.complete` before consuming findings.
+4. Check `result.complete` before treating a source as clean; on a `result.partial` result, consume the findings but also report the `incomplete_components`.
 5. Map `FindingKind` through structured values, not messages.
 6. Preserve `depends_on_assumptions` when configuration-specific reasoning is enabled.
 7. Apply only explicit `SuggestedEdit` objects according to host policy.

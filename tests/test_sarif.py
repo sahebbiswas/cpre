@@ -128,7 +128,14 @@ def test_sarif_incomplete_analysis_is_tool_notification_not_finding():
         "resource": "atoms",
         "limit": 1,
         "observed": 2,
+        "scope": "component",
+        "component": {
+            "index": 0,
+            "groups": [{"startLine": 1, "endLine": 2}],
+            "atoms": ["A", "B"],
+        },
     }
+    assert notification["locations"][0]["physicalLocation"]["region"] == {"startLine": 1}
 
 
 def test_cli_sarif_emits_single_document_for_batch(tmp_path, capsys):
