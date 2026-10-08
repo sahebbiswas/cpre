@@ -134,7 +134,7 @@ Concrete preprocessing supports nested standard conditional groups including:
 
 Boolean assumptions may be supplied as a mapping or `MacroAssumptions`. Unmentioned names remain open-world/unknown unless the caller instead selects a concrete `MacroConfiguration` policy.
 
-If a reachable branch condition cannot be resolved after the supported bounded Boolean/numeric/macro-expansion reasoning, the result is incomplete rather than guessed.
+If a reachable branch condition cannot be resolved after the supported bounded Boolean/numeric/macro-expansion reasoning, the result is incomplete rather than guessed. The `UNRESOLVED_CONDITION` diagnostic carries the condition text in `condition` and the macros that keep it undetermined in `unresolved`; see [Unknown macro dependencies](api.md#unknown-macro-dependencies).
 
 For the concrete integer-expression grammar and deterministic implementation-defined boundaries, see [Concrete conditional expressions](conditional-expressions.md).
 

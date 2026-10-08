@@ -97,8 +97,9 @@ from .symbolic import (
     ordered_atoms,
     simplify,
 )
+from .unknown_macros import MacroUse, UnknownMacro, unknown_macros, unknown_macros_in_source
 
-__version__ = "0.18.0"
+__version__ = "0.19.0"
 
 __all__ = [
     "AnalysisError",
@@ -136,6 +137,7 @@ __all__ = [
     "MacroEnvironment",
     "MacroSimplificationResult",
     "MacroState",
+    "MacroUse",
     "Negation",
     "ParseError",
     "Predicate",
@@ -159,6 +161,7 @@ __all__ = [
     "StructureDiagnosticCode",
     "SuggestedEdit",
     "TRUE",
+    "UnknownMacro",
     "UnknownNamePolicy",
     "Variable",
     "WitnessAssignment",
@@ -187,5 +190,7 @@ __all__ = [
     "satisfiable",
     "simplify",
     "simplify_macros",
+    "unknown_macros",
+    "unknown_macros_in_source",
     "witness_assignment",
 ]

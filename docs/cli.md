@@ -217,6 +217,8 @@ cpre preprocess source.c --standard-macro __STDC__=1
 cpre preprocess source.c --skip-includes
 cpre preprocess src/main.c -I include --iquote src
 cpre preprocess --unknown-names undefined --config-from flags.h target.c
+cpre preprocess --list-unknown-macros target.c
+cpre preprocess --json source.c
 ```
 
 The command is deliberately explicit and does not infer compiler or build state from the host. `-D NAME` creates an empty object-like macro, while `-D NAME=VALUE` supplies explicit replacement text. `-U NAME` records an explicit undefined macro. `--unknown-names undefined` opts into closed-world handling for names absent from the supplied configuration; the default is `open`.
@@ -255,6 +257,62 @@ Precedence is deterministic:
 3. Explicit `-D` and `-U` options are then re-applied, so they always win over any seed `#define` or `#undef` of the same name.
 
 A seed that cannot be read, is malformed, contains an active `#include`, or has a condition that is not determined fails before the target is read, with diagnostics such as `flags.h: invalid --config-from seed: line 1: ...` on stderr and exit status `2`. Seeds never read headers from the filesystem; `-I` and `--iquote` apply only to the target. See [Construction from source](concrete-configuration.md#construction-from-source).
+
+### Unresolved conditions and unknown macros
+
+When a reachable condition depends on a macro the configuration does not fix, the diagnostic names each unresolved macro and how to supply it:
+
+```text
+$ cpre preprocess target.c
+target.c: line 1: condition is not determined by the current macro state: #if __GNUC__ >= 4 && defined(FEAT) (unresolved: FEAT (definedness), __GNUC__ (value))
+target.c: hint: supply -D FEAT or -U FEAT
+target.c: hint: supply -D __GNUC__=<value>, or -U __GNUC__ to evaluate it as 0
+```
+
+A name used only as a definedness test is never given a value suggestion. Names already fixed by `-D`, `-U`, `--config-from`, or `--unknown-names undefined` are not listed.
+
+`--json` writes one JSON document to stdout instead of the transformed source, with the same exit status:
+
+```json
+{
+  "file": "target.c",
+  "complete": false,
+  "source": null,
+  "diagnostics": [
+    {
+      "code": "unresolved_condition",
+      "message": "condition is not determined by the current macro state: ...",
+      "line": 1,
+      "source_identity": null,
+      "condition": "__GNUC__ >= 4 && defined(FEAT)",
+      "unresolved": [
+        {"name": "FEAT", "uses": ["definedness"], "lines": [1], "suggestions": ["-D FEAT", "-U FEAT"]},
+        {"name": "__GNUC__", "uses": ["value"], "lines": [1], "suggestions": ["-D __GNUC__=<value>", "-U __GNUC__"]}
+      ]
+    }
+  ],
+  "skipped_includes": []
+}
+```
+
+On success `complete` is `true`, `source` holds the output (compacted with `--compact`), and `diagnostics` is empty. Diagnostics that are not unresolved conditions have `condition: null` and an empty `unresolved` list; resource-limit diagnostics use the `resource`/`limit`/`observed` fields of the analysis JSON.
+
+Preprocessing stops at the first undetermined condition. To see every name the source's conditionals need at once, use `--list-unknown-macros`. It does not preprocess; it prints one tab-separated `NAME`, `USES`, `LINES` record per line, sorted by name:
+
+```text
+$ cpre preprocess --list-unknown-macros target.c
+FEAT	definedness	6
+__GNUC__	value	4,12
+```
+
+`USES` is `definedness`, `value`, or `definedness,value`; `LINES` lists the dependent directive lines. Combine with `--json` for `{"file": ..., "unknown_macros": [{"name", "uses", "lines", "suggestions"}, ...]}`. The listing honors `-D`, `-U`, `--config-from`, `--standard-macro`, and `--unknown-names`, so it shows only what is still missing. Every conditional is inspected, reachable or not, so the list may include names a particular configuration never reaches; supplying them is harmless. Headers are not read. Output is deterministic, so it can build a seed for a later run:
+
+```bash
+cpre preprocess --list-unknown-macros target.c |
+  awk -F'\t' '{ print ($2 ~ /value/ ? "#define " $1 " 0" : "#undef " $1) }' > seed.h
+# edit seed.h, then:
+cpre preprocess --config-from seed.h target.c
+```
 
 `--skip-includes` masks reachable `#include`, `#include_next`, and `#import` directives instead of failing, and reports each one on stderr as `PATH: line N: skipped #include <header.h>` while the transformed source goes to stdout. Skipped headers are never read, so macros and declarations they would supply are not assumed; a condition that depends on them still fails as incomplete. See [Opt-in include skipping](preprocessing.md#opt-in-include-skipping) for the full semantic limitation.
 

@@ -55,6 +55,7 @@ def test_top_level_public_api_exposes_supported_symbols_only():
         "MacroEnvironment",
         "MacroSimplificationResult",
         "MacroState",
+        "MacroUse",
         "Negation",
         "ParseError",
         "Predicate",
@@ -78,6 +79,7 @@ def test_top_level_public_api_exposes_supported_symbols_only():
         "StructureDiagnosticCode",
         "SuggestedEdit",
         "TRUE",
+        "UnknownMacro",
         "UnknownNamePolicy",
         "Variable",
         "WitnessAssignment",
@@ -106,6 +108,8 @@ def test_top_level_public_api_exposes_supported_symbols_only():
         "satisfiable",
         "simplify",
         "simplify_macros",
+        "unknown_macros",
+        "unknown_macros_in_source",
         "witness_assignment",
     ]
 
