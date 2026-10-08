@@ -578,7 +578,8 @@ def _build_preprocess_parser(prog: str) -> argparse.ArgumentParser:
         help=f"maximum nesting depth of resolved includes (default: {DEFAULT_MAX_INCLUDE_DEPTH})",
     )
     parser.epilog = (
-        "example: cpre preprocess --config-from flags.h -D LEVEL=2 target.c "
+        "example: cpre preprocess --unknown-names undefined --config-from flags.h "
+        "-D LEVEL=2 target.c "
         "(flags.h macros seed the configuration; LEVEL=2 overrides any seed value)"
     )
     return parser

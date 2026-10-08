@@ -170,4 +170,6 @@ def test_config_from_help_includes_example(capsys):
         assert exit_.code == 0
     out = capsys.readouterr().out
     assert "--config-from PATH" in out
-    assert "cpre preprocess --config-from flags.h" in out
+    assert "cpre preprocess --unknown-names undefined --config-from flags.h" in " ".join(
+        out.split()
+    )

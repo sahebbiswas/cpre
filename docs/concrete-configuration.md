@@ -107,7 +107,7 @@ config = cpre.MacroConfiguration.from_source(
 - `exclude=` is applied after classification, after `base=` layering, and after automatic detection, removing matching names from every category (`presence`, `integers`, `definitions`, `undefined`), whether they originated from the seed, from `base`, or from both.
 - `exclude=` does not change seed evaluation. The seed's own `#define` directives remain visible while the seed is preprocessed, so guarded bodies and later conditions on that derivation pass are evaluated normally.
 
-From the command line, `cpre preprocess --config-from flags.h target.c` applies the same derivation; see [Concrete preprocessing](cli.md#concrete-preprocessing) for how it combines with `-D`/`-U`.
+From the command line, `cpre preprocess --unknown-names undefined --config-from flags.h target.c` applies the same derivation; see [Concrete preprocessing](cli.md#concrete-preprocessing) for how it combines with `-D`/`-U`.
 
 Note that `MacroConfiguration.from_source()` is not GCC `-imacros`. `-imacros` also pulls nested header includes from the filesystem, whereas `from_source()` processes self-contained macro definitions and refuses active `#include` directives.
 

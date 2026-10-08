@@ -216,7 +216,7 @@ cpre preprocess source.c -D LEVEL=2 -U DISABLED
 cpre preprocess source.c --standard-macro __STDC__=1
 cpre preprocess source.c --skip-includes
 cpre preprocess src/main.c -I include --iquote src
-cpre preprocess --config-from flags.h target.c
+cpre preprocess --unknown-names undefined --config-from flags.h target.c
 ```
 
 The command is deliberately explicit and does not infer compiler or build state from the host. `-D NAME` creates an empty object-like macro, while `-D NAME=VALUE` supplies explicit replacement text. `-U NAME` records an explicit undefined macro. `--unknown-names undefined` opts into closed-world handling for names absent from the supplied configuration; the default is `open`.
