@@ -28,6 +28,7 @@ from .expressions import (
     format_expression,
     parse_expression,
 )
+from .free_macros import FreeMacro, MacroUse, free_macros_in_source
 from .includes import DEFAULT_MAX_INCLUDE_DEPTH, SearchPathResolver
 from .macro_analysis import (
     MacroAnalysisResult,
@@ -125,6 +126,38 @@ def _incomplete_to_dict(diagnostic: AnalysisIncomplete) -> dict[str, object]:
         "line": diagnostic.location.line if diagnostic.location else None,
         "component": diagnostic.component,
     }
+
+
+def _free_macro_to_dict(item: FreeMacro) -> dict[str, object]:
+    return {
+        "name": item.name,
+        "uses": [use.value for use in item.uses],
+        "lines": [location.line for location in item.locations],
+        "suggestions": list(item.suggestions),
+    }
+
+
+def _preprocess_diagnostic_to_dict(
+    diagnostic: PreprocessDiagnostic | AnalysisIncomplete,
+) -> dict[str, object]:
+    if isinstance(diagnostic, AnalysisIncomplete):
+        data = _incomplete_to_dict(diagnostic)
+        data["source_identity"] = diagnostic.source_identity
+        return data
+    return {
+        "code": diagnostic.code.value,
+        "message": diagnostic.message,
+        "line": diagnostic.location.line,
+        "source_identity": diagnostic.source_identity,
+        "condition": diagnostic.condition,
+        "unresolved": [_free_macro_to_dict(item) for item in diagnostic.unresolved],
+    }
+
+
+def _free_macro_hint(item: FreeMacro) -> str:
+    if MacroUse.VALUE in item.uses:
+        return f"supply -D {item.name}=<value>, or -U {item.name} to evaluate it as 0"
+    return f"supply -D {item.name} or -U {item.name}"
 
 
 def _incomplete_component_to_dict(component: IncompleteComponent) -> dict[str, object]:
@@ -577,6 +610,23 @@ def _build_preprocess_parser(prog: str) -> argparse.ArgumentParser:
         metavar="N",
         help=f"maximum nesting depth of resolved includes (default: {DEFAULT_MAX_INCLUDE_DEPTH})",
     )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help=(
+            "write a JSON document with the output source, structured diagnostics "
+            "(including unresolved macro names), and skipped includes to stdout"
+        ),
+    )
+    parser.add_argument(
+        "--list-free-macros",
+        action="store_true",
+        help=(
+            "instead of preprocessing, list the macros the source's conditionals need "
+            "that the configuration does not fix, one tab-separated NAME, USES, LINES "
+            "record per line sorted by name; combine with --json for a JSON document"
+        ),
+    )
     parser.epilog = (
         "example: cpre preprocess --unknown-names undefined --config-from flags.h "
         "-D LEVEL=2 target.c "
@@ -654,6 +704,19 @@ def _load_seed_configuration(
     return None
 
 
+def _print_free_macros(path: Path, free: Sequence[FreeMacro], *, as_json: bool) -> int:
+    """Write ``--list-free-macros`` output; records are sorted by name."""
+    if as_json:
+        document = {"file": str(path), "free_macros": [_free_macro_to_dict(m) for m in free]}
+        print(json.dumps(document, indent=2))
+        return 0
+    for item in free:
+        uses = ",".join(use.value for use in item.uses)
+        lines = ",".join(str(location.line) for location in item.locations)
+        print(f"{item.name}\t{uses}\t{lines}")
+    return 0
+
+
 def preprocess_main(
     argv: Sequence[str] | None = None,
     prog: str = "cpre preprocess",
@@ -661,6 +724,8 @@ def preprocess_main(
     """Run the concrete preprocessing CLI workflow for one source file."""
     parser = _build_preprocess_parser(prog)
     args = parser.parse_args(argv)
+    if args.list_free_macros and args.compact:
+        parser.error("--compact cannot be combined with --list-free-macros")
     if len(args.sources) != 1:
         parser.error("preprocess currently accepts exactly one source file")
     path = args.sources[0]
@@ -708,6 +773,9 @@ def preprocess_main(
             configuration = _overlay_configuration(configuration, explicit)
         with path.open("r", encoding="utf-8", newline="") as handle:
             source = handle.read()
+        if args.list_free_macros:
+            free = free_macros_in_source(source, filename=str(path), configuration=configuration)
+            return _print_free_macros(path, free, as_json=args.json)
         resolver = (
             SearchPathResolver(args.include_dirs, quote_paths=args.quote_dirs)
             if args.include_dirs or args.quote_dirs
@@ -727,10 +795,39 @@ def preprocess_main(
         print(f"{origin}: {getattr(error, 'message', str(error))}", file=sys.stderr)
         return 2
 
+    if args.json:
+        output_source = result.source
+        if result.complete and args.compact:
+            try:
+                output_source = compact(result, max_consecutive_blank_lines=args.max_blank_lines)
+            except ValueError as error:
+                print(f"{path}: {error}", file=sys.stderr)
+                return 2
+        document = {
+            "file": str(path),
+            "complete": result.complete,
+            "source": output_source,
+            "diagnostics": [_preprocess_diagnostic_to_dict(d) for d in result.incomplete],
+            "skipped_includes": [
+                {
+                    "directive": skipped.directive,
+                    "operand": skipped.operand,
+                    "line": skipped.location.line,
+                    "source_identity": skipped.source_identity,
+                }
+                for skipped in result.skipped_includes
+            ],
+        }
+        print(json.dumps(document, indent=2))
+        return 0 if result.complete else 2
+
     if not result.complete:
         for diagnostic in result.incomplete:
             origin = diagnostic.source_identity or path
             print(f"{origin}: {_format_incomplete(diagnostic)}", file=sys.stderr)
+            if isinstance(diagnostic, PreprocessDiagnostic):
+                for item in diagnostic.unresolved:
+                    print(f"{origin}: hint: {_free_macro_hint(item)}", file=sys.stderr)
         return 2
 
     for skipped in result.skipped_includes:

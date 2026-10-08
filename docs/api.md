@@ -311,6 +311,39 @@ Interpret results as follows:
 
 `complete` keeps its meaning: it is `True` exactly when `incomplete` is empty, so code written before partial results existed still treats a partial result as incomplete.
 
+## Free macro dependencies
+
+Open-world preprocessing fails when a reachable condition depends on a macro the configuration does not fix. Instead of parsing diagnostic text, query the dependencies directly:
+
+```python
+import cpre
+
+cpre.free_macros("__GNUC__ >= 4")
+# (FreeMacro(name='__GNUC__', uses=(MacroUse.VALUE,), locations=()),)
+
+cpre.free_macros("defined(FEAT)")[0].suggestions
+# ('-D FEAT', '-U FEAT')            -- definedness never suggests a value
+
+for item in cpre.free_macros_in_source(source_text, configuration=configuration):
+    print(item.name, [use.value for use in item.uses], [loc.line for loc in item.locations])
+```
+
+- `free_macros(expression, *, configuration=None)` inspects one `#if`/`#elif` expression. Configured definitions are expanded, so a name reached only through a configured macro's replacement list is reported.
+- `free_macros_in_source(source, *, filename=None, configuration=None)` inspects every conditional directive in the source, reachable or not, because reachability itself depends on the free names. The result is a sound over-approximation suitable for seeding a configuration. A name is not free when the configuration fixes the state a use needs, or when an earlier `#define`/`#undef` in the same or an enclosing branch assigns it on every path to the use (so include-guarded bodies behave as expected). A definition in some other branch keeps the name free, and its replacement list is followed. Included headers are not read.
+
+Each `FreeMacro` has a `name`, `uses` (`MacroUse.DEFINEDNESS` for `defined`/`#ifdef`/`#ifndef` tests and `MacroUse.VALUE` for evaluated identifiers; definedness first), `locations` of the dependent directives in source order, and `suggestions` with command-line forms that would fix the state (`-D NAME=<value>` only for value uses). Results are sorted by name. Integer and character literals, `defined`, `__has_include`, `__LINE__`, and `__FILE__` are never free. Under `UnknownNamePolicy.UNDEFINED`, nothing is free.
+
+The same data appears on preprocessing failures: a `PreprocessDiagnostic` with `ErrorCode.UNRESOLVED_CONDITION` carries `condition` (the expression as written, or the macro name for `#ifdef`-style directives) and `unresolved`, the `FreeMacro` entries that keep that condition undetermined under the exact macro state at that point.
+
+```python
+result = cpre.preprocess_source("#if __GNUC__ >= 4\n#endif\n")
+diagnostic = result.incomplete[0]
+diagnostic.condition                       # '__GNUC__ >= 4'
+[item.name for item in diagnostic.unresolved]  # ['__GNUC__']
+```
+
+The free-macro API does not depend on the CLI and is intended for reuse by configuration-generation tooling.
+
 ## Structured errors
 
 Malformed conditional source and invalid public API input use the `CpreError` hierarchy:

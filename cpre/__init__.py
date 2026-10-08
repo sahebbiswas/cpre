@@ -26,6 +26,7 @@ from .api import (
 )
 from .configuration import MacroConfiguration, UnknownNamePolicy
 from .expansion import SourceMapping
+from .free_macros import FreeMacro, MacroUse, free_macros, free_macros_in_source
 from .macro_analysis import (
     MacroAnalysisResult,
     MacroSimplificationResult,
@@ -98,7 +99,7 @@ from .symbolic import (
     simplify,
 )
 
-__version__ = "0.18.0"
+__version__ = "0.19.0"
 
 __all__ = [
     "AnalysisError",
@@ -126,6 +127,7 @@ __all__ = [
     "Finding",
     "FindingKind",
     "FixConfidence",
+    "FreeMacro",
     "IncompleteComponent",
     "IncompleteConfigurationError",
     "IncompleteGroup",
@@ -136,6 +138,7 @@ __all__ = [
     "MacroEnvironment",
     "MacroSimplificationResult",
     "MacroState",
+    "MacroUse",
     "Negation",
     "ParseError",
     "Predicate",
@@ -177,6 +180,8 @@ __all__ = [
     "expression_predicates",
     "expression_to_dict",
     "format_expression",
+    "free_macros",
+    "free_macros_in_source",
     "implies",
     "negate",
     "normalize",

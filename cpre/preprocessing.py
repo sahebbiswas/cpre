@@ -26,6 +26,7 @@ from .configuration import (
 from .errors import AnalysisError, ErrorCode, SourceLocation
 from .expansion import Expansion, ExpansionError, SourceMapping, Token, tokenize
 from .expressions import conjunction, expression_atoms_in_order, negate
+from .free_macros import FreeMacro, _unresolved_macros
 from .includes import (
     DEFAULT_MAX_INCLUDE_DEPTH,
     IncludeForm,
@@ -133,12 +134,19 @@ class PreprocessDiagnostic:
 
     ``source_identity`` is ``None`` for the primary source and otherwise names the
     resolved included source that ``location`` refers to.
+
+    For ``UNRESOLVED_CONDITION``, ``condition`` is the directive's expression as
+    written (the macro name for ``#ifdef``-style directives) and ``unresolved``
+    lists, sorted by name, the macros whose unknown state keeps it undetermined
+    under the macro state at that point.
     """
 
     code: ErrorCode
     message: str
     location: SourceLocation
     source_identity: str | None = None
+    condition: str | None = None
+    unresolved: tuple[FreeMacro, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -919,10 +927,13 @@ def _preprocess_unit(
                                     break
                             if ambiguous and selected is None:
                                 diagnostics.append(
-                                    located(
-                                        ErrorCode.UNRESOLVED_CONDITION,
-                                        "condition is not determined by the current macro state",
+                                    _unresolved_condition(
+                                        branch.directive,
+                                        branch.expression_text,
+                                        environment,
                                         current_line,
+                                        identity,
+                                        limits.max_work,
                                     )
                                 )
                                 break
@@ -1129,6 +1140,40 @@ def _preprocess_unit(
     if insertions:
         unit = _splice(unit, insertions, len(source), expansion, identity)
     return unit
+
+
+def _unresolved_condition(
+    directive: str,
+    condition: str | None,
+    environment: MacroEnvironment,
+    line: int,
+    identity: str | None,
+    max_work: int,
+) -> PreprocessDiagnostic:
+    """Diagnose an undetermined condition with the names that would decide it."""
+    unresolved = (
+        _unresolved_macros(
+            condition, environment, directive=directive, line=line, max_work=max_work
+        )
+        if condition is not None
+        else ()
+    )
+    message = "condition is not determined by the current macro state"
+    if condition is not None:
+        message += f": #{directive} {condition}"
+    if unresolved:
+        names = ", ".join(
+            f"{item.name} ({'/'.join(use.value for use in item.uses)})" for item in unresolved
+        )
+        message += f" (unresolved: {names})"
+    return PreprocessDiagnostic(
+        ErrorCode.UNRESOLVED_CONDITION,
+        message,
+        SourceLocation(line),
+        identity,
+        condition,
+        unresolved,
+    )
 
 
 def _ends_line(text: str) -> bool:
