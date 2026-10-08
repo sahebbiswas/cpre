@@ -50,7 +50,7 @@ A completed result exposes:
 - `incomplete`: ordered structured diagnostics when preprocessing cannot complete;
 - `macros`: a detached, read-only snapshot of the final explicitly tracked macro state;
 - `source_map`: mappings from canonical output spans back to physical input provenance;
-- `removed_lines`: an immutable set of one-based physical lines wholly masked by preprocessing and eligible for opt-in compaction;
+- `removed_lines`: an immutable set of one-based canonical output lines wholly masked by preprocessing and eligible for opt-in compaction. Without entered includes these equal the physical input lines; with [caller-resolved includes](#caller-resolved-includes) they refer to `result.source`, not the input file;
 - `skipped_includes`: `SkippedInclude` records for include directives masked by opt-in [`skip_includes=True`](#opt-in-include-skipping), in source order (empty otherwise);
 - `includes`: `IncludeRecord` provenance for reachable includes resolved by an [`include_resolver`](#caller-resolved-includes) (empty otherwise).
 

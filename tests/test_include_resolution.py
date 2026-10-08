@@ -489,7 +489,7 @@ def test_search_path_resolver_order_and_include_next(tmp_path: Path):
         ("two", "std.h", "two-std\n"),
     ]:
         (tmp_path / directory).mkdir(exist_ok=True)
-        (tmp_path / directory / name).write_text(text, encoding="utf-8")
+        (tmp_path / directory / name).write_bytes(text.encode("utf-8"))
     resolver = SearchPathResolver(
         [tmp_path / "one", tmp_path / "two"], quote_paths=[tmp_path / "quote"]
     )
