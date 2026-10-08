@@ -18,6 +18,7 @@ from .api import (
     CpreError,
     ErrorCode,
     IncompleteComponent,
+    IncompleteConfigurationError,
     analyze_source,
 )
 from .configuration import MacroConfiguration, UnknownNamePolicy
@@ -39,7 +40,7 @@ from .macro_analysis import (
 from .macros import MacroDefinition
 from .model import TRUE, ConditionError, ExpressionSyntaxError, Predicate
 from .pragmas import preprocess_source
-from .preprocessing import PreprocessingContext, PreprocessResult, compact
+from .preprocessing import PreprocessDiagnostic, PreprocessingContext, PreprocessResult, compact
 from .robdd import (
     BDD,
     AnalysisBudget,
@@ -500,6 +501,19 @@ def _build_preprocess_parser(prog: str) -> argparse.ArgumentParser:
         help="explicitly mark an external macro as undefined",
     )
     parser.add_argument(
+        "--config-from",
+        dest="config_from",
+        action="append",
+        default=[],
+        type=Path,
+        metavar="PATH",
+        help=(
+            "derive the initial macro configuration from the final macro state of a seed "
+            "file such as flags.h; repeatable, applied in order with the last definition "
+            "winning; -D/-U are visible while seeds are evaluated and always take precedence"
+        ),
+    )
+    parser.add_argument(
         "--unknown-names",
         choices=[policy.value for policy in UnknownNamePolicy],
         default=UnknownNamePolicy.OPEN.value,
@@ -563,7 +577,80 @@ def _build_preprocess_parser(prog: str) -> argparse.ArgumentParser:
         metavar="N",
         help=f"maximum nesting depth of resolved includes (default: {DEFAULT_MAX_INCLUDE_DEPTH})",
     )
+    parser.epilog = (
+        "example: cpre preprocess --config-from flags.h -D LEVEL=2 target.c "
+        "(flags.h macros seed the configuration; LEVEL=2 overrides any seed value)"
+    )
     return parser
+
+
+def _overlay_configuration(
+    seeded: MacroConfiguration, explicit: MacroConfiguration
+) -> MacroConfiguration:
+    """Re-apply explicit command-line macros on top of a seed-derived configuration."""
+    explicit_names = {definition.name for definition in explicit.definitions} | explicit.undefined
+    return MacroConfiguration(
+        definitions=[
+            *(
+                definition
+                for definition in seeded.definitions
+                if definition.name not in explicit_names
+            ),
+            *explicit.definitions,
+        ],
+        undefined=(seeded.undefined - explicit_names) | explicit.undefined,
+        unknown_names=explicit.unknown_names,
+    )
+
+
+def _load_seed_configuration(
+    seed: Path,
+    base: MacroConfiguration,
+    context: PreprocessingContext | None,
+) -> MacroConfiguration | None:
+    """Evaluate one ``--config-from`` seed file, reporting failures on stderr."""
+    if seed.is_dir():
+        print(f"{seed}: --config-from requires a file, not a directory", file=sys.stderr)
+        return None
+    try:
+        with seed.open("r", encoding="utf-8", newline="") as handle:
+            text = handle.read()
+        return MacroConfiguration.from_source(
+            text,
+            filename=str(seed),
+            context=context,
+            unknown_names=base.unknown_names,
+            base=base,
+        )
+    except IncompleteConfigurationError as error:
+        diagnostics = [
+            diagnostic
+            for diagnostic in error.incomplete
+            if isinstance(diagnostic, PreprocessDiagnostic)
+        ]
+        if not diagnostics:
+            print(f"{seed}: invalid --config-from seed: {_format_error(error)}", file=sys.stderr)
+        for diagnostic in diagnostics:
+            origin = diagnostic.source_identity or seed
+            print(
+                f"{origin}: invalid --config-from seed: {_format_incomplete(diagnostic)}",
+                file=sys.stderr,
+            )
+        if base.unknown_names is UnknownNamePolicy.OPEN and any(
+            diagnostic.code is ErrorCode.UNRESOLVED_CONDITION for diagnostic in diagnostics
+        ):
+            print(
+                f"{seed}: hint: seed conditions such as include guards on undefined names "
+                "need --unknown-names undefined",
+                file=sys.stderr,
+            )
+    except CpreError as error:
+        print(f"{seed}: invalid --config-from seed: {_format_error(error)}", file=sys.stderr)
+    except OSError as error:
+        print(f"{seed}: cannot read --config-from seed: {error.strerror or error}", file=sys.stderr)
+    except UnicodeDecodeError as error:
+        print(f"{seed}: cannot read --config-from seed: {error}", file=sys.stderr)
+    return None
 
 
 def preprocess_main(
@@ -610,6 +697,14 @@ def preprocess_main(
             unknown_names=args.unknown_names,
         )
         context = PreprocessingContext(standard_macros=standard_macros) if standard_macros else None
+        if args.config_from:
+            explicit = configuration
+            for seed in args.config_from:
+                seeded = _load_seed_configuration(seed, configuration, context)
+                if seeded is None:
+                    return 2
+                configuration = seeded
+            configuration = _overlay_configuration(configuration, explicit)
         with path.open("r", encoding="utf-8", newline="") as handle:
             source = handle.read()
         resolver = (
