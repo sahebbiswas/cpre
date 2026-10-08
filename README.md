@@ -80,7 +80,7 @@ Select a concrete configuration and emit preprocessed source:
 ```bash
 cpre preprocess source.c -D FEATURE
 cpre preprocess source.c --compact
-cpre preprocess source.c --list-free-macros   # macros the conditionals still need
+cpre preprocess source.c --list-unknown-macros   # macros the conditionals still need
 ```
 
 Quickly evaluate and simplify arbitrary Boolean expressions:

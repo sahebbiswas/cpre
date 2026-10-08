@@ -28,7 +28,6 @@ from .expressions import (
     format_expression,
     parse_expression,
 )
-from .free_macros import FreeMacro, MacroUse, free_macros_in_source
 from .includes import DEFAULT_MAX_INCLUDE_DEPTH, SearchPathResolver
 from .macro_analysis import (
     MacroAnalysisResult,
@@ -49,6 +48,7 @@ from .robdd import (
     exact_simplify,
 )
 from .sarif import ToolNotification, sarif_log
+from .unknown_macros import MacroUse, UnknownMacro, unknown_macros_in_source
 
 
 def _format_error(error: CpreError) -> str:
@@ -128,7 +128,7 @@ def _incomplete_to_dict(diagnostic: AnalysisIncomplete) -> dict[str, object]:
     }
 
 
-def _free_macro_to_dict(item: FreeMacro) -> dict[str, object]:
+def _unknown_macro_to_dict(item: UnknownMacro) -> dict[str, object]:
     return {
         "name": item.name,
         "uses": [use.value for use in item.uses],
@@ -150,11 +150,11 @@ def _preprocess_diagnostic_to_dict(
         "line": diagnostic.location.line,
         "source_identity": diagnostic.source_identity,
         "condition": diagnostic.condition,
-        "unresolved": [_free_macro_to_dict(item) for item in diagnostic.unresolved],
+        "unresolved": [_unknown_macro_to_dict(item) for item in diagnostic.unresolved],
     }
 
 
-def _free_macro_hint(item: FreeMacro) -> str:
+def _unknown_macro_hint(item: UnknownMacro) -> str:
     if MacroUse.VALUE in item.uses:
         return f"supply -D {item.name}=<value>, or -U {item.name} to evaluate it as 0"
     return f"supply -D {item.name} or -U {item.name}"
@@ -619,7 +619,7 @@ def _build_preprocess_parser(prog: str) -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--list-free-macros",
+        "--list-unknown-macros",
         action="store_true",
         help=(
             "instead of preprocessing, list the macros the source's conditionals need "
@@ -704,13 +704,16 @@ def _load_seed_configuration(
     return None
 
 
-def _print_free_macros(path: Path, free: Sequence[FreeMacro], *, as_json: bool) -> int:
-    """Write ``--list-free-macros`` output; records are sorted by name."""
+def _print_unknown_macros(path: Path, unknown: Sequence[UnknownMacro], *, as_json: bool) -> int:
+    """Write ``--list-unknown-macros`` output; records are sorted by name."""
     if as_json:
-        document = {"file": str(path), "free_macros": [_free_macro_to_dict(m) for m in free]}
+        document = {
+            "file": str(path),
+            "unknown_macros": [_unknown_macro_to_dict(m) for m in unknown],
+        }
         print(json.dumps(document, indent=2))
         return 0
-    for item in free:
+    for item in unknown:
         uses = ",".join(use.value for use in item.uses)
         lines = ",".join(str(location.line) for location in item.locations)
         print(f"{item.name}\t{uses}\t{lines}")
@@ -724,8 +727,8 @@ def preprocess_main(
     """Run the concrete preprocessing CLI workflow for one source file."""
     parser = _build_preprocess_parser(prog)
     args = parser.parse_args(argv)
-    if args.list_free_macros and args.compact:
-        parser.error("--compact cannot be combined with --list-free-macros")
+    if args.list_unknown_macros and args.compact:
+        parser.error("--compact cannot be combined with --list-unknown-macros")
     if len(args.sources) != 1:
         parser.error("preprocess currently accepts exactly one source file")
     path = args.sources[0]
@@ -773,9 +776,11 @@ def preprocess_main(
             configuration = _overlay_configuration(configuration, explicit)
         with path.open("r", encoding="utf-8", newline="") as handle:
             source = handle.read()
-        if args.list_free_macros:
-            free = free_macros_in_source(source, filename=str(path), configuration=configuration)
-            return _print_free_macros(path, free, as_json=args.json)
+        if args.list_unknown_macros:
+            unknown = unknown_macros_in_source(
+                source, filename=str(path), configuration=configuration
+            )
+            return _print_unknown_macros(path, unknown, as_json=args.json)
         resolver = (
             SearchPathResolver(args.include_dirs, quote_paths=args.quote_dirs)
             if args.include_dirs or args.quote_dirs
@@ -827,7 +832,7 @@ def preprocess_main(
             print(f"{origin}: {_format_incomplete(diagnostic)}", file=sys.stderr)
             if isinstance(diagnostic, PreprocessDiagnostic):
                 for item in diagnostic.unresolved:
-                    print(f"{origin}: hint: {_free_macro_hint(item)}", file=sys.stderr)
+                    print(f"{origin}: hint: {_unknown_macro_hint(item)}", file=sys.stderr)
         return 2
 
     for skipped in result.skipped_includes:

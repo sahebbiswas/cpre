@@ -45,7 +45,6 @@ def test_top_level_public_api_exposes_supported_symbols_only():
         "Finding",
         "FindingKind",
         "FixConfidence",
-        "FreeMacro",
         "IncompleteComponent",
         "IncompleteConfigurationError",
         "IncompleteGroup",
@@ -80,6 +79,7 @@ def test_top_level_public_api_exposes_supported_symbols_only():
         "StructureDiagnosticCode",
         "SuggestedEdit",
         "TRUE",
+        "UnknownMacro",
         "UnknownNamePolicy",
         "Variable",
         "WitnessAssignment",
@@ -98,8 +98,6 @@ def test_top_level_public_api_exposes_supported_symbols_only():
         "expression_predicates",
         "expression_to_dict",
         "format_expression",
-        "free_macros",
-        "free_macros_in_source",
         "implies",
         "negate",
         "normalize",
@@ -110,6 +108,8 @@ def test_top_level_public_api_exposes_supported_symbols_only():
         "satisfiable",
         "simplify",
         "simplify_macros",
+        "unknown_macros",
+        "unknown_macros_in_source",
         "witness_assignment",
     ]
 

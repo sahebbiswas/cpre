@@ -1,6 +1,6 @@
-"""Free macro dependencies of preprocessor conditions.
+"""Unknown macro dependencies of preprocessor conditions.
 
-A *free* macro is a name whose external state (definedness or replacement
+An *unknown* macro is a name whose external state (definedness or replacement
 value) is not fixed by the current configuration and would have to be supplied
 to make a conditional concrete. This module is independent of the CLI so other
 tooling, such as configuration generators, can reuse it.
@@ -44,7 +44,7 @@ _USE_ORDER = (MacroUse.DEFINEDNESS, MacroUse.VALUE)
 
 
 @dataclass(frozen=True)
-class FreeMacro:
+class UnknownMacro:
     """A macro name whose external state a condition depends on.
 
     ``uses`` lists each distinct way the name is used, definedness first.
@@ -71,9 +71,9 @@ class FreeMacro:
 def _collect(
     uses: Mapping[str, set[MacroUse]],
     lines: Mapping[str, set[int]] | None = None,
-) -> tuple[FreeMacro, ...]:
+) -> tuple[UnknownMacro, ...]:
     return tuple(
-        FreeMacro(
+        UnknownMacro(
             name,
             tuple(use for use in _USE_ORDER if use in uses[name]),
             tuple(SourceLocation(line) for line in sorted(lines.get(name, ()))) if lines else (),
@@ -185,7 +185,7 @@ def _unresolved_macros(
     directive: str,
     line: int,
     max_work: int,
-) -> tuple[FreeMacro, ...]:
+) -> tuple[UnknownMacro, ...]:
     """Structured unresolved names for one undetermined preprocessing condition."""
     uses = _unresolved_uses(
         text,
@@ -202,16 +202,16 @@ def _base_environment(configuration: MacroConfiguration | None) -> MacroEnvironm
     return _configured_environment(configuration)
 
 
-def free_macros(
+def unknown_macros(
     expression: str,
     *,
     configuration: MacroConfiguration | None = None,
     options: AnalysisOptions | None = None,
-) -> tuple[FreeMacro, ...]:
+) -> tuple[UnknownMacro, ...]:
     """Return the macro names an ``#if`` expression needs to become concrete.
 
     ``expression`` is the text after ``#if``/``#elif``. Names already fixed by
-    ``configuration`` are not free; configured definitions are expanded, so a
+    ``configuration`` are not unknown; configured definitions are expanded, so a
     name reached only through a configured macro's replacement is reported.
     Results are sorted by name. ``defined(NAME)`` contributes a
     :attr:`MacroUse.DEFINEDNESS` dependency; any other identifier that survives
@@ -322,21 +322,21 @@ class _SourceDependencies:
             self.definitions.setdefault(name, []).append(definition)
 
 
-def free_macros_in_source(
+def unknown_macros_in_source(
     source: str,
     *,
     filename: str | None = None,
     configuration: MacroConfiguration | None = None,
-) -> tuple[FreeMacro, ...]:
+) -> tuple[UnknownMacro, ...]:
     """Return the macro names needed to make every conditional in ``source`` concrete.
 
     Every conditional directive is inspected, reachable or not, because
-    reachability itself depends on the free names; the result is therefore a
+    reachability itself depends on the unknown names; the result is therefore a
     sound over-approximation suitable for seeding a configuration. A name is not
-    free when ``configuration`` fixes the state a use needs, or when an earlier
+    unknown when ``configuration`` fixes the state a use needs, or when an earlier
     ``#define``/``#undef`` in the same or an enclosing conditional branch assigns
     it on every path reaching the use (so include-guarded bodies work as
-    expected). Definitions made in other branches keep the name free, since the
+    expected). Definitions made in other branches keep the name unknown, since the
     external state still matters on paths that skip them, and every candidate
     replacement list is followed for further dependencies. Included headers are
     not read.
@@ -378,4 +378,4 @@ def free_macros_in_source(
     return _collect(sweep.uses, sweep.lines)
 
 
-__all__ = ["FreeMacro", "MacroUse", "free_macros", "free_macros_in_source"]
+__all__ = ["UnknownMacro", "MacroUse", "unknown_macros", "unknown_macros_in_source"]

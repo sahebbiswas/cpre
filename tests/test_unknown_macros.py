@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 import cpre
-from cpre import FreeMacro, MacroConfiguration, MacroDefinition, MacroUse, UnknownNamePolicy
+from cpre import MacroConfiguration, MacroDefinition, MacroUse, UnknownMacro, UnknownNamePolicy
 from cpre.cli import main
 
 DEFINEDNESS = (MacroUse.DEFINEDNESS,)
@@ -14,12 +14,12 @@ VALUE = (MacroUse.VALUE,)
 BOTH = (MacroUse.DEFINEDNESS, MacroUse.VALUE)
 
 
-def _names(free: tuple[FreeMacro, ...]) -> dict[str, tuple[MacroUse, ...]]:
-    return {item.name: item.uses for item in free}
+def _names(unknown: tuple[UnknownMacro, ...]) -> dict[str, tuple[MacroUse, ...]]:
+    return {item.name: item.uses for item in unknown}
 
 
-def _lines(free: tuple[FreeMacro, ...]) -> dict[str, list[int | None]]:
-    return {item.name: [location.line for location in item.locations] for item in free}
+def _lines(unknown: tuple[UnknownMacro, ...]) -> dict[str, list[int | None]]:
+    return {item.name: [location.line for location in item.locations] for item in unknown}
 
 
 def _unresolved(source: str, **kwargs: object) -> cpre.PreprocessDiagnostic:
@@ -39,7 +39,7 @@ def test_gnuc_version_check_names_the_unresolved_macro():
 
     assert diagnostic.condition == "__GNUC__ >= 4"
     assert diagnostic.location.line == 1
-    assert diagnostic.unresolved == (FreeMacro("__GNUC__", VALUE, (cpre.SourceLocation(1),)),)
+    assert diagnostic.unresolved == (UnknownMacro("__GNUC__", VALUE, (cpre.SourceLocation(1),)),)
     assert diagnostic.unresolved[0].suggestions == ("-D __GNUC__=<value>", "-U __GNUC__")
     assert "condition is not determined" in diagnostic.message
     assert "__GNUC__ (value)" in diagnostic.message
@@ -114,42 +114,42 @@ def test_unresolved_condition_in_nested_branch_uses_state_at_that_point():
 # --- expression-level API -------------------------------------------------------
 
 
-def test_free_macros_of_expression():
-    assert _names(cpre.free_macros("__GNUC__ >= 4")) == {"__GNUC__": VALUE}
-    assert _names(cpre.free_macros("defined(FEAT)")) == {"FEAT": DEFINEDNESS}
-    assert cpre.free_macros("defined(FEAT)")[0].locations == ()
+def test_unknown_macros_of_expression():
+    assert _names(cpre.unknown_macros("__GNUC__ >= 4")) == {"__GNUC__": VALUE}
+    assert _names(cpre.unknown_macros("defined(FEAT)")) == {"FEAT": DEFINEDNESS}
+    assert cpre.unknown_macros("defined(FEAT)")[0].locations == ()
 
 
 @pytest.mark.parametrize(
     "expression",
     ["0", "1 && 0x10UL > 7", "'a' == 97", "(1 ? 2 : 3) << 1", "-1 < 0u"],
 )
-def test_literals_are_never_free(expression):
-    assert cpre.free_macros(expression) == ()
+def test_literals_are_never_unknown(expression):
+    assert cpre.unknown_macros(expression) == ()
 
 
-def test_free_macros_respects_configuration_and_expands_definitions():
+def test_unknown_macros_respects_configuration_and_expands_definitions():
     configuration = MacroConfiguration(
         definitions=[MacroDefinition("VERSION", "(MAJOR * 100)"), MacroDefinition("X", "1")],
         undefined=["OLD"],
     )
     assert _names(
-        cpre.free_macros("VERSION > X && !defined(OLD) && OLD == 0", configuration=configuration)
+        cpre.unknown_macros("VERSION > X && !defined(OLD) && OLD == 0", configuration=configuration)
     ) == {"MAJOR": VALUE}
 
 
-def test_closed_world_configuration_has_no_free_names():
+def test_closed_world_configuration_has_no_unknown_names():
     configuration = MacroConfiguration(unknown_names=UnknownNamePolicy.UNDEFINED)
-    assert cpre.free_macros("A > 1 || defined(B)", configuration=configuration) == ()
+    assert cpre.unknown_macros("A > 1 || defined(B)", configuration=configuration) == ()
 
 
-def test_operators_and_location_builtins_are_not_free():
-    assert cpre.free_macros("__LINE__ > 1 && __has_include(<x.h>)") == ()
+def test_operators_and_location_builtins_are_not_unknown():
+    assert cpre.unknown_macros("__LINE__ > 1 && __has_include(<x.h>)") == ()
 
 
-def test_free_macros_rejects_non_string():
+def test_unknown_macros_rejects_non_string():
     with pytest.raises(cpre.AnalysisError):
-        cpre.free_macros(1)  # type: ignore[arg-type]
+        cpre.unknown_macros(1)  # type: ignore[arg-type]
 
 
 # --- source-level API -----------------------------------------------------------
@@ -172,10 +172,10 @@ SOURCE = (
 )
 
 
-def test_free_macros_in_source_reports_every_conditional():
-    free = cpre.free_macros_in_source(SOURCE)
+def test_unknown_macros_in_source_reports_every_conditional():
+    unknown = cpre.unknown_macros_in_source(SOURCE)
 
-    assert _names(free) == {
+    assert _names(unknown) == {
         "FEAT": DEFINEDNESS,
         "OPT": DEFINEDNESS,
         "T_H": DEFINEDNESS,
@@ -184,48 +184,48 @@ def test_free_macros_in_source_reports_every_conditional():
         "__GNUC__": VALUE,
     }
     # LEVEL is defined on every path before its use; include guards nest bodies.
-    assert "LEVEL" not in _names(free)
+    assert "LEVEL" not in _names(unknown)
     # Repeated names collect every dependent directive line.
-    assert _lines(free)["__GNUC__"] == [4, 12]
-    assert _lines(free)["FEAT"] == [6]
+    assert _lines(unknown)["__GNUC__"] == [4, 12]
+    assert _lines(unknown)["FEAT"] == [6]
 
 
-def test_free_macros_in_source_respects_configuration():
+def test_unknown_macros_in_source_respects_configuration():
     configuration = MacroConfiguration(
         integers={"__GNUC__": 5}, undefined=["OPT", "T_H"], presence=["FEAT"]
     )
-    free = cpre.free_macros_in_source(SOURCE, configuration=configuration)
+    unknown = cpre.unknown_macros_in_source(SOURCE, configuration=configuration)
 
-    # V is still free: the external value is used when OPT is undefined.
-    assert _names(free) == {"V": VALUE, "X": VALUE}
-
-
-def test_free_macros_in_source_definition_after_use_does_not_hide_it():
-    free = cpre.free_macros_in_source("#if A\n#endif\n#define A 1\n#if A\n#endif\n")
-    assert _lines(free) == {"A": [1]}
+    # V is still unknown: the external value is used when OPT is undefined.
+    assert _names(unknown) == {"V": VALUE, "X": VALUE}
 
 
-def test_free_macros_in_source_elif_is_evaluated_outside_its_branch():
-    free = cpre.free_macros_in_source("#if X\n#define A 1\n#elif A\n#endif\n")
-    assert _names(free) == {"A": VALUE, "X": VALUE}
+def test_unknown_macros_in_source_definition_after_use_does_not_hide_it():
+    unknown = cpre.unknown_macros_in_source("#if A\n#endif\n#define A 1\n#if A\n#endif\n")
+    assert _lines(unknown) == {"A": [1]}
+
+
+def test_unknown_macros_in_source_elif_is_evaluated_outside_its_branch():
+    unknown = cpre.unknown_macros_in_source("#if X\n#define A 1\n#elif A\n#endif\n")
+    assert _names(unknown) == {"A": VALUE, "X": VALUE}
 
 
 def test_undef_fixes_a_name():
-    assert cpre.free_macros_in_source("#undef A\n#if A || defined(A)\n#endif\n") == ()
+    assert cpre.unknown_macros_in_source("#undef A\n#if A || defined(A)\n#endif\n") == ()
 
 
-def test_free_macros_in_source_raises_parse_errors():
+def test_unknown_macros_in_source_raises_parse_errors():
     with pytest.raises(cpre.ParseError):
-        cpre.free_macros_in_source("#if A\n", filename="broken.c")
+        cpre.unknown_macros_in_source("#if A\n", filename="broken.c")
 
 
-def test_seeding_every_free_macro_makes_preprocessing_complete():
-    free = cpre.free_macros_in_source(SOURCE)
+def test_seeding_every_unknown_macro_makes_preprocessing_complete():
+    unknown = cpre.unknown_macros_in_source(SOURCE)
     configuration = MacroConfiguration(
         definitions=[
-            MacroDefinition(item.name, "1") for item in free if MacroUse.VALUE in item.uses
+            MacroDefinition(item.name, "1") for item in unknown if MacroUse.VALUE in item.uses
         ],
-        undefined=[item.name for item in free if MacroUse.VALUE not in item.uses],
+        undefined=[item.name for item in unknown if MacroUse.VALUE not in item.uses],
     )
     assert cpre.preprocess_source(SOURCE, configuration=configuration).complete
 
@@ -287,12 +287,12 @@ def test_cli_json_success_contains_source(tmp_path, capsys):
     }
 
 
-def test_cli_list_free_macros_text_is_deterministic(tmp_path, capsys):
+def test_cli_list_unknown_macros_text_is_deterministic(tmp_path, capsys):
     target = _write(tmp_path / "t.c", SOURCE)
 
-    assert main(["preprocess", "--list-free-macros", str(target)]) == 0
+    assert main(["preprocess", "--list-unknown-macros", str(target)]) == 0
     first = capsys.readouterr().out
-    assert main(["preprocess", "--list-free-macros", str(target)]) == 0
+    assert main(["preprocess", "--list-unknown-macros", str(target)]) == 0
     assert capsys.readouterr().out == first
     assert first.splitlines() == [
         "FEAT\tdefinedness\t6",
@@ -304,16 +304,16 @@ def test_cli_list_free_macros_text_is_deterministic(tmp_path, capsys):
     ]
 
 
-def test_cli_list_free_macros_honors_configuration_and_json(tmp_path, capsys):
+def test_cli_list_unknown_macros_honors_configuration_and_json(tmp_path, capsys):
     target = _write(tmp_path / "t.c", SOURCE)
     seed = _write(tmp_path / "flags.h", "#define __GNUC__ 5\n#undef OPT\n")
 
-    argv = ["preprocess", "--list-free-macros", "--json", "--config-from", str(seed)]
+    argv = ["preprocess", "--list-unknown-macros", "--json", "--config-from", str(seed)]
     assert main([*argv, "-U", "T_H", "-D", "FEAT", str(target)]) == 0
     document = json.loads(capsys.readouterr().out)
     assert document["file"] == str(target)
-    assert [item["name"] for item in document["free_macros"]] == ["V", "X"]
-    assert document["free_macros"][0] == {
+    assert [item["name"] for item in document["unknown_macros"]] == ["V", "X"]
+    assert document["unknown_macros"][0] == {
         "name": "V",
         "uses": ["value"],
         "lines": [12],
@@ -321,10 +321,10 @@ def test_cli_list_free_macros_honors_configuration_and_json(tmp_path, capsys):
     }
 
 
-def test_cli_list_free_macros_builds_a_seed_for_preprocessing(tmp_path, capsys):
+def test_cli_list_unknown_macros_builds_a_seed_for_preprocessing(tmp_path, capsys):
     target = _write(tmp_path / "t.c", SOURCE)
 
-    assert main(["preprocess", "--list-free-macros", str(target)]) == 0
+    assert main(["preprocess", "--list-unknown-macros", str(target)]) == 0
     seed_lines = []
     for record in capsys.readouterr().out.splitlines():
         name, uses, _ = record.split("\t")
@@ -335,9 +335,9 @@ def test_cli_list_free_macros_builds_a_seed_for_preprocessing(tmp_path, capsys):
     assert "int a;" in capsys.readouterr().out
 
 
-def test_cli_list_free_macros_rejects_compact(tmp_path, capsys):
+def test_cli_list_unknown_macros_rejects_compact(tmp_path, capsys):
     target = _write(tmp_path / "t.c", SOURCE)
     with pytest.raises(SystemExit) as excinfo:
-        main(["preprocess", "--list-free-macros", "--compact", str(target)])
+        main(["preprocess", "--list-unknown-macros", "--compact", str(target)])
     assert excinfo.value.code == 2
     assert "--compact" in capsys.readouterr().err

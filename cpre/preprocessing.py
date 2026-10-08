@@ -26,7 +26,6 @@ from .configuration import (
 from .errors import AnalysisError, ErrorCode, SourceLocation
 from .expansion import Expansion, ExpansionError, SourceMapping, Token, tokenize
 from .expressions import conjunction, expression_atoms_in_order, negate
-from .free_macros import FreeMacro, _unresolved_macros
 from .includes import (
     DEFAULT_MAX_INCLUDE_DEPTH,
     IncludeForm,
@@ -41,6 +40,7 @@ from .model import TRUE, ConditionalGroup, ConditionError, DefinedVariable, Vari
 from .numeric_conditions import NumericConditionError, evaluate_numeric_condition
 from .parser import logical_lines, parse_source
 from .robdd import BDD, AnalysisBudget, AnalysisLimitExceeded, ResourceLimits
+from .unknown_macros import UnknownMacro, _unresolved_macros
 
 # These names have implementation-provided semantics in common C/C++ preprocessors.
 # cpre must never silently certify them as ordinary identifiers. Explicit concrete
@@ -146,7 +146,7 @@ class PreprocessDiagnostic:
     location: SourceLocation
     source_identity: str | None = None
     condition: str | None = None
-    unresolved: tuple[FreeMacro, ...] = ()
+    unresolved: tuple[UnknownMacro, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -217,7 +217,7 @@ cpre preprocess source.c --standard-macro __STDC__=1
 cpre preprocess source.c --skip-includes
 cpre preprocess src/main.c -I include --iquote src
 cpre preprocess --unknown-names undefined --config-from flags.h target.c
-cpre preprocess --list-free-macros target.c
+cpre preprocess --list-unknown-macros target.c
 cpre preprocess --json source.c
 ```
 
@@ -258,7 +258,7 @@ Precedence is deterministic:
 
 A seed that cannot be read, is malformed, contains an active `#include`, or has a condition that is not determined fails before the target is read, with diagnostics such as `flags.h: invalid --config-from seed: line 1: ...` on stderr and exit status `2`. Seeds never read headers from the filesystem; `-I` and `--iquote` apply only to the target. See [Construction from source](concrete-configuration.md#construction-from-source).
 
-### Unresolved conditions and free macros
+### Unresolved conditions and unknown macros
 
 When a reachable condition depends on a macro the configuration does not fix, the diagnostic names each unresolved macro and how to supply it:
 
@@ -297,18 +297,18 @@ A name used only as a definedness test is never given a value suggestion. Names 
 
 On success `complete` is `true`, `source` holds the output (compacted with `--compact`), and `diagnostics` is empty. Diagnostics that are not unresolved conditions have `condition: null` and an empty `unresolved` list; resource-limit diagnostics use the `resource`/`limit`/`observed` fields of the analysis JSON.
 
-Preprocessing stops at the first undetermined condition. To see every name the source's conditionals need at once, use `--list-free-macros`. It does not preprocess; it prints one tab-separated `NAME`, `USES`, `LINES` record per line, sorted by name:
+Preprocessing stops at the first undetermined condition. To see every name the source's conditionals need at once, use `--list-unknown-macros`. It does not preprocess; it prints one tab-separated `NAME`, `USES`, `LINES` record per line, sorted by name:
 
 ```text
-$ cpre preprocess --list-free-macros target.c
+$ cpre preprocess --list-unknown-macros target.c
 FEAT	definedness	6
 __GNUC__	value	4,12
 ```
 
-`USES` is `definedness`, `value`, or `definedness,value`; `LINES` lists the dependent directive lines. Combine with `--json` for `{"file": ..., "free_macros": [{"name", "uses", "lines", "suggestions"}, ...]}`. The listing honors `-D`, `-U`, `--config-from`, and `--unknown-names`, so it shows only what is still missing. Every conditional is inspected, reachable or not, so the list may include names a particular configuration never reaches; supplying them is harmless. Headers are not read. Output is deterministic, so it can build a seed for a later run:
+`USES` is `definedness`, `value`, or `definedness,value`; `LINES` lists the dependent directive lines. Combine with `--json` for `{"file": ..., "unknown_macros": [{"name", "uses", "lines", "suggestions"}, ...]}`. The listing honors `-D`, `-U`, `--config-from`, and `--unknown-names`, so it shows only what is still missing. Every conditional is inspected, reachable or not, so the list may include names a particular configuration never reaches; supplying them is harmless. Headers are not read. Output is deterministic, so it can build a seed for a later run:
 
 ```bash
-cpre preprocess --list-free-macros target.c |
+cpre preprocess --list-unknown-macros target.c |
   awk -F'\t' '{ print ($2 ~ /value/ ? "#define " $1 " 0" : "#undef " $1) }' > seed.h
 # edit seed.h, then:
 cpre preprocess --config-from seed.h target.c
