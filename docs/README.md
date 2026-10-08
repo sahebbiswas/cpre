@@ -17,6 +17,7 @@ Use this index to choose the guide that matches your integration surface.
 - [Concrete conditional expressions](conditional-expressions.md) — supported integer-expression grammar and deterministic boundaries.
 - [Macro expansion](macro-expansion.md) — object/function-like expansion, prescan/rescan, variadics, stringification, token pasting, `__VA_OPT__`, mapping, and failures.
 - [Host-assisted `__has_include`](has-include.md) — deterministic host-owned header-availability queries.
+- [Include resolution](include-resolution.md) — caller-resolved recursive `#include`/`#include_next`/`#import` preprocessing, provenance, guards, cycles, and the filesystem search-path resolver.
 - [Pragma handling](pragma-handling.md) — standard pragma syntax with host-owned semantics.
 
 ## Integration and compatibility

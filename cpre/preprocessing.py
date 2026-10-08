@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 
+from ._pragma_syntax import _mask_source_pragmas, _output_offset_for_source, _SourcePragma
 from .analysis import _macro_semantics, tree_expressions
 from .api import (
     AnalysisIncomplete,
@@ -20,15 +21,25 @@ from .configuration import (
     MacroConfiguration,
     _condition_environment,
     _configured_environment,
+    _detect_include_guard,
 )
 from .errors import AnalysisError, ErrorCode, SourceLocation
 from .expansion import Expansion, ExpansionError, SourceMapping, Token, tokenize
 from .expressions import conjunction, expression_atoms_in_order, negate
+from .includes import (
+    DEFAULT_MAX_INCLUDE_DEPTH,
+    IncludeForm,
+    IncludeOutcome,
+    IncludeRecord,
+    IncludeRequest,
+    IncludeResolver,
+    ResolvedInclude,
+)
 from .macros import MacroDefinition, MacroEnvironment, MacroState, _apply_macro_directive
 from .model import TRUE, ConditionalGroup, ConditionError, DefinedVariable, Variable
 from .numeric_conditions import NumericConditionError, evaluate_numeric_condition
 from .parser import logical_lines, parse_source
-from .robdd import BDD, AnalysisBudget, AnalysisLimitExceeded
+from .robdd import BDD, AnalysisBudget, AnalysisLimitExceeded, ResourceLimits
 
 # These names have implementation-provided semantics in common C/C++ preprocessors.
 # cpre must never silently certify them as ordinary identifiers. Explicit concrete
@@ -118,11 +129,16 @@ class PreprocessingContext:
 
 @dataclass(frozen=True)
 class PreprocessDiagnostic:
-    """A reachable construct that prevents supported concrete preprocessing."""
+    """A reachable construct that prevents supported concrete preprocessing.
+
+    ``source_identity`` is ``None`` for the primary source and otherwise names the
+    resolved included source that ``location`` refers to.
+    """
 
     code: ErrorCode
     message: str
     location: SourceLocation
+    source_identity: str | None = None
 
 
 @dataclass(frozen=True)
@@ -133,11 +149,25 @@ class SkippedInclude:
     ``operand`` is the directive operand as written after physical line splicing
     and comment removal; it is not macro expanded or resolved. The skipped header's
     contents, including any macros or declarations it would supply, are unknown.
+    ``source_identity`` is ``None`` for the primary source and otherwise names the
+    resolved included source containing the directive.
     """
 
     directive: str
     operand: str
     location: SourceLocation
+    source_identity: str | None = None
+
+
+@dataclass(frozen=True)
+class _IncludedPragma:
+    """A reachable ``#pragma`` marker from an included source, in output coordinates."""
+
+    payload: str
+    location: SourceLocation
+    source_identity: str
+    output_start: int
+    line_count: int
 
 
 @dataclass(frozen=True)
@@ -152,10 +182,52 @@ class PreprocessResult:
     source_map: tuple[SourceMapping, ...] | None = None
     removed_lines: frozenset[int] | None = None
     skipped_includes: tuple[SkippedInclude, ...] = ()
+    includes: tuple[IncludeRecord, ...] = ()
+    _included_pragmas: tuple[_IncludedPragma, ...] = field(default=(), repr=False, compare=False)
 
     @property
     def complete(self) -> bool:
         return self.source is not None and not self.incomplete
+
+
+@dataclass
+class _IncludeState:
+    """Include bookkeeping shared by every source in one preprocessing run."""
+
+    resolver: IncludeResolver
+    max_depth: int
+    stack: list[str]
+    once: set[str] = field(default_factory=set)
+    imported: set[str] = field(default_factory=set)
+    entered: set[str] = field(default_factory=set)
+    guards: dict[str, str | None] = field(default_factory=dict)
+    records: list[IncludeRecord] = field(default_factory=list)
+
+
+@dataclass
+class _Run:
+    """State shared by the primary source and every included source."""
+
+    base_environment: MacroEnvironment
+    limits: ResourceLimits
+    budget: AnalysisBudget
+    skip_includes: bool
+    includes: _IncludeState | None
+    skipped: list[SkippedInclude]
+    # Only the pragma layer dispatches pragma markers; other callers keep included
+    # pragmas as unsupported directives rather than emitting inert markers.
+    dispatch_pragmas: bool = False
+
+
+@dataclass(frozen=True)
+class _UnitOutput:
+    """Diagnostics, or canonical output of one source with its includes spliced in."""
+
+    diagnostics: tuple[PreprocessDiagnostic | AnalysisIncomplete, ...]
+    source: str = ""
+    source_map: tuple[SourceMapping, ...] = ()
+    removed_lines: frozenset[int] = frozenset()
+    pragmas: tuple[_IncludedPragma, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -335,15 +407,74 @@ def _unexpanded_predefined_macro(
     return None
 
 
-def _skipped_include(concrete: str, location: SourceLocation) -> SkippedInclude | None:
-    """Describe a spliced include-family directive, or return None for other directives."""
-    match = re.fullmatch(r"#\s*(include_next|include|import)\b(.*)", concrete, re.DOTALL)
+_INCLUDE_DIRECTIVE_RE = re.compile(r"#\s*(include_next|include|import)\b(.*)", re.DOTALL)
+
+
+def _include_directive(concrete: str) -> tuple[str, str] | None:
+    """Return ``(kind, operand)`` for a spliced include-family directive."""
+    match = _INCLUDE_DIRECTIVE_RE.fullmatch(concrete)
     if match is None:
         return None
-    operand = match[2].strip()
-    if not operand:
-        raise ValueError(f"#{match[1]} expects a header name")
-    return SkippedInclude(match[1], operand, location)
+    return match[1], match[2].strip()
+
+
+def _include_header(
+    raw: str,
+    operand: str,
+    environment: _PredefinedMacroEnvironment,
+    state: _LogicalPreprocessingState,
+    budget: AnalysisBudget,
+) -> tuple[str, IncludeForm]:
+    """Interpret an include operand as a header name.
+
+    Direct ``"header"`` and ``<header>`` forms are read from the physical spelling
+    so header-name characters such as ``//`` are not lexed as comments. Any other
+    operand is macro expanded and must produce one of those forms.
+    """
+    spliced = re.sub(r"\\(?:\r\n|\r|\n)", "", raw).rstrip("\r\n")
+    prefix = re.match(r"\s*#\s*(?:include_next|include|import)\b[ \t\f\v]*", spliced)
+    if prefix is not None:
+        rest = spliced[prefix.end() :]
+        direct = re.match(r'"([^"\r\n]*)"|<([^>\r\n]*)>', rest)
+        if direct is not None:
+            trailing = tokenize(rest[direct.end() :])
+            if any(token.kind not in {"space", "comment"} for token in trailing):
+                raise ValueError("unexpected tokens after the include header name")
+            quoted = direct[1] is not None
+            header = direct[1] if quoted else direct[2]
+            if not header:
+                raise ValueError("empty include header name")
+            return header, IncludeForm.QUOTED if quoted else IncludeForm.ANGLE
+
+    fragment = Expansion(operand, budget)
+    tokens = [token for token in fragment.tokens if token.kind not in {"space", "comment"}]
+    previous = environment.logical_override
+    environment.logical_override = state
+    try:
+        expanded = fragment._expand(tokens, environment)  # internal shared expansion semantics
+    finally:
+        environment.logical_override = previous
+    expanded = [token for token in expanded if token.kind not in {"empty", "space", "comment"}]
+    if (
+        len(expanded) == 1
+        and expanded[0].kind == "literal"
+        and re.fullmatch(r'"[^"\r\n]*"', expanded[0].text)
+    ):
+        header = expanded[0].text[1:-1]
+        form = IncludeForm.QUOTED
+    elif (
+        len(expanded) >= 3
+        and expanded[0].text == "<"
+        and expanded[-1].text == ">"
+        and not any(token.text == ">" for token in expanded[1:-1])
+    ):
+        header = "".join(token.text for token in expanded[1:-1])
+        form = IncludeForm.ANGLE
+    else:
+        raise ValueError('include operand must be "header" or <header>, or macro-expand to one')
+    if not header:
+        raise ValueError("empty include header name")
+    return header, form
 
 
 def compact(
@@ -391,6 +522,9 @@ def preprocess_source(
     context: PreprocessingContext | None = None,
     options: AnalysisOptions | None = None,
     skip_includes: bool = False,
+    include_resolver: IncludeResolver | None = None,
+    max_include_depth: int = DEFAULT_MAX_INCLUDE_DEPTH,
+    _dispatch_included_pragmas: bool = False,
 ) -> PreprocessResult:
     """Select conditional branches under an explicit concrete macro state.
 
@@ -419,14 +553,34 @@ def preprocess_source(
     ``#include``/``#include_next``/``#import`` directives are instead masked like other
     handled directives and reported in ``skipped_includes``; the skipped headers are
     never read, so no macros or declarations are attributed to them.
-    Definedness-only checks remain ordinary conditional reasoning. Successful results expose a detached, read-only final
-    macro-state snapshot and immutable provenance for physical lines wholly removed
-    by preprocessing. Malformed conditionals raise the same structured ParseError
-    as analyze_source.
+
+    With ``include_resolver``, reachable include directives are resolved by the
+    caller and the resolved sources are preprocessed recursively with shared macro
+    state. Their canonical output is spliced after the masked directive line and
+    mapped with ``SourceMapping.source_identity``. Cycles, nesting deeper than
+    ``max_include_depth``, and unresolvable headers return atomic incomplete
+    results; unresolvable headers fall back to masking when ``skip_includes`` is
+    also set. ``#pragma once``, ``#import``, and detected include guards prevent
+    re-entering a source. Every resolved include is reported in ``includes``.
+
+    Definedness-only checks remain ordinary conditional reasoning. Successful
+    results expose a detached, read-only final macro-state snapshot and immutable
+    provenance for output lines wholly removed by preprocessing. Malformed
+    conditionals raise the same structured ParseError as analyze_source.
     """
     if type(skip_includes) is not bool:
         raise AnalysisError(
             "skip_includes must be True or False",
+            code=ErrorCode.INVALID_CONFIGURATION,
+        )
+    if include_resolver is not None and not callable(include_resolver):
+        raise AnalysisError(
+            "include_resolver must be callable",
+            code=ErrorCode.INVALID_CONFIGURATION,
+        )
+    if type(max_include_depth) is not int or max_include_depth < 1:
+        raise AnalysisError(
+            "max_include_depth must be a positive integer",
             code=ErrorCode.INVALID_CONFIGURATION,
         )
     normalized = _normalize_assumptions(assumptions)
@@ -446,11 +600,67 @@ def preprocess_source(
         raise AnalysisError(
             "options must be an AnalysisOptions instance", code=ErrorCode.ANALYSIS_FAILURE
         )
+
+    limits = resolved_options._resource_limits()
+    includes = (
+        _IncludeState(
+            include_resolver,
+            max_include_depth,
+            [filename] if filename is not None else [],
+        )
+        if include_resolver is not None
+        else None
+    )
+    run = _Run(
+        base_environment,
+        limits,
+        AnalysisBudget(limits.max_work),
+        skip_includes,
+        includes,
+        [],
+        _dispatch_included_pragmas,
+    )
+    unit = _preprocess_unit(source, run, identity=None, filename=filename, depth=0)
+    if unit.diagnostics:
+        diagnostics = list(unit.diagnostics)
+        diagnostics.sort(key=lambda item: item.location.line if item.location else 0)
+        return PreprocessResult(None, filename, tuple(diagnostics))
+    return PreprocessResult(
+        unit.source,
+        filename,
+        macros=base_environment.snapshot(),
+        source_map=unit.source_map,
+        removed_lines=unit.removed_lines,
+        skipped_includes=tuple(run.skipped),
+        includes=tuple(includes.records) if includes is not None else (),
+        _included_pragmas=unit.pragmas,
+    )
+
+
+def _preprocess_unit(
+    source: str,
+    run: _Run,
+    *,
+    identity: str | None,
+    filename: str | None,
+    depth: int,
+) -> _UnitOutput:
+    """Preprocess one primary or included source against the shared macro state."""
+    pragma_markers: tuple[_SourcePragma, ...] = ()
+    if identity is not None and run.dispatch_pragmas:
+        # Included pragmas become same-width markers that survive only on reachable
+        # lines; the pragma layer dispatches them in output order. ``once`` is a
+        # core include-management pragma and stays a directive.
+        source, pragma_markers = _mask_source_pragmas(source, frozenset({"once"}))
     try:
         tree = parse_source(source, distinguish_defined=True)
     except ConditionError as error:
         raise _translate_parse_error(error, filename) from error
 
+    base_environment = run.base_environment
+    limits = run.limits
+    budget = run.budget
+    includes = run.includes
     physical = source.splitlines(keepends=True)
     logical = list(logical_lines(source))
     ends = {
@@ -461,13 +671,14 @@ def preprocess_source(
     }
     retained = [True] * len(physical)
     diagnostics: list[PreprocessDiagnostic | AnalysisIncomplete] = []
-    skipped_includes: list[SkippedInclude] = []
+    insertions: list[tuple[int, int, _UnitOutput]] = []
 
     def blank(start: int, end: int) -> None:
         retained[start - 1 : end] = [False] * (end - start + 1)
 
-    limits = resolved_options._resource_limits()
-    budget = AnalysisBudget(limits.max_work)
+    def located(code: ErrorCode, message: str, line: int) -> PreprocessDiagnostic:
+        return PreprocessDiagnostic(code, message, SourceLocation(line), identity)
+
     expansion = Expansion(source, budget)
     logical_states: dict[int, _LogicalPreprocessingState] = {}
     environment = _PredefinedMacroEnvironment(base_environment, expansion, logical_states)
@@ -477,6 +688,130 @@ def preprocess_source(
     current_line = None
     logical_delta = 0
     logical_file_literal = _file_literal(filename)
+
+    def include_line(kind: str, operand: str, line: int, state: _LogicalPreprocessingState) -> bool:
+        """Handle one reachable include directive; False means diagnostics were added."""
+        location = SourceLocation(line)
+        if not operand:
+            diagnostics.append(
+                located(
+                    ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
+                    f"#{kind} expects a header name",
+                    line,
+                )
+            )
+            return False
+        if includes is None:
+            run.skipped.append(SkippedInclude(kind, operand, location, identity))
+            blank(line, ends[line])
+            return True
+
+        expansion.current_offset = offsets[line - 1]
+        try:
+            header, form = _include_header(
+                source[offsets[line - 1] : offsets[ends[line]]],
+                operand,
+                environment,
+                state,
+                budget,
+            )
+        except ValueError as error:
+            diagnostics.append(
+                located(ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE, str(error), line)
+            )
+            return False
+        spelling = f'"{header}"' if form is IncludeForm.QUOTED else f"<{header}>"
+        includer = identity if identity is not None else filename
+        request = IncludeRequest(header, form, kind, location, includer, depth)
+        resolved = includes.resolver(request)
+        if resolved is None:
+            if run.skip_includes:
+                run.skipped.append(SkippedInclude(kind, operand, location, identity))
+                blank(line, ends[line])
+                return True
+            diagnostics.append(
+                located(
+                    ErrorCode.UNRESOLVED_INCLUDE,
+                    f"cannot resolve #{kind} {spelling}",
+                    line,
+                )
+            )
+            return False
+        if not isinstance(resolved, ResolvedInclude):
+            raise AnalysisError(
+                "include_resolver must return a ResolvedInclude or None",
+                code=ErrorCode.INVALID_CONFIGURATION,
+                location=location,
+                filename=includer,
+            )
+
+        target = resolved.identity
+        outcome: IncludeOutcome | None = None
+        if target in includes.once:
+            outcome = IncludeOutcome.PRAGMA_ONCE
+        elif target in includes.entered and (kind == "import" or target in includes.imported):
+            # #import makes a source include-once, as in GCC and Clang.
+            outcome = IncludeOutcome.IMPORTED
+        else:
+            if target not in includes.guards:
+                includes.guards[target] = _detect_include_guard(resolved.source)
+            guard = includes.guards[target]
+            if guard is not None and environment.get(guard).defined is True:
+                outcome = IncludeOutcome.GUARDED
+        if kind == "import":
+            includes.imported.add(target)
+        if outcome is not None:
+            includes.records.append(IncludeRecord(request, target, outcome))
+            blank(line, ends[line])
+            return True
+
+        if target in includes.stack:
+            diagnostics.append(
+                located(
+                    ErrorCode.INCLUDE_CYCLE,
+                    f"#{kind} {spelling} re-enters {target}, which is already being preprocessed",
+                    line,
+                )
+            )
+            return False
+        if depth + 1 > includes.max_depth:
+            diagnostics.append(
+                located(
+                    ErrorCode.INCLUDE_DEPTH_EXCEEDED,
+                    f"#{kind} {spelling} exceeds the maximum include depth of {includes.max_depth}",
+                    line,
+                )
+            )
+            return False
+
+        guard = includes.guards[target]
+        if guard is not None and environment.get(guard).defined is None:
+            # A detected include guard is file-private, as in
+            # MacroConfiguration.from_source(): unless the caller configured it,
+            # it starts undefined so the guarded body is entered.
+            environment.undef(guard)
+        includes.records.append(IncludeRecord(request, target, IncludeOutcome.ENTERED))
+        includes.entered.add(target)
+        includes.stack.append(target)
+        try:
+            child = _preprocess_unit(
+                resolved.source,
+                run,
+                identity=target,
+                filename=target,
+                depth=depth + 1,
+            )
+        finally:
+            includes.stack.pop()
+        # Names defined or undefined by the included source are explicit state now.
+        environment._explicit_names.update(base_environment.snapshot())
+        if child.diagnostics:
+            diagnostics.extend(child.diagnostics)
+            return False
+        blank(line, ends[line])
+        insertions.append((offsets[ends[line]], ends[line], child))
+        return True
+
     try:
         semantics = _macro_semantics(tree, legacy_symbolic=False)
         atoms = [
@@ -528,10 +863,10 @@ def preprocess_source(
                         )
                         if builtin is not None:
                             diagnostics.append(
-                                PreprocessDiagnostic(
+                                located(
                                     ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
                                     f"predefined macro {builtin} is not supported during concrete preprocessing",
-                                    SourceLocation(current_line),
+                                    current_line,
                                 )
                             )
                             break
@@ -566,28 +901,28 @@ def preprocess_source(
                                     )
                                 except NumericConditionError as error:
                                     diagnostics.append(
-                                        PreprocessDiagnostic(
+                                        located(
                                             ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION,
                                             str(error),
-                                            SourceLocation(current_line),
+                                            current_line,
                                         )
                                     )
                                     break
                                 except ExpansionError as error:
                                     diagnostics.append(
-                                        PreprocessDiagnostic(
+                                        located(
                                             ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
                                             str(error),
-                                            SourceLocation(current_line),
+                                            current_line,
                                         )
                                     )
                                     break
                             if ambiguous and selected is None:
                                 diagnostics.append(
-                                    PreprocessDiagnostic(
+                                    located(
                                         ErrorCode.UNRESOLVED_CONDITION,
                                         "condition is not determined by the current macro state",
-                                        SourceLocation(current_line),
+                                        current_line,
                                     )
                                 )
                                 break
@@ -631,35 +966,37 @@ def preprocess_source(
                         blank(current_line, ends[current_line])
                         continue
                     if kind not in {"define", "undef"}:
-                        if not skip_includes:
+                        if not run.skip_includes and includes is None:
                             raise ValueError("include processing is not supported")
-                        skipped = _skipped_include(concrete, SourceLocation(current_line))
-                        if skipped is None or skipped.directive != kind:
+                        directive = _include_directive(concrete)
+                        if directive is None or directive[0] != kind:
                             raise ValueError("ambiguous directive after physical line splicing")
-                        skipped_includes.append(skipped)
-                        blank(current_line, ends[current_line])
-                        continue
-                    definition_match = re.fullmatch(
-                        r"#\s*(define|undef)\b(.*)", concrete, re.DOTALL
-                    )
-                    if definition_match is None or definition_match[1] != kind:
-                        raise ValueError("ambiguous directive after physical line splicing")
-                    remainder = definition_match[2]
-                    _apply_macro_directive(
-                        environment, kind, remainder, SourceLocation(current_line)
-                    )
-                    if kind == "define":
-                        name_match = re.match(r"\s*([A-Za-z_]\w*)", remainder)
-                        assert name_match is not None
-                        definition = environment.get(name_match[1]).definition
+                    else:
+                        definition_match = re.fullmatch(
+                            r"#\s*(define|undef)\b(.*)", concrete, re.DOTALL
+                        )
+                        if definition_match is None or definition_match[1] != kind:
+                            raise ValueError("ambiguous directive after physical line splicing")
+                        remainder = definition_match[2]
+                        _apply_macro_directive(
+                            environment, kind, remainder, SourceLocation(current_line)
+                        )
+                        if kind == "define":
+                            name_match = re.match(r"\s*([A-Za-z_]\w*)", remainder)
+                            assert name_match is not None
+                            definition = environment.get(name_match[1]).definition
                 except ValueError as error:
                     diagnostics.append(
-                        PreprocessDiagnostic(
+                        located(
                             ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
                             str(error),
-                            SourceLocation(current_line),
+                            current_line,
                         )
                     )
+                    break
+                if kind not in {"define", "undef"}:
+                    if include_line(kind, directive[1], current_line, line_state):
+                        continue
                     break
                 if definition is not None:
                     expansion.current_offset = offsets[current_line - 1]
@@ -672,22 +1009,17 @@ def preprocess_source(
                 if re.fullmatch(r"#\s*", concrete, re.DOTALL):
                     blank(current_line, ends[current_line])
                     continue
-                if skip_includes:
-                    try:
-                        skipped = _skipped_include(concrete, SourceLocation(current_line))
-                    except ValueError as error:
-                        diagnostics.append(
-                            PreprocessDiagnostic(
-                                ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
-                                str(error),
-                                SourceLocation(current_line),
-                            )
-                        )
-                        break
-                    if skipped is not None:
-                        skipped_includes.append(skipped)
+                if identity is not None and includes is not None:
+                    if re.fullmatch(r"#\s*pragma\s+once", concrete):
+                        includes.once.add(identity)
                         blank(current_line, ends[current_line])
                         continue
+                if run.skip_includes or includes is not None:
+                    directive = _include_directive(concrete)
+                    if directive is not None:
+                        if include_line(directive[0], directive[1], current_line, line_state):
+                            continue
+                        break
                 directive_match = re.match(r"#\s*([A-Za-z_]\w*)\b", concrete)
                 if directive_match is not None:
                     message = (
@@ -697,10 +1029,10 @@ def preprocess_source(
                 else:
                     message = "nonconditional preprocessing directive is not supported"
                 diagnostics.append(
-                    PreprocessDiagnostic(
+                    located(
                         ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
                         message,
-                        SourceLocation(current_line),
+                        current_line,
                     )
                 )
                 break
@@ -716,6 +1048,7 @@ def preprocess_source(
                 ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
                 str(error),
                 expansion.location(expansion.current_offset),
+                identity,
             )
         )
     except AnalysisLimitExceeded as error:
@@ -728,12 +1061,12 @@ def preprocess_source(
                 error.observed,
                 str(error),
                 SourceLocation(limit_line) if limit_line is not None else None,
+                source_identity=identity,
             )
         )
 
     if diagnostics:
-        diagnostics.sort(key=lambda item: item.location.line if item.location else 0)
-        return PreprocessResult(None, filename, tuple(diagnostics))
+        return _UnitOutput(tuple(diagnostics))
     output = "".join(
         line if keep else "".join(char if char in "\r\n" else " " for char in line)
         for line, keep in zip(physical, retained)
@@ -760,24 +1093,172 @@ def preprocess_source(
     builtin = _unexpanded_predefined_macro(output, source_map, expansion)
     if builtin is not None:
         name, location = builtin
-        return PreprocessResult(
-            None,
-            filename,
+        return _UnitOutput(
             (
                 PreprocessDiagnostic(
                     ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
                     f"predefined macro {name} is not supported during concrete preprocessing",
                     location,
+                    identity,
                 ),
-            ),
+            )
         )
-    return PreprocessResult(
-        output,
-        filename,
-        macros=environment.snapshot(),
-        source_map=source_map,
-        removed_lines=removed_lines,
-        skipped_includes=tuple(skipped_includes),
+
+    pragmas = []
+    for marker in pragma_markers:
+        output_offset = _output_offset_for_source(source_map, marker.marker_offset)
+        if output_offset is None or output_offset >= len(output) or output[output_offset] != "0":
+            continue
+        assert identity is not None
+        pragmas.append(
+            _IncludedPragma(
+                marker.payload,
+                marker.location,
+                identity,
+                output_offset,
+                marker.end_line - marker.start_line + 1,
+            )
+        )
+    if identity is not None:
+        source_map = tuple(replace(item, source_identity=identity) for item in source_map)
+        if output and not _ends_line(output):
+            # End of an included source ends its last line, as in compiler preprocessing.
+            source_map += (_synthetic_newline(len(output), len(source), expansion, identity),)
+            output += "\n"
+    unit = _UnitOutput((), output, source_map, removed_lines, tuple(pragmas))
+    if insertions:
+        unit = _splice(unit, insertions, len(source), expansion, identity)
+    return unit
+
+
+def _ends_line(text: str) -> bool:
+    return text.endswith(("\n", "\r"))
+
+
+def _synthetic_newline(
+    output_offset: int,
+    source_offset: int,
+    expansion: Expansion,
+    identity: str | None,
+) -> SourceMapping:
+    """Map a generated line ending to an empty range at the end of a source."""
+    location = expansion.location(source_offset)
+    return SourceMapping(
+        output_offset,
+        output_offset + 1,
+        source_offset,
+        source_offset,
+        location,
+        location,
+        True,
+        identity,
+    )
+
+
+def _splice(
+    unit: _UnitOutput,
+    insertions: list[tuple[int, int, _UnitOutput]],
+    source_length: int,
+    expansion: Expansion,
+    identity: str | None,
+) -> _UnitOutput:
+    """Insert included outputs after their masked directive lines.
+
+    Each insertion is ``(source_offset, directive_end_line, child)`` where
+    ``source_offset`` is the start of the physical line after the directive.
+    """
+    output = unit.source
+    mappings = list(unit.source_map)
+
+    def output_offset(source_offset: int) -> int:
+        if source_offset >= source_length:
+            return len(output)
+        for mapping in mappings:
+            if mapping.source_start > source_offset or (
+                mapping.expanded and mapping.source_start == source_offset
+            ):
+                return mapping.output_start
+            if source_offset < mapping.source_end and not mapping.expanded:
+                return mapping.output_start + source_offset - mapping.source_start
+        return len(output)
+
+    def split(at: int) -> None:
+        for index, mapping in enumerate(mappings):
+            if not (mapping.output_start < at < mapping.output_end) or mapping.expanded:
+                continue
+            middle = mapping.source_start + at - mapping.output_start
+            location = expansion.location(middle)
+            mappings[index : index + 1] = [
+                replace(mapping, output_end=at, source_end=middle, end=location),
+                replace(mapping, output_start=at, source_start=middle, start=location),
+            ]
+            return
+
+    points = [(output_offset(offset), end_line, child) for offset, end_line, child in insertions]
+    for at, _end_line, _child in points:
+        split(at)
+
+    pieces: list[str] = []
+    combined: list[SourceMapping] = []
+    removed: set[int] = set()
+    pragmas: list[_IncludedPragma] = []
+    char_shift = 0
+    line_shift = 0
+    cursor = 0
+    pending = iter(sorted(unit.removed_lines))
+    next_removed = next(pending, None)
+
+    def own(until: int, through_line: int | None) -> None:
+        nonlocal cursor, next_removed
+        pieces.append(output[cursor:until])
+        for mapping in mappings:
+            if cursor <= mapping.output_start < until:
+                combined.append(
+                    replace(
+                        mapping,
+                        output_start=mapping.output_start + char_shift,
+                        output_end=mapping.output_end + char_shift,
+                    )
+                )
+        for pragma in unit.pragmas:
+            if cursor <= pragma.output_start < until:
+                pragmas.append(replace(pragma, output_start=pragma.output_start + char_shift))
+        while next_removed is not None and (through_line is None or next_removed <= through_line):
+            removed.add(next_removed + line_shift)
+            next_removed = next(pending, None)
+        cursor = until
+
+    for at, end_line, child in points:
+        own(at, end_line)
+        if not child.source:
+            continue
+        if at == len(output) and output and not _ends_line(output):
+            combined.append(_synthetic_newline(at + char_shift, source_length, expansion, identity))
+            pieces.append("\n")
+            char_shift += 1
+        base = at + char_shift
+        pieces.append(child.source)
+        combined.extend(
+            replace(
+                mapping,
+                output_start=mapping.output_start + base,
+                output_end=mapping.output_end + base,
+            )
+            for mapping in child.source_map
+        )
+        pragmas.extend(
+            replace(pragma, output_start=pragma.output_start + base) for pragma in child.pragmas
+        )
+        removed.update(line + end_line + line_shift for line in child.removed_lines)
+        char_shift += len(child.source)
+        line_shift += len(child.source.splitlines())
+    own(len(output), None)
+    return _UnitOutput(
+        (),
+        "".join(pieces),
+        tuple(combined),
+        frozenset(removed),
+        tuple(pragmas),
     )
 
 

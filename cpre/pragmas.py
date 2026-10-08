@@ -9,13 +9,21 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Protocol
 
+from ._pragma_syntax import (
+    _mask_source_pragmas,
+    _normalize_pragma_payload,
+    _output_offset_for_source,
+    _physical_line_starts,
+    _public_location,
+    _SourcePragma,
+)
 from .api import AnalysisOptions, MacroAssumptions
 from .configuration import MacroConfiguration
 from .errors import AnalysisError, ErrorCode, SourceLocation
 from .expansion import SourceMapping, tokenize
 from .include_queries import IncludeQueryProvider
 from .include_queries import preprocess_source as _include_preprocess_source
-from .parser import logical_lines
+from .includes import DEFAULT_MAX_INCLUDE_DEPTH, IncludeResolver
 from .preprocessing import PreprocessDiagnostic, PreprocessingContext, PreprocessResult
 
 
@@ -58,33 +66,24 @@ class PragmaHandler(Protocol):
 
 
 @dataclass(frozen=True)
-class _SourcePragma:
-    payload: str
-    location: SourceLocation
-    marker_offset: int
-    start_line: int
-    end_line: int
-
-
-@dataclass(frozen=True)
 class _RenderedPragma:
     pragma: Pragma
     output_start: int
     output_end: int
-    source_lines: tuple[int, ...] = ()
+    output_lines: tuple[int, ...] = ()
+    source_identity: str | None = None
 
 
 class _MalformedPragma(ValueError):
-    def __init__(self, message: str, location: SourceLocation) -> None:
+    def __init__(
+        self,
+        message: str,
+        location: SourceLocation,
+        source_identity: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.location = location
-
-
-def _physical_line_starts(source: str) -> list[int]:
-    starts = [0]
-    for line in source.splitlines(keepends=True):
-        starts.append(starts[-1] + len(line))
-    return starts
+        self.source_identity = source_identity
 
 
 def _source_location(source: str, offset: int) -> SourceLocation:
@@ -94,112 +93,44 @@ def _source_location(source: str, offset: int) -> SourceLocation:
     return SourceLocation(index + 1, offset - starts[index] + 1)
 
 
-def _public_location(location: object) -> SourceLocation:
-    line = getattr(location, "line", None)
-    column = getattr(location, "column", None)
-    if line is None or column is None:
-        raise AnalysisError(
-            "pragma source location is incomplete",
-            code=ErrorCode.ANALYSIS_FAILURE,
-        )
-    return SourceLocation(line, column)
-
-
-def _normalize_pragma_payload(payload: str) -> str:
-    """Return stable phase-3 spelling for host dispatch.
-
-    Comments become whitespace and physical inter-token whitespace is normalized,
-    while every non-whitespace preprocessing token keeps its exact spelling.
-    """
-    parts: list[str] = []
-    pending_space = False
-    for token in tokenize(payload):
-        if token.kind in {"space", "comment"}:
-            pending_space = True
-            continue
-        if pending_space and parts:
-            parts.append(" ")
-        parts.append(token.text)
-        pending_space = False
-    return "".join(parts)
-
-
-def _mask_source_pragmas(source: str) -> tuple[str, tuple[_SourcePragma, ...]]:
-    """Replace pragma directives with inert same-width markers.
-
-    Keeping every physical offset stable lets the ordinary concrete preprocessor
-    decide reachability. Active markers survive; markers in discarded branches
-    are blanked by the existing conditional-selection machinery.
-    """
-    physical = source.splitlines(keepends=True)
-    logical = list(logical_lines(source))
-    starts = _physical_line_starts(source)
-    characters = list(source)
-    pragmas: list[_SourcePragma] = []
-
-    for index, line in enumerate(logical):
-        match = re.match(r"^\s*#\s*pragma\b(.*)$", line.text, re.DOTALL)
-        if match is None:
-            continue
-        end_line = logical[index + 1].start_line - 1 if index + 1 < len(logical) else len(physical)
-        hash_index = line.text.find("#")
-        if hash_index < 0 or hash_index >= len(line.locations):
-            raise AnalysisError(
-                "cannot locate #pragma directive",
-                code=ErrorCode.ANALYSIS_FAILURE,
-            )
-        location = _public_location(line.locations[hash_index])
-        marker_offset = starts[location.line - 1] + location.column - 1
-        span_start = starts[line.start_line - 1]
-        span_end = starts[end_line]
-        for position in range(span_start, span_end):
-            if source[position] not in "\r\n":
-                characters[position] = " "
-        # '#pragma' guarantees at least two writable characters beginning at '#'.
-        characters[marker_offset] = "0"
-        characters[marker_offset + 1] = ";"
-        pragmas.append(
-            _SourcePragma(
-                _normalize_pragma_payload(match.group(1)),
-                location,
-                marker_offset,
-                line.start_line,
-                end_line,
-            )
-        )
-
-    return "".join(characters), tuple(pragmas)
-
-
-def _output_offset_for_source(
-    source_map: tuple[SourceMapping, ...],
-    source_offset: int,
-) -> int | None:
-    for mapping in source_map:
-        if not (mapping.source_start <= source_offset < mapping.source_end):
-            continue
-        if mapping.expanded:
-            return mapping.output_start
-        output = mapping.output_start + source_offset - mapping.source_start
-        if output < mapping.output_end:
-            return output
-        return None
-    return None
+def _output_line(output: str, offset: int) -> int:
+    """Return the one-based canonical output line containing ``offset``."""
+    lines = output[:offset].splitlines(keepends=True)
+    if not lines:
+        return 1
+    last = lines[-1]
+    return len(lines) + (1 if last.splitlines()[0] != last else 0)
 
 
 def _location_for_output(
     source: str,
+    output: str,
     source_map: tuple[SourceMapping, ...],
     output_offset: int,
-) -> SourceLocation:
+) -> tuple[SourceLocation, str | None]:
+    """Return the physical location and source identity behind an output offset."""
     for mapping in source_map:
         if not (mapping.output_start <= output_offset < mapping.output_end):
             continue
         if mapping.expanded:
-            return mapping.start
-        source_offset = mapping.source_start + output_offset - mapping.output_start
-        return _source_location(source, source_offset)
-    return SourceLocation(1, 1)
+            return mapping.start, mapping.source_identity
+        if mapping.source_identity is None:
+            source_offset = mapping.source_start + output_offset - mapping.output_start
+            return _source_location(source, source_offset), None
+        # Unexpanded included text is copied verbatim, so the output spelling between
+        # the mapping start and the offset locates it within the included source.
+        assert mapping.start.column is not None
+        lines = output[mapping.output_start : output_offset].splitlines(keepends=True)
+        if not lines:
+            location = mapping.start
+        elif lines[-1].splitlines()[0] != lines[-1]:
+            location = SourceLocation(mapping.start.line + len(lines), 1)
+        elif len(lines) == 1:
+            location = SourceLocation(mapping.start.line, mapping.start.column + len(lines[0]))
+        else:
+            location = SourceLocation(mapping.start.line + len(lines) - 1, len(lines[-1]) + 1)
+        return location, mapping.source_identity
+    return SourceLocation(1, 1), None
 
 
 def _destringize_pragma(literal: str) -> str:
@@ -237,28 +168,40 @@ def _scan_operator_pragmas(
         # _Pragma is a standard phase-4 preprocessing operator. Treat a surviving
         # token that does not form the required unary expression as malformed
         # reserved preprocessing syntax rather than silently passing it through.
-        location = _location_for_output(source, source_map, token.start)
+        location, identity = _location_for_output(source, output, source_map, token.start)
         opening_index = significant(index + 1)
         if opening_index >= len(tokens) or tokens[opening_index].text != "(":
-            raise _MalformedPragma("_Pragma expects a parenthesized string literal", location)
+            raise _MalformedPragma(
+                "_Pragma expects a parenthesized string literal", location, identity
+            )
         literal_index = significant(opening_index + 1)
         if literal_index >= len(tokens):
-            raise _MalformedPragma("_Pragma expects one ordinary string literal", location)
+            raise _MalformedPragma(
+                "_Pragma expects one ordinary string literal", location, identity
+            )
         literal = tokens[literal_index]
         try:
             payload = _normalize_pragma_payload(_destringize_pragma(literal.text))
         except ValueError as error:
-            raise _MalformedPragma(str(error), location) from error
+            raise _MalformedPragma(str(error), location, identity) from error
         closing_index = significant(literal_index + 1)
         if closing_index >= len(tokens) or tokens[closing_index].text != ")":
-            raise _MalformedPragma("_Pragma expects exactly one string literal operand", location)
+            raise _MalformedPragma(
+                "_Pragma expects exactly one string literal operand", location, identity
+            )
 
         closing = tokens[closing_index]
         found.append(
             _RenderedPragma(
-                Pragma(payload, PragmaOrigin.OPERATOR, location, filename),
+                Pragma(
+                    payload,
+                    PragmaOrigin.OPERATOR,
+                    location,
+                    identity if identity is not None else filename,
+                ),
                 token.start,
                 closing.end,
+                source_identity=identity,
             )
         )
         index = closing_index + 1
@@ -280,12 +223,29 @@ def _source_pragma_events(
             continue
         if result.source[output_offset] != "0":
             continue
+        first_line = _output_line(result.source, output_offset)
         found.append(
             _RenderedPragma(
                 Pragma(pragma.payload, PragmaOrigin.DIRECTIVE, pragma.location, filename),
                 output_offset,
                 min(output_offset + 2, len(result.source)),
-                tuple(range(pragma.start_line, pragma.end_line + 1)),
+                tuple(range(first_line, first_line + pragma.end_line - pragma.start_line + 1)),
+            )
+        )
+    for included in result._included_pragmas:
+        first_line = _output_line(result.source, included.output_start)
+        found.append(
+            _RenderedPragma(
+                Pragma(
+                    included.payload,
+                    PragmaOrigin.DIRECTIVE,
+                    included.location,
+                    included.source_identity,
+                ),
+                included.output_start,
+                min(included.output_start + 2, len(result.source)),
+                tuple(range(first_line, first_line + included.line_count)),
+                included.source_identity,
             )
         )
     return tuple(found)
@@ -293,10 +253,11 @@ def _source_pragma_events(
 
 def _unsupported_pragma(
     filename: str | None,
-    pragma: Pragma,
+    item: _RenderedPragma,
     *,
     unknown_handler: bool,
 ) -> PreprocessResult:
+    pragma = item.pragma
     location = pragma.location
     if unknown_handler and pragma.origin is PragmaOrigin.DIRECTIVE:
         # Preserve the pre-extension default diagnostic shape for source pragmas.
@@ -316,6 +277,7 @@ def _unsupported_pragma(
                 ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
                 message,
                 location,
+                item.source_identity,
             ),
         ),
     )
@@ -332,6 +294,8 @@ def preprocess_source(
     pragma_handler: PragmaHandler | None = None,
     options: AnalysisOptions | None = None,
     skip_includes: bool = False,
+    include_resolver: IncludeResolver | None = None,
+    max_include_depth: int = DEFAULT_MAX_INCLUDE_DEPTH,
 ) -> PreprocessResult:
     """Concrete preprocessing with caller-owned pragma semantics.
 
@@ -359,6 +323,9 @@ def preprocess_source(
         include_query=include_query,
         options=options,
         skip_includes=skip_includes,
+        include_resolver=include_resolver,
+        max_include_depth=max_include_depth,
+        _dispatch_included_pragmas=True,
     )
     if not result.complete or result.source is None or result.source_map is None:
         return result
@@ -379,6 +346,7 @@ def preprocess_source(
                     ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
                     str(error),
                     error.location,
+                    error.source_identity,
                 ),
             ),
         )
@@ -393,10 +361,10 @@ def preprocess_source(
 
     for item in rendered:
         if pragma_handler is None:
-            return _unsupported_pragma(filename, item.pragma, unknown_handler=True)
+            return _unsupported_pragma(filename, item, unknown_handler=True)
         disposition = pragma_handler(item.pragma)
         if disposition in {None, PragmaDisposition.UNSUPPORTED}:
-            return _unsupported_pragma(filename, item.pragma, unknown_handler=False)
+            return _unsupported_pragma(filename, item, unknown_handler=False)
         if disposition is not PragmaDisposition.CONSUME:
             raise AnalysisError(
                 "pragma_handler must return PragmaDisposition.CONSUME, "
@@ -411,7 +379,7 @@ def preprocess_source(
         for position in range(item.output_start, item.output_end):
             if characters[position] not in "\r\n":
                 characters[position] = " "
-        removed_lines.update(item.source_lines)
+        removed_lines.update(item.output_lines)
 
     return replace(
         result,

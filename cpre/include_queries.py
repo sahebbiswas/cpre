@@ -5,13 +5,13 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from enum import Enum
 from typing import Protocol
 
 from .api import AnalysisIncomplete, AnalysisOptions, MacroAssumptions
 from .configuration import MacroConfiguration
 from .errors import AnalysisError, ErrorCode, SourceLocation
 from .expansion import Expansion, ExpansionError, tokenize
+from .includes import DEFAULT_MAX_INCLUDE_DEPTH, IncludeForm, IncludeResolver
 from .macros import MacroEnvironment
 from .parser import DIRECTIVE_RE, logical_lines
 from .preprocessing import (
@@ -23,13 +23,6 @@ from .preprocessing import (
     preprocess_source as _core_preprocess_source,
 )
 from .robdd import AnalysisBudget, AnalysisLimitExceeded
-
-
-class IncludeForm(str, Enum):
-    """Syntactic form used by a ``__has_include`` query."""
-
-    QUOTED = "quoted"
-    ANGLE = "angle"
 
 
 @dataclass(frozen=True)
@@ -248,6 +241,8 @@ def _environment_before_line(
     context: PreprocessingContext | None,
     options: AnalysisOptions | None,
     skip_includes: bool = False,
+    include_resolver: IncludeResolver | None = None,
+    max_include_depth: int = DEFAULT_MAX_INCLUDE_DEPTH,
 ) -> MacroEnvironment | None:
     physical = source.splitlines(keepends=True)
     prefix = "".join(physical[: line - 1])
@@ -262,6 +257,10 @@ def _environment_before_line(
         context=context,
         options=options,
         skip_includes=skip_includes,
+        include_resolver=include_resolver,
+        max_include_depth=max_include_depth,
+        # Only macro state is read here; included pragma markers are inert.
+        _dispatch_included_pragmas=True,
     )
     if not result.complete or result.macros is None:
         return None
@@ -350,6 +349,9 @@ def preprocess_source(
     include_query: IncludeQueryProvider | None = None,
     options: AnalysisOptions | None = None,
     skip_includes: bool = False,
+    include_resolver: IncludeResolver | None = None,
+    max_include_depth: int = DEFAULT_MAX_INCLUDE_DEPTH,
+    _dispatch_included_pragmas: bool = False,
 ) -> PreprocessResult:
     """Concrete preprocessing with optional host-assisted ``__has_include`` support.
 
@@ -358,7 +360,8 @@ def preprocess_source(
     macro-expanded header spelling, delimiter form, physical source location, and
     filename. A Boolean answer is substituted deterministically; ``None`` yields an
     atomic incomplete result. Queries in branches or Boolean terms proven unreachable
-    are never sent to the provider.
+    are never sent to the provider. Queries are recognized in the primary source
+    only; a ``__has_include`` condition inside an included source is unresolved.
     """
     if include_query is not None and not callable(include_query):
         raise AnalysisError(
@@ -376,6 +379,9 @@ def preprocess_source(
             context=context,
             options=options,
             skip_includes=skip_includes,
+            include_resolver=include_resolver,
+            max_include_depth=max_include_depth,
+            _dispatch_included_pragmas=_dispatch_included_pragmas,
         )
 
     resolved: dict[int, bool] = {}
@@ -389,13 +395,16 @@ def preprocess_source(
             context=context,
             options=options,
             skip_includes=skip_includes,
+            include_resolver=include_resolver,
+            max_include_depth=max_include_depth,
+            _dispatch_included_pragmas=_dispatch_included_pragmas,
         )
         if result.complete:
             return result
 
         trigger_line = None
         for diagnostic in result.incomplete:
-            if diagnostic.location is None:
+            if diagnostic.location is None or diagnostic.source_identity is not None:
                 continue
             if diagnostic.code not in {
                 ErrorCode.UNRESOLVED_CONDITION,
@@ -442,6 +451,8 @@ def preprocess_source(
             context=context,
             options=options,
             skip_includes=skip_includes,
+            include_resolver=include_resolver,
+            max_include_depth=max_include_depth,
         )
         if environment is None:
             return result

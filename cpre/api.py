@@ -79,7 +79,9 @@ class AnalysisIncomplete:
     ``component`` is ``None`` when the limit curtailed the whole analysis. For
     :func:`analyze_source` it is otherwise the index of the affected entry in
     :attr:`AnalysisResult.incomplete_components`; the rest of the source was
-    still analyzed.
+    still analyzed. ``source_identity`` names the resolved included source that
+    ``location`` refers to during concrete preprocessing, or ``None`` for the
+    primary source.
     """
 
     code: ErrorCode
@@ -89,6 +91,7 @@ class AnalysisIncomplete:
     message: str
     location: SourceLocation | None = None
     component: int | None = None
+    source_identity: str | None = None
 
 
 @dataclass(frozen=True)

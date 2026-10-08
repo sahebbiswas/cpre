@@ -31,6 +31,9 @@ class ErrorCode(str, Enum):
     UNSUPPORTED_CONDITION_EXPRESSION = "unsupported_condition_expression"
     UNSUPPORTED_PREPROCESSING_DIRECTIVE = "unsupported_preprocessing_directive"
     UNSUPPORTED_MACRO_EXPANSION = "unsupported_macro_expansion"
+    UNRESOLVED_INCLUDE = "unresolved_include"
+    INCLUDE_CYCLE = "include_cycle"
+    INCLUDE_DEPTH_EXCEEDED = "include_depth_exceeded"
     SOURCE_READ_ERROR = "source_read_error"
 
 
