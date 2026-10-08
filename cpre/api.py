@@ -427,59 +427,54 @@ def _finding_for_branch(
         if branch.expression is not None
         else ()
     )
-    common = {
-        "location": SourceLocation(branch.line),
-        "directive": branch.directive,
-        "original_condition": original,
-        "exact_simplification": exact,
-        "contextual_simplification": contextual,
-        "opaque_predicates": predicates,
-    }
+
+    def make_finding(kind: FindingKind, reason: str, edit: SuggestedEdit | None) -> Finding:
+        return Finding(
+            kind=kind,
+            location=SourceLocation(branch.line),
+            directive=branch.directive,
+            original_condition=original,
+            exact_simplification=exact,
+            contextual_simplification=contextual,
+            reason=reason,
+            opaque_predicates=predicates,
+            edit=edit,
+            depends_on_assumptions=_analysis_dependency(branch, baseline, kind),
+        )
+
     if analysis.status == "dead":
-        kind = FindingKind.DEAD_BRANCH
         return (
-            Finding(
-                kind=kind,
-                reason=analysis.reason or "branch is unreachable",
-                edit=None,
-                depends_on_assumptions=_analysis_dependency(branch, baseline, kind),
-                **common,
+            make_finding(
+                FindingKind.DEAD_BRANCH,
+                analysis.reason or "branch is unreachable",
+                None,
             ),
         )
     if analysis.status == "redundant":
-        kind = FindingKind.REDUNDANT_BRANCH
         return (
-            Finding(
-                kind=kind,
-                reason=analysis.reason or "condition is redundant in this context",
-                edit=None,
-                depends_on_assumptions=_analysis_dependency(branch, baseline, kind),
-                **common,
+            make_finding(
+                FindingKind.REDUNDANT_BRANCH,
+                analysis.reason or "condition is redundant in this context",
+                None,
             ),
         )
     if branch.expression is None:
         return ()
     findings: list[Finding] = []
     if exact is not None:
-        kind = FindingKind.SIMPLIFIABLE_CONDITION
         findings.append(
-            Finding(
-                kind=kind,
-                reason="condition has an exact simpler form",
-                edit=_edit_for(branch, ranges, exact.replacement, FixConfidence.EXACT),
-                depends_on_assumptions=_analysis_dependency(branch, baseline, kind),
-                **common,
+            make_finding(
+                FindingKind.SIMPLIFIABLE_CONDITION,
+                "condition has an exact simpler form",
+                _edit_for(branch, ranges, exact.replacement, FixConfidence.EXACT),
             )
         )
     if contextual is not None:
-        kind = FindingKind.CONTEXTUAL_SIMPLIFICATION
         findings.append(
-            Finding(
-                kind=kind,
-                reason="condition has a simpler equivalent under its branch context",
-                edit=_edit_for(branch, ranges, contextual.replacement, FixConfidence.CONTEXTUAL),
-                depends_on_assumptions=_analysis_dependency(branch, baseline, kind),
-                **common,
+            make_finding(
+                FindingKind.CONTEXTUAL_SIMPLIFICATION,
+                "condition has a simpler equivalent under its branch context",
+                _edit_for(branch, ranges, contextual.replacement, FixConfidence.CONTEXTUAL),
             )
         )
     return tuple(findings)
