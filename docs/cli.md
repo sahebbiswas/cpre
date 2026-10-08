@@ -216,6 +216,7 @@ cpre preprocess source.c -D LEVEL=2 -U DISABLED
 cpre preprocess source.c --standard-macro __STDC__=1
 cpre preprocess source.c --skip-includes
 cpre preprocess src/main.c -I include --iquote src
+cpre preprocess --unknown-names undefined --config-from flags.h target.c
 ```
 
 The command is deliberately explicit and does not infer compiler or build state from the host. `-D NAME` creates an empty object-like macro, while `-D NAME=VALUE` supplies explicit replacement text. `-U NAME` records an explicit undefined macro. `--unknown-names undefined` opts into closed-world handling for names absent from the supplied configuration; the default is `open`.
@@ -228,6 +229,32 @@ cpre preprocess source.c --compact --max-blank-lines 1
 ```
 
 Incomplete preprocessing never emits partial transformed source. Diagnostics are written to stderr and the command exits with status `2`. A successful preprocessing run exits `0`; this command does not use findings-oriented `--fail-on-findings` semantics.
+
+`--config-from PATH` seeds the configuration from a macro file instead of spelling each macro out as `-D/-U`. The seed is evaluated exactly like `MacroConfiguration.from_source()`: its final macro state becomes the initial state for the target, and a standard include guard is detected and stripped. The seed is evaluated with the command's `--unknown-names` policy and `--standard-macro` context, so a guard such as `#ifndef FLAGS_H` needs `--unknown-names undefined` (the command prints a hint when it does). For example, with this `flags.h`:
+
+```c
+#ifndef FLAGS_H
+#define FLAGS_H
+#define FEATURE
+#ifndef LEVEL
+#define LEVEL 1
+#endif
+#undef LEGACY
+#endif
+```
+
+```bash
+cpre preprocess --unknown-names undefined --config-from flags.h target.c            # FEATURE, LEVEL=1, LEGACY undefined
+cpre preprocess --unknown-names undefined --config-from flags.h -D LEVEL=2 target.c # LEVEL=2
+```
+
+Precedence is deterministic:
+
+1. Explicit `-D` and `-U` options form the base that the first seed is evaluated on, so seed conditions such as `#ifndef LEVEL` see them.
+2. `--config-from` may be repeated; seeds are applied in command-line order, each layered on the previous result with the API's last-definition-wins `base=` semantics.
+3. Explicit `-D` and `-U` options are then re-applied, so they always win over any seed `#define` or `#undef` of the same name.
+
+A seed that cannot be read, is malformed, contains an active `#include`, or has a condition that is not determined fails before the target is read, with diagnostics such as `flags.h: invalid --config-from seed: line 1: ...` on stderr and exit status `2`. Seeds never read headers from the filesystem; `-I` and `--iquote` apply only to the target. See [Construction from source](concrete-configuration.md#construction-from-source).
 
 `--skip-includes` masks reachable `#include`, `#include_next`, and `#import` directives instead of failing, and reports each one on stderr as `PATH: line N: skipped #include <header.h>` while the transformed source goes to stdout. Skipped headers are never read, so macros and declarations they would supply are not assumed; a condition that depends on them still fails as incomplete. See [Opt-in include skipping](preprocessing.md#opt-in-include-skipping) for the full semantic limitation.
 
