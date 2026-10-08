@@ -9,9 +9,10 @@ tooling, such as configuration generators, can reuse it.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from enum import Enum
+from typing import TYPE_CHECKING
 
 from .api import AnalysisOptions, _translate_parse_error
 from .configuration import MacroConfiguration, _condition_environment, _configured_environment
@@ -21,6 +22,9 @@ from .macros import MacroDefinition, MacroEnvironment, _apply_macro_directive
 from .model import ConditionalBranch, ConditionError
 from .parser import DIRECTIVE_RE, logical_lines, parse_source
 from .robdd import AnalysisBudget, AnalysisLimitExceeded
+
+if TYPE_CHECKING:
+    from .preprocessing import PreprocessingContext
 
 # Operators with standard semantics, and location-sensitive builtins whose values
 # come from the source itself; none of these can be supplied as -D/-U.
@@ -118,6 +122,41 @@ def _defined_operand(tokens: list[Token], index: int) -> tuple[str, int] | None:
     return None
 
 
+def _static_uses(
+    text: str,
+    record: Callable[[str, MacroUse], None],
+    candidates: Callable[[str], Iterable[MacroDefinition]],
+) -> None:
+    """Record every name ``text`` can depend on, following candidate replacement lists.
+
+    Unlike real expansion this never stops early and ignores which definition
+    wins, so it over-approximates: no dependency is missed.
+    """
+    pending: list[tuple[list[Token], frozenset[str]]] = [(_significant(text), frozenset())]
+    visited: set[str] = set()
+    while pending:
+        tokens, parameters = pending.pop()
+        index = 0
+        while index < len(tokens):
+            token = tokens[index]
+            index += 1
+            if token.kind != "identifier" or token.text in parameters:
+                continue
+            if token.text == "defined":
+                operand = _defined_operand(tokens, index - 1)
+                if operand is not None:
+                    name, index = operand
+                    record(name, MacroUse.DEFINEDNESS)
+                continue
+            record(token.text, MacroUse.VALUE)
+            if token.text in visited:
+                continue
+            visited.add(token.text)
+            for definition in candidates(token.text):
+                names = frozenset((*(definition.parameters or ()), "__VA_ARGS__"))
+                pending.append((_significant(definition.replacement), names))
+
+
 def _unresolved_uses(
     text: str,
     environment: MacroEnvironment,
@@ -131,7 +170,9 @@ def _unresolved_uses(
     definedness is substituted before macro expansion, as in concrete
     evaluation; identifiers that survive expansion without replacement text are
     value dependencies. Expansion uses its own budget so diagnostics never
-    consume or exhaust the preprocessing run's budget.
+    consume or exhaust the preprocessing run's budget; if expansion fails or
+    exceeds that budget, a static walk of the replacement lists is used instead,
+    which may over-report but never omits a dependency.
     """
     uses: dict[str, set[MacroUse]] = {}
     if definedness_directive:
@@ -169,7 +210,24 @@ def _unresolved_uses(
         # A replacement list may itself spell ``defined``.
         expanded = substitute_defined([token for token in expanded if token.kind != "empty"])
     except (ExpansionError, AnalysisLimitExceeded):
-        expanded = tokens
+
+        def record(name: str, use: MacroUse) -> None:
+            if name in _NOT_CONFIGURABLE:
+                return
+            state = environment.get(name)
+            if use is MacroUse.DEFINEDNESS:
+                unknown = state.defined is None
+            else:
+                unknown = state.defined is not False and state.definition is None
+            if unknown:
+                uses.setdefault(name, set()).add(use)
+
+        def candidates(name: str) -> Iterable[MacroDefinition]:
+            definition = environment.get(name).definition
+            return (definition,) if definition is not None else ()
+
+        _static_uses(text, record, candidates)
+        return uses
     for token in expanded:
         if token.kind != "identifier" or token.text in _NOT_CONFIGURABLE:
             continue
@@ -196,22 +254,30 @@ def _unresolved_macros(
     return _collect(uses, {name: {line} for name in uses})
 
 
-def _base_environment(configuration: MacroConfiguration | None) -> MacroEnvironment:
-    if configuration is None:
-        return MacroEnvironment()
-    return _configured_environment(configuration)
+def _base_environment(
+    configuration: MacroConfiguration | None,
+    context: PreprocessingContext | None = None,
+) -> MacroEnvironment:
+    from .preprocessing import _configured_preprocessing_context
+
+    environment = (
+        MacroEnvironment() if configuration is None else _configured_environment(configuration)
+    )
+    _configured_preprocessing_context(environment, context)
+    return environment
 
 
 def unknown_macros(
     expression: str,
     *,
     configuration: MacroConfiguration | None = None,
+    context: PreprocessingContext | None = None,
     options: AnalysisOptions | None = None,
 ) -> tuple[UnknownMacro, ...]:
     """Return the macro names an ``#if`` expression needs to become concrete.
 
     ``expression`` is the text after ``#if``/``#elif``. Names already fixed by
-    ``configuration`` are not unknown; configured definitions are expanded, so a
+    ``configuration`` or the standard macros of ``context`` are not unknown; configured definitions are expanded, so a
     name reached only through a configured macro's replacement is reported.
     Results are sorted by name. ``defined(NAME)`` contributes a
     :attr:`MacroUse.DEFINEDNESS` dependency; any other identifier that survives
@@ -222,7 +288,7 @@ def unknown_macros(
     resolved = options if options is not None else AnalysisOptions()
     uses = _unresolved_uses(
         expression,
-        _base_environment(configuration),
+        _base_environment(configuration, context),
         definedness_directive=False,
         max_work=resolved._resource_limits().max_work,
     )
@@ -232,8 +298,12 @@ def unknown_macros(
 class _SourceDependencies:
     """Source-order, path-insensitive sweep over every conditional directive."""
 
-    def __init__(self, configuration: MacroConfiguration | None) -> None:
-        self.external = _base_environment(configuration)
+    def __init__(
+        self,
+        configuration: MacroConfiguration | None,
+        context: PreprocessingContext | None,
+    ) -> None:
+        self.external = _base_environment(configuration, context)
         # The enclosing conditional branches (by directive line) of the current line.
         self.path: list[int] = []
         # Branch paths of every #define/#undef seen so far, per name. A directive
@@ -242,8 +312,17 @@ class _SourceDependencies:
         self.assignments: dict[str, list[tuple[int, ...]]] = {}
         # Every definition the source may have made so far, on any path.
         self.definitions: dict[str, list[MacroDefinition]] = {}
+        # Per open conditional group: whether it has an #else, and the names each
+        # branch so far assigns on every path through it. A group with an #else
+        # whose branches all assign a name assigns it at the enclosing path.
+        self.groups: list[tuple[list[bool], list[set[str]]]] = []
         self.uses: dict[str, set[MacroUse]] = {}
         self.lines: dict[str, set[int]] = {}
+
+    def _assign(self, name: str) -> None:
+        self.assignments.setdefault(name, []).append(tuple(self.path))
+        if self.groups:
+            self.groups[-1][1][-1].add(name)
 
     def _assigned(self, name: str) -> bool:
         path = tuple(self.path)
@@ -273,38 +352,26 @@ class _SourceDependencies:
         if directive in _DEFINEDNESS_DIRECTIVES:
             self._record(text, MacroUse.DEFINEDNESS, line)
             return
-        pending: list[tuple[list[Token], frozenset[str]]] = [(_significant(text), frozenset())]
-        visited: set[str] = set()
-        while pending:
-            tokens, parameters = pending.pop()
-            index = 0
-            while index < len(tokens):
-                token = tokens[index]
-                index += 1
-                if token.kind != "identifier" or token.text in parameters:
-                    continue
-                if token.text == "defined":
-                    operand = _defined_operand(tokens, index - 1)
-                    if operand is not None:
-                        name, index = operand
-                        self._record(name, MacroUse.DEFINEDNESS, line)
-                    continue
-                self._record(token.text, MacroUse.VALUE, line)
-                if token.text in visited:
-                    continue
-                visited.add(token.text)
-                for definition in self._candidates(token.text):
-                    names = frozenset((*(definition.parameters or ()), "__VA_ARGS__"))
-                    pending.append((_significant(definition.replacement), names))
+        _static_uses(text, lambda name, use: self._record(name, use, line), self._candidates)
 
     def conditional(self, kind: str, line: int) -> None:
         if kind in {"if", "ifdef", "ifndef"}:
             self.path.append(line)
+            self.groups.append(([False], [set()]))
         elif kind == "endif":
             if self.path:
                 self.path.pop()
+            if self.groups:
+                (has_else,), branches = self.groups.pop()
+                if has_else:
+                    for name in sorted(set.intersection(*branches)):
+                        self._assign(name)
         elif self.path:
             self.path[-1] = line
+            if self.groups:
+                if kind == "else":
+                    self.groups[-1][0][0] = True
+                self.groups[-1][1].append(set())
 
     def directive(self, kind: str, remainder: str, line: int) -> None:
         scratch = MacroEnvironment()
@@ -317,7 +384,7 @@ class _SourceDependencies:
         assert name_match is not None
         name = name_match[1]
         definition = scratch.get(name).definition
-        self.assignments.setdefault(name, []).append(tuple(self.path))
+        self._assign(name)
         if definition is not None:
             self.definitions.setdefault(name, []).append(definition)
 
@@ -327,16 +394,18 @@ def unknown_macros_in_source(
     *,
     filename: str | None = None,
     configuration: MacroConfiguration | None = None,
+    context: PreprocessingContext | None = None,
 ) -> tuple[UnknownMacro, ...]:
     """Return the macro names needed to make every conditional in ``source`` concrete.
 
     Every conditional directive is inspected, reachable or not, because
     reachability itself depends on the unknown names; the result is therefore a
     sound over-approximation suitable for seeding a configuration. A name is not
-    unknown when ``configuration`` fixes the state a use needs, or when an earlier
-    ``#define``/``#undef`` in the same or an enclosing conditional branch assigns
-    it on every path reaching the use (so include-guarded bodies work as
-    expected). Definitions made in other branches keep the name unknown, since the
+    unknown when ``configuration`` or the standard macros of ``context`` fix the
+    state a use needs, or when an earlier ``#define``/``#undef`` assigns it on
+    every path reaching the use: in the same or an enclosing conditional branch
+    (so include-guarded bodies work as expected), or in every branch of an
+    earlier group that has an ``#else``. Definitions made in other branches keep the name unknown, since the
     external state still matters on paths that skip them, and every candidate
     replacement list is followed for further dependencies. Included headers are
     not read.
@@ -356,7 +425,7 @@ def unknown_macros_in_source(
             branches[branch.line] = branch
             pending.extend(branch.children)
 
-    sweep = _SourceDependencies(configuration)
+    sweep = _SourceDependencies(configuration, context)
     for line in logical_lines(source):
         conditional = DIRECTIVE_RE.match(line.text)
         if conditional is not None:

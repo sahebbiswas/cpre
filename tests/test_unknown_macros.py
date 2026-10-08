@@ -341,3 +341,61 @@ def test_cli_list_unknown_macros_rejects_compact(tmp_path, capsys):
         main(["preprocess", "--list-unknown-macros", "--compact", str(target)])
     assert excinfo.value.code == 2
     assert "--compact" in capsys.readouterr().err
+
+
+# --- review regressions -----------------------------------------------------------
+
+
+def test_standard_macro_context_fixes_names():
+    context = cpre.PreprocessingContext(standard_macros={"__STDC_VERSION__": "201112L"})
+    source = "#if __STDC_VERSION__ >= 201112L && LEVEL\n#endif\n"
+
+    assert cpre.unknown_macros("__STDC_VERSION__ >= 201112L", context=context) == ()
+    assert _names(cpre.unknown_macros_in_source(source, context=context)) == {"LEVEL": VALUE}
+
+
+def test_cli_list_unknown_macros_honors_standard_macro(tmp_path, capsys):
+    target = _write(tmp_path / "t.c", "#if __STDC_VERSION__ >= 201112L && LEVEL\n#endif\n")
+
+    argv = ["preprocess", "--list-unknown-macros", "--standard-macro"]
+    assert main([*argv, "__STDC_VERSION__=201112L", str(target)]) == 0
+    assert capsys.readouterr().out.splitlines() == ["LEVEL\tvalue\t1"]
+
+
+@pytest.mark.parametrize("expression", ["A > 1", "A > F("])
+def test_interrupted_expansion_still_reports_replacement_dependencies(expression):
+    configuration = MacroConfiguration(
+        definitions=[MacroDefinition("A", "B"), MacroDefinition("F", "1", parameters=("x",))]
+    )
+    options = cpre.AnalysisOptions(max_work=1)
+
+    assert _names(cpre.unknown_macros(expression, configuration=configuration)) == {"B": VALUE}
+    assert _names(
+        cpre.unknown_macros(expression, configuration=configuration, options=options)
+    ) == {"B": VALUE}
+
+
+def test_name_assigned_in_every_branch_with_else_is_known():
+    source = "#ifdef X\n#define R 1\n#else\n#define R 2\n#endif\n#if R\n#endif\n"
+    assert _names(cpre.unknown_macros_in_source(source)) == {"X": DEFINEDNESS}
+
+
+def test_nested_complete_groups_count_as_assignment():
+    source = (
+        "#ifdef X\n#ifdef Y\n#define R 1\n#else\n#undef R\n#endif\n"
+        "#else\n#define R 2\n#endif\n#if R\n#endif\n"
+    )
+    assert _names(cpre.unknown_macros_in_source(source)) == {"X": DEFINEDNESS, "Y": DEFINEDNESS}
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # No #else: the external R is used when neither branch is taken.
+        "#ifdef X\n#define R 1\n#elif Y\n#define R 2\n#endif\n#if R\n#endif\n",
+        # Only some branches assign R.
+        "#ifdef X\n#define R 1\n#elif Y\n#else\n#define R 2\n#endif\n#if R\n#endif\n",
+    ],
+)
+def test_partially_covering_groups_keep_name_unknown(source):
+    assert "R" in _names(cpre.unknown_macros_in_source(source))

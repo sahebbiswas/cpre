@@ -305,7 +305,7 @@ FEAT	definedness	6
 __GNUC__	value	4,12
 ```
 
-`USES` is `definedness`, `value`, or `definedness,value`; `LINES` lists the dependent directive lines. Combine with `--json` for `{"file": ..., "unknown_macros": [{"name", "uses", "lines", "suggestions"}, ...]}`. The listing honors `-D`, `-U`, `--config-from`, and `--unknown-names`, so it shows only what is still missing. Every conditional is inspected, reachable or not, so the list may include names a particular configuration never reaches; supplying them is harmless. Headers are not read. Output is deterministic, so it can build a seed for a later run:
+`USES` is `definedness`, `value`, or `definedness,value`; `LINES` lists the dependent directive lines. Combine with `--json` for `{"file": ..., "unknown_macros": [{"name", "uses", "lines", "suggestions"}, ...]}`. The listing honors `-D`, `-U`, `--config-from`, `--standard-macro`, and `--unknown-names`, so it shows only what is still missing. Every conditional is inspected, reachable or not, so the list may include names a particular configuration never reaches; supplying them is harmless. Headers are not read. Output is deterministic, so it can build a seed for a later run:
 
 ```bash
 cpre preprocess --list-unknown-macros target.c |

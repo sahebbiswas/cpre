@@ -778,7 +778,7 @@ def preprocess_main(
             source = handle.read()
         if args.list_unknown_macros:
             unknown = unknown_macros_in_source(
-                source, filename=str(path), configuration=configuration
+                source, filename=str(path), configuration=configuration, context=context
             )
             return _print_unknown_macros(path, unknown, as_json=args.json)
         resolver = (
