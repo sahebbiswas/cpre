@@ -9,6 +9,28 @@ permissions:
   contents: read
 
 jobs:
+  version-bump:
+    # Every pull request bumps __version__ in cpre/__init__.py by one SemVer
+    # step (CONTRIBUTING.md, "Versioning"). The checkout is GitHub's test
+    # merge commit, whose first parent is the tip of the base branch, so
+    # depth 2 brings the base version along with no extra fetch.
+    name: Version bumped
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Compare with the base branch
+        run: |
+          if ! git rev-parse --verify --quiet HEAD^2 >/dev/null; then
+            echo "::error::Expected the pull request's test merge commit, found a single-parent commit"
+            exit 1
+          fi
+          git show HEAD^1:cpre/__init__.py > "$RUNNER_TEMP/base_version.py"
+          python3 .github/scripts/check_version_bump.py "$RUNNER_TEMP/base_version.py" cpre/__init__.py
+
   test:
     strategy:
       fail-fast: false

@@ -99,7 +99,9 @@ from .symbolic import (
 )
 from .unknown_macros import MacroUse, UnknownMacro, unknown_macros, unknown_macros_in_source
 
-__version__ = "0.20.0"
+# Single source of truth for the package version (Semantic Versioning 2.0.0).
+# Every pull request merged to main bumps it once; see CONTRIBUTING.md.
+__version__ = "0.20.1"
 
 __all__ = [
     "AnalysisError",
