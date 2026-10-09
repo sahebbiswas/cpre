@@ -21,6 +21,7 @@ from .configuration import (
     MacroConfiguration,
     _condition_environment,
     _configured_environment,
+    _ConfiguredMacroEnvironment,
     _detect_include_guard,
 )
 from .errors import AnalysisError, ErrorCode, SourceLocation
@@ -560,7 +561,9 @@ def preprocess_source(
     return atomic incomplete results. With ``skip_includes=True``, active
     ``#include``/``#include_next``/``#import`` directives are instead masked like other
     handled directives and reported in ``skipped_includes``; the skipped headers are
-    never read, so no macros or declarations are attributed to them.
+    never read, so no macros or declarations are attributed to them. Under the
+    closed-world policy, names neither configured explicitly nor already settled by
+    the source become unknown after the first reachable skipped include.
 
     With ``include_resolver``, reachable include directives are resolved by the
     caller and the resolved sources are preprocessed recursively with shared macro
@@ -697,6 +700,13 @@ def _preprocess_unit(
     logical_delta = 0
     logical_file_literal = _file_literal(filename)
 
+    def skip(kind: str, operand: str, location: SourceLocation) -> None:
+        run.skipped.append(SkippedInclude(kind, operand, location, identity))
+        if isinstance(base_environment, _ConfiguredMacroEnvironment):
+            # Names the caller configured or the source already settled keep their
+            # state; any other name may come from the unread header.
+            base_environment._skip_include()
+
     def include_line(kind: str, operand: str, line: int, state: _LogicalPreprocessingState) -> bool:
         """Handle one reachable include directive; False means diagnostics were added."""
         location = SourceLocation(line)
@@ -710,7 +720,7 @@ def _preprocess_unit(
             )
             return False
         if includes is None:
-            run.skipped.append(SkippedInclude(kind, operand, location, identity))
+            skip(kind, operand, location)
             blank(line, ends[line])
             return True
 
@@ -734,7 +744,7 @@ def _preprocess_unit(
         resolved = includes.resolver(request)
         if resolved is None:
             if run.skip_includes:
-                run.skipped.append(SkippedInclude(kind, operand, location, identity))
+                skip(kind, operand, location)
                 blank(line, ends[line])
                 return True
             diagnostics.append(

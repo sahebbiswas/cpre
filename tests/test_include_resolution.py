@@ -282,6 +282,30 @@ def test_skip_includes_falls_back_for_unresolved_headers_only():
     assert [record.identity for record in result.includes] == ["h.h"]
 
 
+def test_closed_skip_fallback_keeps_names_unknown_but_enters_guarded_headers():
+    resolver = MemoryResolver({"g.h": "#ifndef G_H\n#define G_H\n#define LOCAL 1\n#endif\n"})
+    closed = cpre.MacroConfiguration(unknown_names="undefined")
+    result = preprocess_source(
+        '#include <system.h>\n#include "g.h"\n#include "g.h"\n#if LOCAL\nint local;\n#endif\n',
+        configuration=closed,
+        include_resolver=resolver,
+        skip_includes=True,
+    )
+    assert _compact(result) == "int local;\n"
+    assert [record.outcome for record in result.includes] == [
+        IncludeOutcome.ENTERED,
+        IncludeOutcome.GUARDED,
+    ]
+
+    unknown = preprocess_source(
+        "#include <system.h>\n#ifdef FROM_SYSTEM\nint on;\n#endif\n",
+        configuration=closed,
+        include_resolver=resolver,
+        skip_includes=True,
+    )
+    assert unknown.incomplete[0].code is ErrorCode.UNRESOLVED_CONDITION
+
+
 def test_computed_include_is_macro_expanded():
     resolver = MemoryResolver({"a/b.h": "int b;\n", "c.h": "int c;\n"})
     result = preprocess_source(

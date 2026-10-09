@@ -99,7 +99,7 @@ from .symbolic import (
 )
 from .unknown_macros import MacroUse, UnknownMacro, unknown_macros, unknown_macros_in_source
 
-__version__ = "0.19.1"
+__version__ = "0.19.2"
 
 __all__ = [
     "AnalysisError",

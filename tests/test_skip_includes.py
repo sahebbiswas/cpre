@@ -89,6 +89,83 @@ def test_skip_mode_does_not_fabricate_header_macros():
     assert without_condition.source == " " * 19 + "\nFROM_HEADER value;\n"
 
 
+CLOSED = cpre.MacroConfiguration(unknown_names="undefined")
+
+
+def test_closed_skip_mode_keeps_header_suppliable_names_unknown():
+    source = '#include "config.h"\n#ifdef FEATURE\nint on;\n#endif\n'
+    result = preprocess_source(source, configuration=CLOSED, skip_includes=True)
+    assert not result.complete
+    (diagnostic,) = result.incomplete
+    assert diagnostic.code is ErrorCode.UNRESOLVED_CONDITION
+    assert diagnostic.location == SourceLocation(2)
+    assert [macro.name for macro in diagnostic.unresolved] == ["FEATURE"]
+
+    value_use = preprocess_source(
+        '#include "config.h"\n#if FEATURE > 1\nint on;\n#endif\n',
+        configuration=CLOSED,
+        skip_includes=True,
+    )
+    assert value_use.incomplete[0].code is ErrorCode.UNRESOLVED_CONDITION
+
+
+@pytest.mark.parametrize(
+    ("configuration", "selected"),
+    [
+        (cpre.MacroConfiguration(unknown_names="undefined", undefined={"FEATURE"}), False),
+        (
+            cpre.MacroConfiguration(
+                unknown_names="undefined", definitions=[cpre.MacroDefinition("FEATURE", "1")]
+            ),
+            True,
+        ),
+    ],
+)
+def test_closed_skip_mode_still_resolves_explicitly_configured_names(configuration, selected):
+    source = '#include "config.h"\n#ifdef FEATURE\nint on;\n#endif\n'
+    result = preprocess_source(source, configuration=configuration, skip_includes=True)
+    assert result.complete
+    assert ("int on;" in result.source) is selected
+
+
+def test_closed_skip_mode_keeps_source_order_state():
+    before = preprocess_source(
+        '#define ON 1\n#undef OFF\n#include "c.h"\n#if ON && !defined(OFF)\nint on;\n#endif\n',
+        configuration=CLOSED,
+        skip_includes=True,
+    )
+    assert before.complete
+    assert "int on;" in before.source
+
+    after = preprocess_source(
+        '#include "c.h"\n#undef LATER\n#ifdef LATER\nint on;\n#endif\n',
+        configuration=CLOSED,
+        skip_includes=True,
+    )
+    assert after.complete
+    assert "int on;" not in after.source
+
+
+def test_closed_skip_mode_defaults_names_before_the_first_skipped_include():
+    result = preprocess_source(
+        '#ifdef EARLY\nint early;\n#endif\n#include "c.h"\nint x;\n',
+        configuration=CLOSED,
+        skip_includes=True,
+    )
+    assert result.complete
+    assert "int early;" not in result.source
+
+
+def test_closed_mode_without_reachable_skipped_include_is_unchanged():
+    for source in (
+        "#ifdef FEATURE\nint on;\n#endif\n",
+        '#if 0\n#include "never.h"\n#endif\n#ifdef FEATURE\nint on;\n#endif\n',
+    ):
+        result = preprocess_source(source, configuration=CLOSED, skip_includes=True)
+        assert result.complete
+        assert "int on;" not in result.source
+
+
 def test_skip_mode_ignores_inactive_includes():
     result = preprocess_source(
         '#if 0\n#include "never.h"\n#endif\n#include "live.h"\n', skip_includes=True
@@ -170,3 +247,19 @@ def test_cli_skip_includes_reports_multiple_and_compacts(tmp_path, capsys):
         f'{source}: line 1: skipped #include "a.h"',
         f"{source}: line 2: skipped #include <b.h>",
     ]
+
+
+def test_cli_closed_skip_mode_does_not_guess_header_macros(tmp_path, capsys):
+    source = tmp_path / "source.c"
+    _write(source, '#include "config.h"\n#ifdef FEATURE\nint on;\n#endif\n')
+
+    arguments = ["preprocess", str(source), "--skip-includes", "--unknown-names", "undefined"]
+    assert main(arguments) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "condition is not determined" in captured.err
+
+    assert main([*arguments, "-UFEATURE", "--compact"]) == 0
+    assert capsys.readouterr().out == ""
+    assert main([*arguments, "-DFEATURE", "--compact"]) == 0
+    assert capsys.readouterr().out == "int on;\n"

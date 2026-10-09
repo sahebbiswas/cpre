@@ -310,15 +310,22 @@ class _ConfiguredMacroEnvironment(MacroEnvironment):
     def __init__(self, configuration: MacroConfiguration) -> None:
         super().__init__()
         self._unknown_names = configuration.unknown_names
+        # Set once a reachable include is skipped: the unread header may define any
+        # name not yet settled, so closed-world defaulting no longer applies to it.
+        self._opaque_include_seen = False
         for name in sorted(configuration.undefined):
             self.undef(name)
         for definition in configuration.definitions:
             self.define(definition)
 
+    def _skip_include(self) -> None:
+        self._opaque_include_seen = True
+
     def get(self, name: str) -> MacroState:
         state = super().get(name)
         if (
             self._unknown_names is UnknownNamePolicy.UNDEFINED
+            and not self._opaque_include_seen
             and state.defined is None
             and state.value is None
             and state.definition is None
