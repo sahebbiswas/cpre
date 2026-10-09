@@ -87,10 +87,12 @@ A new mismatch must either be fixed or deliberately added to `EXPLICIT_NONCOMPLE
 
 During the current `0.x` phase, `cpre` treats the documented public API as compatibility-sensitive even though semantic versioning traditionally permits breaking changes before `1.0`.
 
-- Patch releases must preserve documented imports and established result semantics. They may fix incorrect behavior and add compatible surface area without deliberately reshaping existing contracts.
-- Minor releases may add broader backward-compatible public fields, types, finding categories, or capabilities. Downstream consumers should still review new finding kinds if they use exhaustive matching.
+- Patch versions must preserve documented imports and established result semantics. They fix incorrect behavior without adding public surface area or deliberately reshaping existing contracts.
+- Minor versions add backward-compatible public fields, types, finding categories, options, or capabilities. Downstream consumers should still review new finding kinds if they use exhaustive matching.
 - Any deliberate incompatible change to the documented downstream contract requires an explicitly announced compatibility break and a minor-version boundary while `cpre` remains `0.x`.
 - After `1.0`, intentionally breaking public API changes require a major version bump.
+
+Every pull request merged to `main` bumps the version by one of these steps; see [CONTRIBUTING](../CONTRIBUTING.md#versioning) for how the bump is chosen and checked.
 
 Downstream projects should pin a compatible release range and rely only on behavior covered by the public documentation and contract suite.
 

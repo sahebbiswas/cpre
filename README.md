@@ -182,9 +182,9 @@ When extending cpre, keep downstream integrations on the documented top-level `c
 
 ## Versioning
 
-The package version is defined by `cpre.__version__` and consumed by `pyproject.toml` during builds.
+`cpre` follows [Semantic Versioning](https://semver.org/). The package version is defined once by `cpre.__version__` and consumed by `pyproject.toml` during builds. Every pull request merged to `main` bumps it by one step (patch for fixes, docs and tooling; minor for new features and, while `cpre` is `0.x`, deliberate compatibility breaks), and CI checks the bump. Releases are cut from `main` when it is stable, so not every version is published to PyPI. See [CONTRIBUTING](https://github.com/sahebbiswas/cpre/blob/main/CONTRIBUTING.md#versioning) for the full rules.
 
-`0.7.0` marked the transition from Alpha to Beta. During Beta, the documented top-level API is intended for real integrations; compatibility-sensitive changes should be deliberate and documented. Incremental features and fixes generally use patch releases, while deliberate compatibility changes should be reflected more prominently in release planning.
+`0.7.0` marked the transition from Alpha to Beta. During Beta, the documented top-level API is intended for real integrations; compatibility-sensitive changes must be deliberate and called out as a **Behaviour change:** in the pull request and release notes.
 
 ## License
 
