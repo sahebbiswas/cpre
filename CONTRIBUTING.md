@@ -140,12 +140,29 @@ Publishing (no API tokens are stored).
 
 1. Pick a commit on `main` that is green and stable. Its `cpre/__init__.py` is
    the version released, so no version change is needed.
-2. Publish a GitHub release with tag `vX.Y.Z` matching the version, on that
+2. Optional dry run: manual runs of the workflow (Actions → *Publish to PyPI /
+   TestPyPI* → *Run workflow*) upload only to TestPyPI, but a version can be
+   uploaded only once per index, and a release fails if its version is already
+   on TestPyPI. So never run it on `main` itself. Instead, push a temporary
+   branch from the chosen commit that changes `__version__` to a pre-release of
+   the version (`0.20.2` → `0.20.2rc1`, then `rc2`, …), run the workflow on
+   that branch, and delete the branch afterwards without merging it. The
+   version check runs only on pull requests, so the branch needs no pull
+   request.
+3. Publish a GitHub release with tag `vX.Y.Z` matching the version, on that
    commit. Use *Generate release notes* (since the previous `v` tag) and put
    the **Behaviour change:** items from the merged pull requests at the top.
-   The workflow checks that the tag matches `cpre.__version__`, builds the
-   distributions and uploads them to PyPI.
+   The workflow builds the distributions and checks their metadata and that
+   the tag matches the version. It then installs the wheel and the sdist into
+   clean environments, exercises the API and CLI and runs the test suite
+   against them, uploads to TestPyPI, installs from there, and only then
+   uploads to PyPI.
 
 The release notes on GitHub are the history of what each release contains. A
 version maps to the commit that set it (`git log --oneline -S'__version__ = "0.20.1"' --
 cpre/__init__.py`), and every commit on `main` links to its pull request.
+
+One-time setup: on pypi.org and test.pypi.org, add a (pending) trusted publisher
+for repository `sahebbiswas/cpre`, workflow `release.yml`, and environment
+`pypi` / `testpypi` respectively. GitHub creates the environments on first use;
+add a required reviewer to `pypi` to gate production uploads.
