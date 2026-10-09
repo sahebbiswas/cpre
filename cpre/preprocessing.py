@@ -207,6 +207,13 @@ class PreprocessResult:
         return self.source is not None and not self.incomplete
 
 
+# Branch-coverage verification hook: when set, the primary source records, for every
+# conditional group it reaches, the line of the selected branch (None if none was).
+_SELECTED_BRANCHES: ContextVar[dict[int, int | None] | None] = ContextVar(
+    "_SELECTED_BRANCHES", default=None
+)
+
+
 @dataclass
 class _IncludeState:
     """Include bookkeeping shared by every source in one preprocessing run."""
@@ -1080,7 +1087,9 @@ def _preprocess_unit(
 
         index_groups(tree.groups)
         branches = {branch.line: branch for group in starts.values() for branch in group.branches}
+        selections = _SELECTED_BRANCHES.get() if identity is None else None
         stack: list[list[bool]] = []
+        group_lines: list[int] = []
         active = True
         for line in logical:
             current_line = line.start_line
@@ -1098,6 +1107,9 @@ def _preprocess_unit(
             if branch is not None:
                 if current_line in starts:
                     stack.append([active, False, False])
+                    group_lines.append(current_line)
+                    if selections is not None and active:
+                        selections[current_line] = None
                 frame = stack[-1]
                 active = False
                 blank(current_line, ends[current_line])
@@ -1110,6 +1122,8 @@ def _preprocess_unit(
                         if selected:
                             active = True
                             frame[1] = True
+                            if selections is not None:
+                                selections[group_lines[-1]] = current_line
                 finally:
                     environment.logical_override = None
                 frame[2] = active
@@ -1120,6 +1134,7 @@ def _preprocess_unit(
             )
             if match and match[1] == "endif":
                 stack.pop()
+                group_lines.pop()
                 active = stack[-1][2] if stack else True
                 blank(current_line, ends[current_line])
                 continue

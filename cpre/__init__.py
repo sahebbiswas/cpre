@@ -25,6 +25,13 @@ from .api import (
     analyze_source,
 )
 from .configuration import MacroConfiguration, UnknownNamePolicy
+from .coverage import (
+    BranchCoverageResult,
+    BranchOutcome,
+    BranchOutcomeStatus,
+    CoverageConfiguration,
+    cover_branches,
+)
 from .expansion import SourceMapping
 from .macro_analysis import (
     MacroAnalysisResult,
@@ -101,7 +108,7 @@ from .unknown_macros import MacroUse, UnknownMacro, unknown_macros, unknown_macr
 
 # Single source of truth for the package version (Semantic Versioning 2.0.0).
 # Every pull request merged to main bumps it once; see CONTRIBUTING.md.
-__version__ = "0.22.0"
+__version__ = "0.23.0"
 
 __all__ = [
     "AnalysisError",
@@ -109,6 +116,9 @@ __all__ = [
     "AnalysisOptions",
     "AnalysisResult",
     "BooleanAtom",
+    "BranchCoverageResult",
+    "BranchOutcome",
+    "BranchOutcomeStatus",
     "ConditionError",
     "ConditionalBlock",
     "ConditionalBranch",
@@ -118,6 +128,7 @@ __all__ = [
     "Conjunction",
     "Constant",
     "ContextualSimplification",
+    "CoverageConfiguration",
     "CpreError",
     "DefinedVariable",
     "DirectiveToken",
@@ -175,6 +186,7 @@ __all__ = [
     "analyze_source",
     "compact",
     "conjunction",
+    "cover_branches",
     "disjunction",
     "equivalent",
     "exact_simplify",

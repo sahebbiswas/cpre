@@ -10,6 +10,7 @@ Use this index to choose the guide that matches your integration surface.
 - [Macro Boolean simplification](macro-simplification.md) — bounded ROBDD reasoning for object-like `#define` replacement lists, conservative candidate classification, opt-in symbolic-literal mode, and semantic equivalence proofs.
 - [Lossless conditional structure](conditional-structure.md) — `parse_conditionals()`, exact physical ranges, nested branches, recovery diagnostics, and source-preserving downstream integration.
 - [Concrete preprocessing](preprocessing.md) — `preprocess_source()`, canonical output, source mappings, macro state, compact output, deterministic context, and downstream parser integration.
+- [Branch-covering configurations](branch-coverage.md) — `cover_branches()` generates verified concrete macro configurations that together exercise every reachable conditional-branch outcome.
 
 ## Preprocessing references
 
