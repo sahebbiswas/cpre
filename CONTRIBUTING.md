@@ -163,6 +163,8 @@ version maps to the commit that set it (`git log --oneline -S'__version__ = "0.2
 cpre/__init__.py`), and every commit on `main` links to its pull request.
 
 One-time setup: on pypi.org and test.pypi.org, add a (pending) trusted publisher
-for repository `sahebbiswas/cpre`, workflow `release.yml`, and environment
-`pypi` / `testpypi` respectively. GitHub creates the environments on first use;
-add a required reviewer to `pypi` to gate production uploads.
+for repository `sahebbiswas/cpre` and workflow `release.yml`. On pypi.org,
+restrict it to environment `pypi`; on test.pypi.org, leave the environment
+empty (any environment), as for cddl_verifier. GitHub creates the `pypi` and
+`testpypi` environments on first use; add a required reviewer to `pypi` to gate
+production uploads.

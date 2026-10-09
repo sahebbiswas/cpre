@@ -5,9 +5,11 @@ name: Publish to PyPI / TestPyPI
 #   Project "cpre" -> Publishing -> add a GitHub trusted publisher
 #     owner: sahebbiswas   repository: cpre
 #     workflow: release.yml
-#     environment: pypi (on pypi.org) / testpypi (on test.pypi.org)
-# GitHub creates the "pypi" and "testpypi" environments on first use; add
-# required reviewers on "pypi" under Settings -> Environments if wanted.
+#     environment: pypi on pypi.org; none (any) on test.pypi.org
+# The TestPyPI publisher names no environment, so it accepts the "testpypi"
+# environment the job below runs in. GitHub creates the "pypi" and "testpypi"
+# environments on first use; add required reviewers on "pypi" under
+# Settings -> Environments if wanted.
 #
 # Flow (see CONTRIBUTING.md, "Releasing"):
 #   * Manual run (workflow_dispatch): build, check, test the built
