@@ -154,12 +154,14 @@ jobs:
           PY
 
       - name: Run the test suite against the installed package
-        # The venv's pytest script (not python -m pytest) keeps the checkout
-        # off sys.path; CPRE_REQUIRE_INSTALLED makes tests/conftest.py fail if
-        # cpre would still be imported from the source tree.
+        # Run from outside the checkout with the venv's pytest script (not
+        # python -m pytest), so neither pytest nor the tests' own subprocesses
+        # (python -m cpre, python -c ...) can import cpre from the source tree.
+        # CPRE_REQUIRE_INSTALLED makes tests/conftest.py fail if it still would.
+        working-directory: ${{ runner.temp }}
         env:
           CPRE_REQUIRE_INSTALLED: "1"
-        run: '"$RUNNER_TEMP/venv/bin/pytest" -p no:cacheprovider tests'
+        run: '"$RUNNER_TEMP/venv/bin/pytest" -p no:cacheprovider "$GITHUB_WORKSPACE/tests"'
 
   publish-testpypi:
     name: Publish to TestPyPI
@@ -181,10 +183,10 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
-          # TestPyPI never allows re-uploading a version. Manual dry runs may
-          # repeat one, but a release must upload the files it just built, so
-          # that the install check below tests exactly what goes to PyPI.
-          skip-existing: ${{ github.event_name == 'workflow_dispatch' }}
+          # No skip-existing: TestPyPI never allows re-uploading a version, and
+          # the install check below must test the files this run built. Each
+          # dry run therefore needs a new pre-release version (CONTRIBUTING.md,
+          # "Releasing").
 
   verify-testpypi:
     name: Verify TestPyPI install
@@ -200,11 +202,12 @@ jobs:
           VERSION: ${{ needs.build.outputs.version }}
         run: |
           python -m venv "$RUNNER_TEMP/venv"
-          # The new upload can take a moment to appear in the index.
+          # The new upload can take a moment to appear in the index. cpre has
+          # no runtime dependencies, so install from TestPyPI only: with PyPI as
+          # an extra index, pip could pick an identical version from PyPI.
           for attempt in 1 2 3 4 5 6; do
             if "$RUNNER_TEMP/venv/bin/python" -m pip install --no-cache-dir \
                  --index-url https://test.pypi.org/simple/ \
-                 --extra-index-url https://pypi.org/simple/ \
                  "cpre==$VERSION"; then
               break
             fi

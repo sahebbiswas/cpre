@@ -146,9 +146,11 @@ Publishing (no API tokens are stored).
    on TestPyPI. So never run it on `main` itself. Instead, push a temporary
    branch from the chosen commit that changes `__version__` to a pre-release of
    the version (`0.20.2` → `0.20.2rc1`, then `rc2`, …), run the workflow on
-   that branch, and delete the branch afterwards without merging it. The
-   version check runs only on pull requests, so the branch needs no pull
-   request.
+   that branch, and delete the branch afterwards without merging it. Use a new
+   pre-release for every run: the workflow never skips a version that is
+   already on TestPyPI, so a repeated version fails instead of testing old
+   files. The version check runs only on pull requests, so the branch needs no
+   pull request.
 3. Publish a GitHub release with tag `vX.Y.Z` matching the version, on that
    commit. Use *Generate release notes* (since the previous `v` tag) and put
    the **Behaviour change:** items from the merged pull requests at the top.
@@ -162,9 +164,11 @@ The release notes on GitHub are the history of what each release contains. A
 version maps to the commit that set it (`git log --oneline -S'__version__ = "0.20.1"' --
 cpre/__init__.py`), and every commit on `main` links to its pull request.
 
-One-time setup: on pypi.org and test.pypi.org, add a (pending) trusted publisher
-for repository `sahebbiswas/cpre` and workflow `release.yml`. On pypi.org,
-restrict it to environment `pypi`; on test.pypi.org, leave the environment
-empty (any environment), as for cddl_verifier. GitHub creates the `pypi` and
-`testpypi` environments on first use; add a required reviewer to `pypi` to gate
-production uploads.
+One-time setup: the `cpre` project already exists on pypi.org, so add the
+trusted publisher under that project's *Publishing* settings: repository
+`sahebbiswas/cpre`, workflow `release.yml`, environment `pypi`. On
+test.pypi.org, add the same publisher with the environment left empty (any
+environment), as for cddl_verifier; use a pending publisher there only if the
+TestPyPI project does not exist yet. GitHub creates the `pypi` and `testpypi`
+environments on first use; add a required reviewer to `pypi` to gate production
+uploads.
