@@ -50,7 +50,7 @@ The resolver returns a `ResolvedInclude(identity, source)` or `None`. `identity`
 - `__FILE__` inside the included source;
 - the `source_identity` field on diagnostics and source mappings.
 
-The resolver can be called more than once for the same request (for example, when `__has_include` handling re-runs a prefix of the source), so it must be deterministic. Exceptions it raises propagate to the caller.
+The resolver must be deterministic. Exceptions it raises propagate to the caller.
 
 ### Header names
 
@@ -110,6 +110,6 @@ The CLI exposes it as `-I DIR`/`--include-dir DIR`, `--iquote DIR`, and `--max-i
 
 ## Current boundaries
 
-- `__has_include` is answered in the primary source only. A `__has_include` condition inside an included source returns `unresolved_condition`.
+- `__has_include` inside an included source is answered by the `include_query` callback with `IncludeQuery.filename` set to the header's identity (see [Host-assisted `__has_include`](has-include.md#included-sources)). Availability is never derived from the resolver.
 - `__INCLUDE_LEVEL__` remains an unsupported predefined macro.
 - Resolution is never inferred from the host machine; everything cpre reads comes from the resolver you supply.

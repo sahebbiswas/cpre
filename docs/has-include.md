@@ -25,7 +25,7 @@ result = cpre.preprocess_source(
 assert result.complete
 ```
 
-`IncludeQuery` exposes the macro-expanded header spelling, whether the source used quoted or angle-bracket form, the physical source location of `__has_include`, and the caller-supplied filename. The callback must return `True`, `False`, or `None`. `None` means the host cannot answer and produces an atomic incomplete `PreprocessResult` with `ErrorCode.UNRESOLVED_CONDITION`; cpre never guesses `False`.
+`IncludeQuery` exposes the macro-expanded header spelling, whether the source used quoted or angle-bracket form, the physical source location of `__has_include` in the source that contains it, and that source's identity in `filename`: the caller-supplied `filename` for the primary source, or the resolved identity of an included source. The callback must return `True`, `False`, or `None`. `None` means the host cannot answer and produces an atomic incomplete `PreprocessResult` with `ErrorCode.UNRESOLVED_CONDITION`; cpre never guesses `False`.
 
 The operand is macro-expanded using the active source-order macro state before cpre interprets it as a header name. Both of these forms are supported:
 
@@ -39,18 +39,51 @@ The operand is macro-expanded using the active source-order macro state before c
 #endif
 ```
 
-Queries are lazy. A `__has_include` in an unreachable `#elif`, nested inactive branch, or Boolean term whose value is already irrelevant is not sent to the host callback.
+Queries are lazy. A `__has_include` in an unreachable `#elif`, nested inactive branch, or Boolean term whose value is already irrelevant is not sent to the host callback. Queries are evaluated under every unknown-name policy: with `MacroConfiguration(unknown_names="undefined")`, `__has_include` is still sent to the callback (or reported as unresolved without one) rather than treated as an undefined name.
+
+## Included sources
+
+With [include resolution](include-resolution.md), `__has_include` conditions inside resolved headers are answered through the same `include_query` callback, with the same semantics. `IncludeQuery.filename` is the header's resolved identity and `location` is the position in that header, so a callback can implement quoted-header search relative to the including file. The operand is expanded with the macro state at that point in the run, so a header entered twice can ask different questions. An unanswered query in a header is an atomic incomplete result whose diagnostic has the header's `source_identity`.
+
+```python
+import cpre
+from cpre.include_queries import IncludeQuery
+from cpre.includes import IncludeRequest, ResolvedInclude
+
+headers = {"config.h": "#if __has_include(<optional.h>)\n#define HAVE_OPTIONAL 1\n#endif\n"}
+
+
+def resolve(request: IncludeRequest) -> ResolvedInclude | None:
+    text = headers.get(request.header)
+    return ResolvedInclude(request.header, text) if text is not None else None
+
+
+def has_include(query: IncludeQuery) -> bool | None:
+    return query.header == "optional.h"
+
+
+result = cpre.preprocess_source(
+    '#include "config.h"\n#if HAVE_OPTIONAL\nint enabled;\n#endif\n',
+    include_resolver=resolve,
+    include_query=has_include,
+)
+assert result.complete
+```
+
+## Feature tests
+
+`defined(__has_include)`, `defined __has_include`, and `#ifdef __has_include` are true when `include_query` is given. Without a callback they are unknown, under either unknown-name policy, so cpre never guesses. `__has_include_next` is not implemented: `defined(__has_include_next)` is false, so the usual feature-test fallback is selected, and a reachable `__has_include_next(...)` that decides a condition is an `unsupported_condition_expression` incomplete result.
 
 ## Boundary
 
-This feature does **not** resolve `#include`, `#include_next`, or `#import` directives; use [include resolution](include-resolution.md) to preprocess headers, or [include skipping](preprocessing.md#opt-in-include-skipping) to treat them as opaque. `__has_include` queries are answered in the primary source only; inside a resolved included source they remain `unresolved_condition`.
+This feature does **not** resolve `#include`, `#include_next`, or `#import` directives; use [include resolution](include-resolution.md) to preprocess headers, or [include skipping](preprocessing.md#opt-in-include-skipping) to treat them as opaque. The callback answers queries; cpre does not derive availability from the include resolver.
 
 cpre also does not:
 
 - probe the filesystem by default;
 - interpret compiler `-I`, `-isystem`, sysroot, framework, or builtin-header search rules;
 - invoke a compiler;
-- implement `__has_include_next`;
+- implement `__has_include_next` (see [Feature tests](#feature-tests));
 - implement vendor probes such as `__has_builtin`, `__has_attribute`, or `__has_feature`.
 
 For quoted-header semantics that depend on the including file, use `IncludeQuery.filename` in the host callback. The callback is responsible for any search policy; cpre only preserves and reports the query form and spelling.

@@ -199,7 +199,7 @@ Environment-dependent predefined-macro value uses that lack deterministic config
 
 The host callback answers the already-parsed query. cpre owns condition evaluation and macro expansion; the host owns filesystem/toolchain availability policy. An unanswered query returns an incomplete result rather than being treated as false.
 
-Active `#include`, `#include_next`, and `#import` directives are outside the default concrete transformation contract; see [Caller-resolved includes](#caller-resolved-includes) and [Opt-in include skipping](#opt-in-include-skipping). `__has_include` is answered in the primary source only.
+Active `#include`, `#include_next`, and `#import` directives are outside the default concrete transformation contract; see [Caller-resolved includes](#caller-resolved-includes) and [Opt-in include skipping](#opt-in-include-skipping). `__has_include` is answered in the primary source and in resolved included sources.
 
 See [Host-assisted `__has_include`](has-include.md) for query objects, return values, laziness, and the header-search boundary.
 

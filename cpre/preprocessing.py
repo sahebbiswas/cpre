@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 
+from . import _has_include
 from ._pragma_syntax import _mask_source_pragmas, _output_offset_for_source, _SourcePragma
 from .analysis import _macro_semantics, tree_expressions
 from .api import (
@@ -37,7 +38,14 @@ from .includes import (
     ResolvedInclude,
 )
 from .macros import MacroDefinition, MacroEnvironment, MacroState, _apply_macro_directive
-from .model import TRUE, ConditionalGroup, ConditionError, DefinedVariable, Variable
+from .model import (
+    TRUE,
+    ConditionalBranch,
+    ConditionalGroup,
+    ConditionError,
+    DefinedVariable,
+    Variable,
+)
 from .numeric_conditions import NumericConditionError, evaluate_numeric_condition
 from .parser import logical_lines, parse_source
 from .robdd import BDD, AnalysisBudget, AnalysisLimitExceeded, ResourceLimits
@@ -226,6 +234,7 @@ class _Run:
     # Only the pragma layer dispatches pragma markers; other callers keep included
     # pragmas as unsupported directives rather than emitting inert markers.
     dispatch_pragmas: bool = False
+    include_query: _has_include.IncludeQueryProvider | None = None
 
 
 @dataclass(frozen=True)
@@ -534,6 +543,7 @@ def preprocess_source(
     include_resolver: IncludeResolver | None = None,
     max_include_depth: int = DEFAULT_MAX_INCLUDE_DEPTH,
     _dispatch_included_pragmas: bool = False,
+    _include_query: _has_include.IncludeQueryProvider | None = None,
 ) -> PreprocessResult:
     """Select conditional branches under an explicit concrete macro state.
 
@@ -630,6 +640,7 @@ def preprocess_source(
         includes,
         [],
         _dispatch_included_pragmas,
+        _include_query,
     )
     unit = _preprocess_unit(source, run, identity=None, filename=filename, depth=0)
     if unit.diagnostics:
@@ -663,6 +674,15 @@ def _preprocess_unit(
         # lines; the pragma layer dispatches them in output order. ``once`` is a
         # core include-management pragma and stays a directive.
         source, pragma_markers = _mask_source_pragmas(source, frozenset({"once"}))
+    # Each __has_include invocation becomes a unique placeholder identifier that stays
+    # unknown until a condition needing it is reached; it is then answered with the
+    # macro state at that point.
+    queries = _has_include.scan(source) if "__has_include" in source else ()
+    if queries:
+        source = _has_include.render(source, queries)
+    queries_by_line: dict[int, list[_has_include.Occurrence]] = {}
+    for occurrence in queries:
+        queries_by_line.setdefault(occurrence.directive_line, []).append(occurrence)
     try:
         tree = parse_source(source, distinguish_defined=True)
     except ConditionError as error:
@@ -693,6 +713,7 @@ def _preprocess_unit(
     expansion = Expansion(source, budget)
     logical_states: dict[int, _LogicalPreprocessingState] = {}
     environment = _PredefinedMacroEnvironment(base_environment, expansion, logical_states)
+    view = _has_include.ConditionView(environment, queries, run.include_query is not None)
     offsets = [0]
     for physical_line in physical:
         offsets.append(offsets[-1] + len(physical_line))
@@ -706,6 +727,171 @@ def _preprocess_unit(
             # Names the caller configured or the source already settled keep their
             # state; any other name may come from the unread header.
             base_environment._skip_include()
+
+    def has_include_diagnostic(
+        code: ErrorCode, message: str, occurrence: _has_include.Occurrence
+    ) -> None:
+        diagnostics.append(PreprocessDiagnostic(code, message, occurrence.location, identity))
+
+    def answer_query(occurrence: _has_include.Occurrence) -> bool:
+        """Answer one reachable __has_include; False means diagnostics were added."""
+        if occurrence.operator == _has_include.HAS_INCLUDE_NEXT:
+            has_include_diagnostic(
+                ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION,
+                "__has_include_next is not supported during concrete preprocessing",
+                occurrence,
+            )
+            return False
+        if occurrence.operand is None:
+            has_include_diagnostic(
+                ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION,
+                "__has_include expects one parenthesized header-name operand",
+                occurrence,
+            )
+            return False
+        if run.include_query is None:
+            has_include_diagnostic(
+                ErrorCode.UNRESOLVED_CONDITION,
+                "__has_include requires caller-provided include availability",
+                occurrence,
+            )
+            return False
+        try:
+            query = _has_include.header_query(occurrence, environment, budget, filename)
+        except _has_include.HeaderOperandError as error:
+            has_include_diagnostic(
+                ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION, str(error), occurrence
+            )
+            return False
+        except ExpansionError as error:
+            has_include_diagnostic(ErrorCode.UNSUPPORTED_MACRO_EXPANSION, str(error), occurrence)
+            return False
+        except AnalysisLimitExceeded as error:
+            diagnostics.append(
+                AnalysisIncomplete(
+                    ErrorCode.ANALYSIS_LIMIT_EXCEEDED,
+                    error.resource,
+                    error.limit,
+                    error.observed,
+                    str(error),
+                    occurrence.location,
+                    source_identity=identity,
+                )
+            )
+            return False
+        available = run.include_query(query)
+        if available is None:
+            delimiter = (
+                f'"{query.header}"' if query.form is IncludeForm.QUOTED else f"<{query.header}>"
+            )
+            has_include_diagnostic(
+                ErrorCode.UNRESOLVED_CONDITION,
+                f"include availability is unknown for {delimiter}",
+                occurrence,
+            )
+            return False
+        if type(available) is not bool:
+            raise AnalysisError(
+                "include_query must return True, False, or None",
+                code=ErrorCode.INVALID_CONFIGURATION,
+                location=occurrence.location,
+                filename=filename,
+            )
+        view.answers[occurrence.placeholder] = available
+        return True
+
+    def select_branch(branch: ConditionalBranch) -> bool | None:
+        """Decide one reachable branch; None means diagnostics were added.
+
+        A condition left undetermined by an unanswered ``__has_include`` asks for
+        the first such query on the line and is re-evaluated, so queries in
+        irrelevant Boolean terms are never sent.
+        """
+        line_queries = queries_by_line.get(branch.line, [])
+        builtin = (
+            _unconfigured_predefined_macro(branch.expression_text, view)
+            if branch.expression_text is not None
+            and branch.directive not in _DEFINEDNESS_DIRECTIVES
+            else None
+        )
+        if builtin is not None:
+            diagnostics.append(
+                located(
+                    ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
+                    f"predefined macro {builtin} is not supported during concrete preprocessing",
+                    branch.line,
+                )
+            )
+            return None
+        condition = branch.expression if branch.expression is not None else TRUE
+        while True:
+            terms = [semantics]
+            for name in names:
+                macro = view.get(name)
+                for atom, value in (
+                    (DefinedVariable(name), macro.defined),
+                    (Variable(name), macro.value),
+                ):
+                    if value is not None:
+                        terms.append(atom if value else negate(atom))
+            context_expression = conjunction(*terms)
+            if not bdd.satisfiable(conjunction(context_expression, condition)):
+                return False
+            if not bdd.satisfiable(conjunction(context_expression, negate(condition))):
+                return True
+            pending = next(
+                (item for item in line_queries if item.placeholder not in view.answers), None
+            )
+            if branch.expression_text is not None and branch.directive not in (
+                _DEFINEDNESS_DIRECTIVES
+            ):
+                try:
+                    selected = evaluate_numeric_condition(
+                        branch.expression_text,
+                        _condition_environment(view),  # type: ignore[arg-type]
+                        expansion,
+                        budget,
+                        unsupported_identifiers=_PREDEFINED_MACROS,
+                    )
+                except NumericConditionError as error:
+                    if pending is not None:
+                        selected = None
+                    else:
+                        diagnostics.append(
+                            located(
+                                ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION,
+                                str(error),
+                                branch.line,
+                            )
+                        )
+                        return None
+                except ExpansionError as error:
+                    diagnostics.append(
+                        located(ErrorCode.UNSUPPORTED_MACRO_EXPANSION, str(error), branch.line)
+                    )
+                    return None
+                if selected is not None:
+                    return selected
+            if pending is not None:
+                if not answer_query(pending):
+                    return None
+                continue
+            condition_text = (
+                _has_include.restore(branch.expression_text, line_queries)
+                if branch.expression_text is not None
+                else None
+            )
+            diagnostics.append(
+                _unresolved_condition(
+                    branch.directive,
+                    condition_text,
+                    view,  # type: ignore[arg-type]
+                    branch.line,
+                    identity,
+                    limits.max_work,
+                )
+            )
+            return None
 
     def include_line(kind: str, operand: str, line: int, state: _LogicalPreprocessingState) -> bool:
         """Handle one reachable include directive; False means diagnostics were added."""
@@ -873,83 +1059,12 @@ def _preprocess_unit(
                 environment.logical_override = line_state
                 try:
                     if frame[0] and not frame[1]:
-                        builtin = (
-                            _unconfigured_predefined_macro(branch.expression_text, environment)
-                            if branch.expression_text is not None
-                            and branch.directive not in _DEFINEDNESS_DIRECTIVES
-                            else None
-                        )
-                        if builtin is not None:
-                            diagnostics.append(
-                                located(
-                                    ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
-                                    f"predefined macro {builtin} is not supported during concrete preprocessing",
-                                    current_line,
-                                )
-                            )
+                        selected = select_branch(branch)
+                        if selected is None:
                             break
-                        terms = [semantics]
-                        for name in names:
-                            state = environment.get(name)
-                            for atom, value in (
-                                (DefinedVariable(name), state.defined),
-                                (Variable(name), state.value),
-                            ):
-                                if value is not None:
-                                    terms.append(atom if value else negate(atom))
-                        context_expression = conjunction(*terms)
-                        condition = branch.expression if branch.expression is not None else TRUE
-                        if bdd.satisfiable(conjunction(context_expression, condition)):
-                            ambiguous = bdd.satisfiable(
-                                conjunction(context_expression, negate(condition))
-                            )
-                            selected: bool | None = None
-                            if (
-                                ambiguous
-                                and branch.expression_text is not None
-                                and branch.directive not in _DEFINEDNESS_DIRECTIVES
-                            ):
-                                try:
-                                    selected = evaluate_numeric_condition(
-                                        branch.expression_text,
-                                        _condition_environment(environment),
-                                        expansion,
-                                        budget,
-                                        unsupported_identifiers=_PREDEFINED_MACROS,
-                                    )
-                                except NumericConditionError as error:
-                                    diagnostics.append(
-                                        located(
-                                            ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION,
-                                            str(error),
-                                            current_line,
-                                        )
-                                    )
-                                    break
-                                except ExpansionError as error:
-                                    diagnostics.append(
-                                        located(
-                                            ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
-                                            str(error),
-                                            current_line,
-                                        )
-                                    )
-                                    break
-                            if ambiguous and selected is None:
-                                diagnostics.append(
-                                    _unresolved_condition(
-                                        branch.directive,
-                                        branch.expression_text,
-                                        environment,
-                                        current_line,
-                                        identity,
-                                        limits.max_work,
-                                    )
-                                )
-                                break
-                            if not ambiguous or selected:
-                                active = True
-                                frame[1] = True
+                        if selected:
+                            active = True
+                            frame[1] = True
                 finally:
                     environment.logical_override = None
                 frame[2] = active

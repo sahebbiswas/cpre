@@ -1,3 +1,6 @@
+import pytest
+
+import cpre
 from cpre import ErrorCode, SourceLocation, preprocess_source
 from cpre.include_queries import IncludeForm, IncludeQuery
 
@@ -231,3 +234,104 @@ def test_has_include_offsets_follow_parser_splitlines_semantics():
     assert "int before;" in result.source
     assert "int yes;" in result.source
     assert seen == [IncludeQuery("optional.h", IncludeForm.ANGLE, SourceLocation(2, 5), None)]
+
+
+def test_closed_world_policy_still_queries_has_include():
+    provider, seen = _provider({(IncludeForm.ANGLE, "optional.h"): True})
+    result = preprocess_source(
+        "#if __has_include(<optional.h>)\nint yes;\n#endif\n",
+        configuration=cpre.MacroConfiguration(unknown_names="undefined"),
+        include_query=provider,
+    )
+
+    assert result.complete
+    assert "int yes;" in result.source
+    assert [query.header for query in seen] == ["optional.h"]
+
+
+def test_closed_world_policy_without_provider_does_not_guess_false():
+    result = preprocess_source(
+        "#if __has_include(<optional.h>)\nint yes;\n#endif\n",
+        configuration=cpre.MacroConfiguration(unknown_names="undefined"),
+    )
+
+    assert not result.complete
+    assert "caller-provided" in result.incomplete[0].message
+
+
+@pytest.mark.parametrize(
+    "test",
+    [
+        "#if defined(__has_include)",
+        "#if defined __has_include",
+        "#ifdef __has_include",
+        "#if defined(__has_include) && __has_include(<optional.h>)",
+    ],
+)
+def test_has_include_feature_test_is_defined_with_provider(test):
+    provider, _ = _provider({(IncludeForm.ANGLE, "optional.h"): True})
+    result = preprocess_source(
+        f"{test}\nint yes;\n#else\nint no;\n#endif\n", include_query=provider
+    )
+
+    assert result.complete
+    assert "int yes;" in result.source
+
+
+def test_has_include_feature_test_is_unknown_without_provider():
+    for configuration in (None, cpre.MacroConfiguration(unknown_names="undefined")):
+        result = preprocess_source(
+            "#ifdef __has_include\nint yes;\n#endif\n", configuration=configuration
+        )
+        assert not result.complete
+        assert result.incomplete[0].code is ErrorCode.UNRESOLVED_CONDITION
+
+
+def test_has_include_next_is_explicitly_unsupported():
+    calls = []
+
+    def provider(query):
+        calls.append(query)
+        return True
+
+    result = preprocess_source(
+        "#if __has_include_next(<optional.h>)\nint yes;\n#endif\n", include_query=provider
+    )
+
+    assert not result.complete
+    assert result.incomplete[0].code is ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION
+    assert "__has_include_next is not supported" in result.incomplete[0].message
+    assert result.incomplete[0].location == SourceLocation(1, 5)
+    assert calls == []
+
+    fallback = preprocess_source(
+        "#if defined(__has_include_next)\nint next;\n#else\nint fallback;\n#endif\n",
+        include_query=provider,
+    )
+    assert fallback.complete
+    assert "int fallback;" in fallback.source
+
+
+def test_has_include_on_continuation_line_is_answered():
+    provider, seen = _provider({(IncludeForm.ANGLE, "optional.h"): True})
+    result = preprocess_source(
+        "#if 1 && \\\n    __has_include(<optional.h>)\nint yes;\n#endif\n",
+        include_query=provider,
+    )
+
+    assert result.complete
+    assert "int yes;" in result.source
+    assert seen[0].location == SourceLocation(2, 5)
+
+
+def test_undetermined_condition_reports_has_include_as_written():
+    provider, _ = _provider({(IncludeForm.ANGLE, "optional.h"): True})
+    result = preprocess_source(
+        "#if FEATURE && __has_include(<optional.h>)\nint yes;\n#endif\n",
+        include_query=provider,
+    )
+
+    assert not result.complete
+    diagnostic = result.incomplete[0]
+    assert diagnostic.condition == "FEATURE && __has_include(<optional.h>)"
+    assert [macro.name for macro in diagnostic.unresolved] == ["FEATURE"]

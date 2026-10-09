@@ -8,6 +8,7 @@ import pytest
 import cpre
 from cpre import ErrorCode, SourceLocation, preprocess_source
 from cpre.cli import main
+from cpre.include_queries import IncludeQuery
 from cpre.includes import (
     IncludeForm,
     IncludeOutcome,
@@ -389,13 +390,98 @@ def test_unresolved_condition_in_header_reports_header_identity():
     assert diagnostic.source_identity == "h.h"
 
 
-def test_has_include_inside_included_source_is_not_answered():
-    resolver = MemoryResolver({"h.h": "#if __has_include(<x.h>)\n#endif\n"})
-    result = preprocess_source(
-        '#include "h.h"\n', include_resolver=resolver, include_query=lambda query: True
+def _recording_query(answers: dict[tuple[IncludeForm, str], bool | None]):
+    seen: list[IncludeQuery] = []
+
+    def query(item: IncludeQuery) -> bool | None:
+        seen.append(item)
+        return answers.get((item.form, item.header))
+
+    return query, seen
+
+
+def test_has_include_inside_included_source_is_answered_with_header_identity():
+    resolver = MemoryResolver(
+        {
+            "config.h": (
+                "#if __has_include(<optional.h>)\n"
+                "#define HAVE_OPTIONAL 1\n"
+                "#endif\n"
+                '#if __has_include("local.h")\n'
+                "#define HAVE_LOCAL 1\n"
+                "#endif\n"
+            )
+        }
     )
+    query, seen = _recording_query(
+        {(IncludeForm.ANGLE, "optional.h"): True, (IncludeForm.QUOTED, "local.h"): False}
+    )
+    result = preprocess_source(
+        '#include "config.h"\n#if HAVE_OPTIONAL && !defined(HAVE_LOCAL)\nint yes;\n#endif\n',
+        filename="main.c",
+        configuration=cpre.MacroConfiguration(unknown_names="undefined"),
+        include_resolver=resolver,
+        include_query=query,
+    )
+    assert _compact(result) == "int yes;\n"
+    assert seen == [
+        IncludeQuery("optional.h", IncludeForm.ANGLE, SourceLocation(1, 5), "config.h"),
+        IncludeQuery("local.h", IncludeForm.QUOTED, SourceLocation(4, 5), "config.h"),
+    ]
+
+
+def test_has_include_in_header_uses_live_macro_state_per_entry():
+    resolver = MemoryResolver(
+        {"probe.h": "#if __has_include(HEADER)\nint found;\n#else\nint missing;\n#endif\n"}
+    )
+    query, seen = _recording_query(
+        {(IncludeForm.QUOTED, "a.h"): True, (IncludeForm.QUOTED, "b.h"): False}
+    )
+    result = preprocess_source(
+        '#define HEADER "a.h"\n#include "probe.h"\n'
+        '#undef HEADER\n#define HEADER "b.h"\n#include "probe.h"\n',
+        include_resolver=resolver,
+        include_query=query,
+    )
+    assert _compact(result) == "int found;\nint missing;\n"
+    assert [item.header for item in seen] == ["a.h", "b.h"]
+
+
+def test_unreachable_has_include_in_header_is_not_queried():
+    resolver = MemoryResolver(
+        {
+            "h.h": (
+                "#if 1 || __has_include(<short.h>)\nint a;\n#endif\n"
+                "#ifdef OFF\n#if __has_include(<dead.h>)\n#endif\n#endif\n"
+                "#if 0\n#elif __has_include(<live.h>)\nint b;\n#endif\n"
+            )
+        }
+    )
+    query, seen = _recording_query({(IncludeForm.ANGLE, "live.h"): True})
+    result = preprocess_source(
+        '#undef OFF\n#include "h.h"\n', include_resolver=resolver, include_query=query
+    )
+    assert _compact(result) == "int a;\nint b;\n"
+    assert [item.header for item in seen] == ["live.h"]
+
+
+@pytest.mark.parametrize(
+    ("include_query", "message"),
+    [
+        (None, "__has_include requires caller-provided include availability"),
+        (lambda query: None, "include availability is unknown for <x.h>"),
+    ],
+)
+def test_unanswered_has_include_in_header_is_atomic_incomplete(include_query, message):
+    resolver = MemoryResolver({"h.h": "int h;\n#if __has_include(<x.h>)\n#endif\n"})
+    result = preprocess_source(
+        '#include "h.h"\nint main;\n', include_resolver=resolver, include_query=include_query
+    )
+    assert result.source is None
     (diagnostic,) = result.incomplete
     assert diagnostic.code is ErrorCode.UNRESOLVED_CONDITION
+    assert diagnostic.message == message
+    assert diagnostic.location == SourceLocation(2, 5)
     assert diagnostic.source_identity == "h.h"
 
 
