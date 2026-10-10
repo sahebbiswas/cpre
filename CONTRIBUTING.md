@@ -1,6 +1,6 @@
 # Contributing to `cpre`
 
-Thank you for contributing! Here are some instructions to get your local development environment set up and ensure your code is ready to be merged. [Every pull request](#every-pull-request) covers what each pull request must include, and [Versioning](#versioning) and [Releasing](#releasing) cover how versions and releases work.
+Thank you for contributing! Here are some instructions to get your local development environment set up and ensure your code is ready to be merged. [Every pull request](#every-pull-request) covers what each pull request must include, [Reporting gaps](#reporting-gaps) covers issues you find along the way, and [Versioning](#versioning) and [Releasing](#releasing) cover how versions and releases work.
 
 ## Prerequisites
 
@@ -86,8 +86,42 @@ When opening a Pull Request, our CI will automatically verify these checks.
   closing keyword in a commit message does close it on merge, but does not
   link the pull request, so use the description. Use `Part of #N` or
   `Refs #N` for an issue the pull request only advances.
-- **Gaps you find but don't fix** get an issue of their own, linked from the
-  pull request.
+- **Gaps you find but don't fix** are tracked in an issue and linked from the
+  pull request. See [Reporting gaps](#reporting-gaps) for how to find or create
+  that issue.
+
+## Reporting gaps
+
+During development you will notice bugs, edge cases, missing features and
+documentation gaps that are outside the change you are making. Record each one
+in the issue tracker instead of leaving it in a code comment or a pull request
+thread, and don't create duplicates:
+
+1. **Search existing issues first.** Search open *and* closed issues for the
+   affected function, CLI option, error message, and `ErrorCode`, and for the
+   issue the work started from. Read the likely matches, not just their
+   titles.
+2. **If an issue already covers it, add to that issue.** Comment with what is
+   new: a minimal reproduction (source text plus the exact API call or `cpre`
+   command, with its actual and expected output), the version or commit you
+   used, and the pull request or issue where you found it. Don't open a second
+   issue for the same problem.
+3. **If an issue is related but the gap is substantially different**, for
+   example another construct, another code path, or a fix that would be
+   reviewed separately, create a new issue and add it as a
+   [sub-issue](https://docs.github.com/en/issues/tracking-your-work-with-issues/using-issues/adding-sub-issues)
+   of the related one, or link it with "Follow-up from #N" when a sub-issue
+   doesn't fit. If a closed issue matches but the problem is back, open a new
+   issue that links to the closed one rather than commenting on it.
+4. **If nothing matches, create a new issue.** Give it:
+   - a title with a priority prefix in the style of the existing issues
+     (`[P2] ...`, where a lower number is more urgent);
+   - **Problem**: what is wrong or missing, and where you found it;
+   - a minimal reproduction with actual and expected results, for a bug;
+   - **Scope** or **Options**, when there is more than one reasonable fix;
+   - **Acceptance criteria** that a pull request can be checked against.
+5. **Link it from the pull request** with `Refs #N` (not `Closes #N`, which
+   would close it on merge), so reviewers can see what was deferred.
 
 ## Versioning
 
