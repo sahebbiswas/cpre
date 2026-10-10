@@ -201,7 +201,7 @@ The host callback answers the already-parsed query. cpre owns condition evaluati
 
 Active `#include`, `#include_next`, and `#import` directives are outside the default concrete transformation contract; see [Caller-resolved includes](#caller-resolved-includes) and [Opt-in include skipping](#opt-in-include-skipping). `__has_include` is answered in the primary source and in resolved included sources.
 
-See [Host-assisted `__has_include`](has-include.md) for query objects, return values, laziness, and the header-search boundary.
+With an `include_resolver`, `has_include_from_resolver=True` answers queries the callback leaves open from the resolver. See [Host-assisted `__has_include`](has-include.md) for query objects, return values, laziness, resolver-derived answers, and the header-search boundary.
 
 ## Opt-in include skipping
 

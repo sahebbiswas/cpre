@@ -25,6 +25,7 @@ def preprocess_source(
     skip_includes: bool = False,
     include_resolver: IncludeResolver | None = None,
     max_include_depth: int = DEFAULT_MAX_INCLUDE_DEPTH,
+    has_include_from_resolver: bool = False,
     _dispatch_included_pragmas: bool = False,
 ) -> PreprocessResult:
     """Concrete preprocessing with optional host-assisted ``__has_include`` support.
@@ -36,7 +37,12 @@ def preprocess_source(
     source, or the resolved identity of an included source. A Boolean answer is
     substituted deterministically; ``None`` yields an atomic incomplete result.
     Queries in branches or Boolean terms proven unreachable are never sent to the
-    provider. ``defined(__has_include)`` is true when ``include_query`` is given;
+    provider. With ``has_include_from_resolver=True``, a query that
+    ``include_query`` does not answer (no callback, or ``None``) is answered by
+    ``include_resolver``: the header is available exactly when the resolver returns
+    a :class:`ResolvedInclude` for the equivalent ``#include`` request. The resolver
+    must have no side effects for this to be sound, so it is opt-in.
+    ``defined(__has_include)`` is true when either source of answers is enabled;
     ``__has_include_next`` is unsupported.
     """
     if include_query is not None and not callable(include_query):
@@ -56,6 +62,7 @@ def preprocess_source(
         max_include_depth=max_include_depth,
         _dispatch_included_pragmas=_dispatch_included_pragmas,
         _include_query=include_query,
+        _has_include_from_resolver=has_include_from_resolver,
     )
 
 

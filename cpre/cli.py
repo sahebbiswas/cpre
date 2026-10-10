@@ -604,6 +604,14 @@ def _build_preprocess_parser(prog: str) -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--has-include-from-search",
+        action="store_true",
+        help=(
+            "answer reachable __has_include(...) from the -I/--iquote search: a header is "
+            "available exactly when the same #include would resolve; requires -I or --iquote"
+        ),
+    )
+    parser.add_argument(
         "--max-include-depth",
         type=int,
         default=DEFAULT_MAX_INCLUDE_DEPTH,
@@ -729,6 +737,8 @@ def preprocess_main(
     args = parser.parse_args(argv)
     if args.list_unknown_macros and args.compact:
         parser.error("--compact cannot be combined with --list-unknown-macros")
+    if args.has_include_from_search and not (args.include_dirs or args.quote_dirs):
+        parser.error("--has-include-from-search requires -I or --iquote")
     if len(args.sources) != 1:
         parser.error("preprocess currently accepts exactly one source file")
     path = args.sources[0]
@@ -794,6 +804,7 @@ def preprocess_main(
             skip_includes=args.skip_includes,
             include_resolver=resolver,
             max_include_depth=args.max_include_depth,
+            has_include_from_resolver=args.has_include_from_search,
         )
     except (CpreError, ValueError, OSError, UnicodeDecodeError) as error:
         origin = getattr(error, "filename", None) or path

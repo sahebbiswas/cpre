@@ -106,10 +106,10 @@ It searches as follows:
 
 Identities are normalized joined paths. Files are read as UTF-8 by default, with line endings preserved. Read failures raise `AnalysisError` with `source_read_error`. It never consults compiler default or system directories.
 
-The CLI exposes it as `-I DIR`/`--include-dir DIR`, `--iquote DIR`, and `--max-include-depth N`. See the [CLI guide](cli.md#concrete-preprocessing).
+The CLI exposes it as `-I DIR`/`--include-dir DIR`, `--iquote DIR`, and `--max-include-depth N`, and answers `__has_include` from the same search with `--has-include-from-search`. See the [CLI guide](cli.md#concrete-preprocessing).
 
 ## Current boundaries
 
-- `__has_include` inside an included source is answered by the `include_query` callback with `IncludeQuery.filename` set to the header's identity (see [Host-assisted `__has_include`](has-include.md#included-sources)). Availability is never derived from the resolver.
+- `__has_include` inside an included source is answered by the `include_query` callback with `IncludeQuery.filename` set to the header's identity (see [Host-assisted `__has_include`](has-include.md#included-sources)). With `has_include_from_resolver=True`, queries the callback leaves open are answered by the resolver instead (see [Answers from the include resolver](has-include.md#answers-from-the-include-resolver)).
 - `__INCLUDE_LEVEL__` remains an unsupported predefined macro.
 - Resolution is never inferred from the host machine; everything cpre reads comes from the resolver you supply.
