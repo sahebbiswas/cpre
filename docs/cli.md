@@ -79,7 +79,7 @@ cpre --recursive --json src
 
 For a single non-directory input, stdout contains an object with:
 - `groups`: structural conditional-tree groups (or empty array if none/disabled). Groups of an incomplete component are not listed here.
-- `macros`: array of macro analysis results, each detailing `name`, `original_replacement`, `simplified`, `simplified_replacement`, `is_equivalent`, `semantics`, and `symbolic_literals`.
+- `macros`: array of macro analysis results, each with `name`, `line`, `column`, `candidate`, `simplified`, `original` (the original replacement), `replacement` (the simplified replacement, or `null`), `equivalent`, `rewritable`, `reason`, `semantics`, and `symbolic_literals`.
 - When conditional analysis is enabled, the completeness of that analysis:
   - `complete`: `true` only if every conditional was analyzed.
   - `partial`: `true` if only some independent components were left unanalyzed, so the listed `groups` are proven.
@@ -175,7 +175,7 @@ In default mode, notable conditional branches (dead, redundant, simplifiable) an
 ```text
 line 12: #elif A [dead]
   reason: condition contradicts its parent or earlier branches
-line 45: #define FEAT_1 (0 && A) || B -> (B)
+line 45: #define FEAT_1 ((0 && A) || B) -> (!!B) [proven equivalent]
 ```
 
 Use `--verbose` to include unchanged branches, unsimplified macros, and skipped non-candidate definitions.
@@ -365,7 +365,13 @@ cpre simplify-macros --in-place source.c
 In report mode, each simplified definition distinguishes the original replacement list, simplified replacement list, proof/equivalence status, and source location:
 
 ```text
-line 12: #define FEAT_1 (0 && A) || B -> (B) [proven equivalent]
+line 12: #define FEAT_1 ((0 && A) || B) -> (!!B) [proven equivalent]
+```
+
+A definition whose replacement has `&&` or `||` outside parentheses is reported but never rewritten, because the parentheses a rewrite adds would change what its uses mean (see [Unparenthesized replacements](macro-simplification.md#unparenthesized-replacements-are-reported-not-rewritten)). Parenthesize the original to allow the rewrite:
+
+```text
+line 13: #define FEAT_2 (0 && A) || B -> (!!B) [proven equivalent; not rewritten: parenthesize the original first]
 ```
 
 With `--verbose`, unsimplified candidates and skipped non-candidate definitions are also displayed with diagnostic reasons:
@@ -378,7 +384,7 @@ line 8: #define FEAT_2 (A || B) (expression is already in simplest equivalent fo
 In rewrite mode (`--rewrite`), successfully applied transformations are indicated:
 
 ```text
-line 12: #define FEAT_1 (0 && A) || B -> (B) [rewritten, proven equivalent]
+line 12: #define FEAT_1 ((0 && A) || B) -> (!!B) [rewritten, proven equivalent]
 ```
 
 ### Safety and verification guarantees
@@ -408,7 +414,7 @@ cpre simplify-macros --json source.c
 cpre simplify-macros --rewrite --json source.c
 ```
 
-The output contains `path`, `rewritten`, `applied_count`, `verified`, `semantics`, `symbolic_literals`, and the array of analyzed `macros`.
+The output contains `path`, `rewritten`, `applied_count`, `verified`, `semantics`, `symbolic_literals`, and the array of analyzed `macros`. Each macro entry has `rewritable`, which is `false` for a simplification that is reported but not rewritten; its `reason` then starts with `not rewritten:`.
 
 ### Diff and check modes
 
@@ -431,8 +437,8 @@ cpre simplify-macros --check --diff --recursive src
 --- source.c
 +++ source.c
 @@ -1,2 +1,2 @@
--#define FEAT_1 (0 && A) || B
-+#define FEAT_1 (B)
+-#define FEAT_1 ((0 && A) || B)
++#define FEAT_1 (!!B)
  int x;
 ```
 

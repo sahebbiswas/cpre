@@ -5,14 +5,15 @@ both the original and the rewritten source are run through concrete
 preprocessing under every configuration of the atoms. The property compares
 which branches preprocessing selects, not the text of the replacement.
 
-The contract under test is the documented one: identifiers are Boolean atoms,
-so the rewritten macro must select the same branches wherever it is used as a
-whole operand (``(M)``), in truth and value contexts, for atoms that are
-undefined, 0 or 1. Uses that bind to an unparenthesized replacement, and
-integer values other than 0 and 1 in value contexts, are known gaps tracked in
-#143 and #144; their regressions are below as strict xfails.
+The contract under test is that a rewrite never changes what preprocessing
+selects, wherever the macro is used: as a whole operand (``(M)``) or as a raw
+operand next to other operators (``!M``, ``M && C``), in truth and in value
+contexts, and for atom values other than 0 and 1. Two rules make that hold: a
+replacement with ``&&`` or ``||`` outside parentheses is never rewritten (#143),
+and a simplified form that is a lone identifier stays normalized as ``!!X``
+(#144).
 
-Definedness: every atom is tried undefined as well as defined as 0 or 1, and
+Definedness: every atom is tried undefined as well as defined, and
 two contexts combine the macro with ``defined`` tests on its atoms, where
 undefined and 0 differ. The ``defined`` operator inside a replacement list is
 outside the documented grammar, so the unsupported-construct property checks
@@ -36,8 +37,9 @@ from cpre import MacroConfiguration, UnknownNamePolicy
 
 NAMES = ("A", "B", "C")
 
-# Contexts that use the macro as a whole operand. Truth contexts depend only on
-# whether the macro is zero; value contexts also depend on its integer value.
+# Truth contexts depend only on whether the macro is zero; value contexts also
+# depend on its integer value. Raw uses (M without parentheses) bind with the
+# surrounding operators, which is where an unparenthesized replacement differs.
 TRUTH_CONTEXTS = (
     "(M)",
     "!(M)",
@@ -46,14 +48,18 @@ TRUTH_CONTEXTS = (
     "(M) ? 1 : 0",
     "defined(A) && (M)",
     "!defined B || !(M)",
+    "!M",
+    "M && C",
+    "C || M",
+    "!M || !C",
 )
-VALUE_CONTEXTS = ("(M) == 1", "(M) + (M) == 2")
+VALUE_CONTEXTS = ("(M) == 1", "(M) + (M) == 2", "M == 1", "M + M == 2")
 CONTEXTS = TRUTH_CONTEXTS + VALUE_CONTEXTS
 
-# None means undefined, which #if evaluates as 0. Other non-zero values add
-# nothing here: !, && and || treat every non-zero operand like 1, so they can
-# only differ in value contexts, which is the known gap #144.
-ATOM_VALUES = (None, 0, 1)
+# None means undefined, which #if evaluates as 0. The truthy value is 2, not 1:
+# !, && and || treat it like 1, but a value context sees the difference if a
+# rewrite drops the 0/1 normalization (#144).
+ATOM_VALUES = (None, 0, 2)
 
 # Each example preprocesses 2 x 27 configurations, so keep normal runs short.
 # Set CPRE_PROPERTY_EXAMPLES (for example to 2000) for a deeper local search.
@@ -132,20 +138,33 @@ DECORATIONS = ("", " /* note */", " // note", "continuation")
 @SETTINGS
 @given(
     replacement=_replacements(),
+    wrapped=st.booleans(),
     symbolic=st.sampled_from(((), (0,))),
     decoration=st.sampled_from(DECORATIONS),
     newline=st.sampled_from(("\n", "\r\n")),
 )
 # Regressions and representative cases found while writing these tests.
-@example(replacement="A || (!A && B)", symbolic=(), decoration="", newline="\n")
-@example(replacement="(0 && A) || B", symbolic=(0,), decoration="", newline="\n")
-@example(replacement="!!A && (A)", symbolic=(), decoration=" // note", newline="\r\n")
-@example(replacement="!A && A", symbolic=(), decoration="continuation", newline="\n")
-@example(replacement="!0 && !A || A", symbolic=(), decoration=" /* note */", newline="\n")
-@example(replacement="(0x0 && A) || (00 && B)", symbolic=(0,), decoration="", newline="\n")
-def test_rewrite_preserves_preprocessing_for_whole_operand_uses(
-    replacement, symbolic, decoration, newline
+@example(replacement="A || (!A && B)", wrapped=False, symbolic=(), decoration="", newline="\n")
+@example(replacement="(0 && A) || B", wrapped=False, symbolic=(0,), decoration="", newline="\n")
+@example(
+    replacement="!!A && (A)", wrapped=False, symbolic=(), decoration=" // note", newline="\r\n"
+)
+@example(replacement="!A && A", wrapped=False, symbolic=(), decoration="continuation", newline="\n")
+@example(
+    replacement="!0 && !A || A", wrapped=False, symbolic=(), decoration=" /* note */", newline="\n"
+)
+@example(
+    replacement="(0x0 && A) || (00 && B)", wrapped=False, symbolic=(0,), decoration="", newline="\n"
+)
+@example(replacement="A || (A && B)", wrapped=True, symbolic=(), decoration="", newline="\n")
+@example(replacement="!!A && A", wrapped=True, symbolic=(), decoration="", newline="\n")
+def test_rewrite_preserves_preprocessing_for_every_use(
+    replacement, wrapped, symbolic, decoration, newline
 ):
+    # Wrapped replacements are substitution-safe and get rewritten; unwrapped
+    # ones with a top-level && or || must be left alone.
+    if wrapped:
+        replacement = f"({replacement})"
     original = _source(_definition(replacement, decoration), CONTEXTS, newline)
 
     result = cpre.simplify_macros(original, rewrite=True, symbolic_literals=symbolic)
@@ -178,12 +197,13 @@ def test_rewrite_is_idempotent_and_matches_the_report(replacement, symbolic):
     twice = cpre.simplify_macros(once, rewrite=True, symbolic_literals=symbolic)
 
     [macro] = report.results
-    if macro.simplified:
+    if macro.simplified and macro.rewritable:
         assert once == f"#define M {macro.simplified_replacement}\n"
     else:
         assert once == source
-    # A rewritten macro is already in simplest form.
-    assert not twice.has_findings
+    # Nothing is left to rewrite: a rewritten macro is in simplest form, and an
+    # unparenthesized one is still reported but never rewritten.
+    assert not any(result.simplified and result.rewritable for result in twice.results)
     assert twice.rewritten_source == once
 
 
@@ -218,20 +238,24 @@ def test_unsupported_constructs_are_never_rewritten(construct, symbolic):
     assert result.rewritten_source == source
 
 
-@pytest.mark.xfail(strict=True, reason="#143: parenthesizing an unparenthesized replacement")
 def test_rewrite_of_unparenthesized_replacement_preserves_meaning():
+    # #143: !A || (A && B) is true for A=1, B=1; !(A) would not be.
     original = "#define FEAT A || (A && B)\n#if !FEAT\nint off;\n#endif\n"
 
+    result = cpre.simplify_macros(original, rewrite=True)
+
+    [macro] = result.results
+    assert macro.simplified and not macro.rewritable
+    assert result.rewritten_source == original
+    assert _selected(original, (1, 1, None)) == ["int off;"]
+
+
+@pytest.mark.parametrize("replacement", ["(!!A)", "(A && A)", "(A || (A && B))"])
+def test_rewrite_preserves_integer_value_of_normalized_macro(replacement):
+    # #144: the original is 1 when A is 2; a bare (A) would be 2.
+    original = f"#define M {replacement}\n#if M == 1\nint one;\n#endif\n"
+
     rewritten = cpre.rewrite_macros(original)
 
-    # !A || (A && B) is true for A=1, B=1; !(A) is not.
-    assert _selected(original, (1, 1, None)) == _selected(rewritten, (1, 1, None))
-
-
-@pytest.mark.xfail(strict=True, reason="#144: !!X simplifies to (X), losing 0/1 normalization")
-def test_rewrite_preserves_integer_value_of_normalized_macro():
-    original = "#define M (!!A)\n#if M == 1\nint one;\n#endif\n"
-
-    rewritten = cpre.rewrite_macros(original)
-
-    assert _selected(original, (2, None, None)) == _selected(rewritten, (2, None, None))
+    assert _selected(original, (2, None, None)) == ["int one;"]
+    assert _selected(rewritten, (2, None, None)) == ["int one;"]

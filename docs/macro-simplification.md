@@ -17,8 +17,8 @@ Many C and C++ projects encode feature flags, build configuration relationships,
 `cpre` applies bounded Reduced Ordered Binary Decision Diagram (ROBDD) analysis to recognize eligible Boolean macro definitions, prove semantic equivalence, and report simplified replacement lists:
 
 - `FEAT_1` simplifies to `(A || B)`
-- `FEAT_2` simplifies to `(A)`
-- `FEAT_3` simplifies to `(A)`
+- `FEAT_2` simplifies to `(!!A)`
+- `FEAT_3` is already in simplest form: `!!A` is how C normalizes `A` to 0 or 1, which `(A)` would not do (see [Values, not just truth values](#values-not-just-truth-values))
 
 Simplification is proof-oriented: every rewrite is verified for exact semantic equivalence under the ROBDD model rather than relying on an ad-hoc set of syntactic rewrite rules.
 
@@ -51,13 +51,31 @@ A macro definition is recognized as a candidate for Boolean simplification if an
 
 ### Parenthesization and formatting
 
-All emitted simplified replacements are enclosed in outer parentheses to ensure safe substitution. This protective parenthesization prevents operator precedence hazards when the simplified macro is expanded inside enclosing expressions (for example, ensuring that an unparenthesized macro such as `#define M A || !A` simplified to `(1)` cannot alter the meaning of expressions like `!M`). For example:
+Every emitted replacement is enclosed in outer parentheses, so it expands as a single operand wherever the macro is used:
 
 - `(A || (!A && B))` -> `(A || B)`
-- `A || (!A && B)` -> `(A || B)`
-- `(!!A)` -> `(A)`
-- `!!A` -> `(A)`
-- `A || !A` -> `(1)`
+- `(!(!(!A)))` -> `(!A)`
+- `(A || !A)` -> `(1)`
+
+### Unparenthesized replacements are reported, not rewritten
+
+A replacement with `&&` or `||` outside every pair of parentheses is not substitution-safe. The preprocessor pastes it into each use, where it binds with the surrounding operators: with `#define FEAT A || (A && B)`, `#if !FEAT` means `!A || (A && B)`, not `!(A || (A && B))`. Any rewrite adds outer parentheses, which would change the meaning of such uses, so cpre never rewrites these definitions. It still reports the simplification, with `rewritable` set to `False`, a `reason` starting with `not rewritten:`, and no `edit`:
+
+```text
+line 1: #define FEAT A || (A && B) -> (!!A) [proven equivalent; not rewritten: parenthesize the original first]
+```
+
+Parenthesizing the original (`#define FEAT (A || (A && B))`) states that every use means the whole expression. After that change, the rewrite is applied. A replacement whose top level is a `!` (`!(A && A)`) is substitution-safe, because `!` binds tighter than every binary operator.
+
+### Values, not just truth values
+
+In C, `!`, `&&` and `||` always yield 0 or 1, so every candidate macro has the value 0 or 1. An identifier can expand to any integer, so a simplified form that is a lone identifier is emitted as `!!X`, which keeps the value at 0 or 1:
+
+- `(A && A)` -> `(!!A)`
+- `(A || (A && B))` -> `(!!A)`
+- `(!!A)` and `!(!A)` are already in simplest form
+
+Without this, `#define HAS_X (X && X)` simplified to `(X)` would change `#if HAS_X == 1`, `HAS_A + HAS_B`, or `table[HAS_X]` when `X` is defined as 2. A symbolic literal (`symbolic_literals=(0,)`) stands for the literal itself and is emitted as is.
 
 ## Semantic limits
 
@@ -77,15 +95,15 @@ Some codebases use a literal `0` as a temporarily disabled feature switch:
 #define FEAT_2 (0 && A) || (0 && B)   /* both experimental paths switched off */
 ```
 
-Under ordinary semantics `0 && A` is just false, so the analyzer reports `FEAT_1 -> (B)` and `FEAT_2 -> (0)`. Accepting those rewrites deletes the control point the author left in place on purpose.
+Under ordinary semantics `0 && A` is just false, so the analyzer reports `FEAT_1 -> (!!B)` and `FEAT_2 -> (0)`. Accepting those rewrites deletes the control point the author left in place on purpose.
 
 Passing `symbolic_literals=(0,)` opts in to **symbolic-literal semantics**: every occurrence of the selected literal is treated as one free Boolean atom instead of a fixed truth value. The ROBDD then reasons about its relationship with the other atoms:
 
 | Replacement | Ordinary (default) | `symbolic_literals=(0,)` |
 |---|---|---|
-| `(0 && A) \|\| B` | `(B)` | unchanged (already simplest) |
+| `(0 && A) \|\| B` | `(!!B)` | unchanged (already simplest) |
 | `(0 && A) \|\| (0 && B)` | `(0)` | `(0 && (A \|\| B))` |
-| `(0 && A) \|\| (!0 && A)` | `(A)` | `(A)` |
+| `(0 && A) \|\| (!0 && A)` | `(!!A)` | `(!!A)` |
 | `0 \|\| !0` | `(1)` | `(1)` |
 | `(A \|\| (!A && B))` | `(A \|\| B)` | `(A \|\| B)` |
 
@@ -181,7 +199,8 @@ Each analyzed macro produces a structured `MacroAnalysisResult`:
 | `is_equivalent` | `bool \| None` | ROBDD proof-of-equivalence status |
 | `incomplete` | `AnalysisIncomplete \| None` | Resource limit diagnostic (if limits exceeded) |
 | `replacement_range` | `SourceRange \| None` | Exact 1-based source range of the replacement text |
-| `edit` | `SuggestedEdit \| None` (property) | Structured edit suggestion when a simpler equivalent expression is proven |
+| `rewritable` | `bool` | `False` when the simplification is reported but must not be rewritten, because the original replacement is not parenthesized (`reason` then says why) |
+| `edit` | `SuggestedEdit \| None` (property) | Structured edit suggestion when a simpler equivalent expression is proven and the definition is `rewritable` |
 | `symbolic_literals` | `tuple[int, ...]` | Literals treated as symbolic atoms; `()` in ordinary mode |
 | `semantics` | `str` (property) | `"ordinary"` or `"symbolic-literal"` |
 | `simplified` | `bool` (property) | `True` if a simpler equivalent expression was found |
@@ -200,7 +219,7 @@ To safely discover and apply macro simplifications without conflating analysis w
 import cpre
 
 source = """
-#define FEAT_1 (0 && A) || B
+#define FEAT_1 ((0 && A) || B)
 #define BUFFER_SIZE 1024
 #define FEAT_2 ((A && B) || (A && !B))
 """
@@ -253,5 +272,6 @@ cpre simplify-macros --check src/example.c
 1. **Reporting never mutates source**: running without `--rewrite` (or `rewrite=True`) is strictly read-only, including `--diff` and `--check`.
 2. **Rewriting requires an explicit flag**: source mutation must be requested intentionally.
 3. **Only proven-equivalent transformations are applied**: transformations must be verified equivalent under the active semantic mode (`ordinary` or `symbolic-literal`).
-4. **Reparsing and re-analysis verification**: after applying edits, the resulting source is reparsed and reanalyzed to ensure it remains syntactically valid, reached simplest form, and preserves semantic equivalence.
-5. **Formatting and comment preservation**: rewriting preserves directive indentation, macro names, inline comments, unrelated code, and native line endings (CRLF / LF).
+4. **Only substitution-safe definitions are rewritten**: a replacement with `&&` or `||` outside parentheses is reported but never rewritten, because the added parentheses would change what its uses mean (see [Unparenthesized replacements are reported, not rewritten](#unparenthesized-replacements-are-reported-not-rewritten)). A simplified lone identifier stays normalized as `!!X`, so the macro's value is preserved, not just its truth value.
+5. **Reparsing and re-analysis verification**: after applying edits, the resulting source is reparsed and reanalyzed to ensure it remains syntactically valid, reached simplest form, and preserves semantic equivalence.
+6. **Formatting and comment preservation**: rewriting preserves directive indentation, macro names, inline comments, unrelated code, and native line endings (CRLF / LF).

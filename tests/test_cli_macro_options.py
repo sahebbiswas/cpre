@@ -17,7 +17,7 @@ def test_cli_macros_text_output(tmp_path, capsys):
     code = main([str(source), "--macros"])
     assert code == 0
     captured = capsys.readouterr()
-    assert "#define FEAT_1 (0 && A) || B -> (B)" in captured.out
+    assert "#define FEAT_1 (0 && A) || B -> (!!B)" in captured.out
     assert "BUFFER_SIZE" not in captured.out
 
 
@@ -30,7 +30,7 @@ def test_cli_macros_verbose_includes_all_macros(tmp_path, capsys):
     code = main([str(source), "--macros", "--verbose"])
     assert code == 0
     captured = capsys.readouterr()
-    assert "#define FEAT_1 (0 && A) || B -> (B)" in captured.out
+    assert "#define FEAT_1 (0 && A) || B -> (!!B)" in captured.out
     assert "BUFFER_SIZE skipped: non-Boolean integer literal" in captured.out
     assert "#define FEAT_2 (A || B)" in captured.out
 
@@ -50,7 +50,9 @@ def test_cli_macros_json_ordinary_semantics(tmp_path, capsys):
     assert macro["name"] == "FEAT_1"
     assert macro["candidate"] is True
     assert macro["simplified"] is True
-    assert macro["replacement"] == "(B)"
+    assert macro["replacement"] == "(!!B)"
+    # Unparenthesized at the top level, so reported but never rewritten (#143).
+    assert macro["rewritable"] is False
     assert macro["semantics"] == "ordinary"
 
 
@@ -107,7 +109,7 @@ def test_cli_unified_both_conditionals_and_macros(tmp_path, capsys):
     captured = capsys.readouterr()
     # Both conditional findings and macro simplification findings are present
     assert "#elif A [dead]" in captured.out
-    assert "#define FEAT_1 (0 && A) || B -> (B)" in captured.out
+    assert "#define FEAT_1 (0 && A) || B -> (!!B)" in captured.out
 
 
 def test_cli_disable_flags(tmp_path, capsys):
@@ -124,7 +126,7 @@ def test_cli_disable_flags(tmp_path, capsys):
     main([str(source), "--no-conditionals"])
     out2 = capsys.readouterr().out
     assert "#elif A" not in out2
-    assert "#define FEAT_1 (0 && A) || B -> (B)" in out2
+    assert "#define FEAT_1 (0 && A) || B -> (!!B)" in out2
 
 
 def test_cli_sarif_with_symbolic_options(tmp_path, capsys):
@@ -163,9 +165,9 @@ def test_cli_macros_batch_recursive(tmp_path, capsys):
     assert code == 0
     captured = capsys.readouterr()
     assert "f1.c" in captured.out
-    assert "#define M1 (A && A) -> (A)" in captured.out
+    assert "#define M1 (A && A) -> (!!A)" in captured.out
     assert "f2.h" in captured.out
-    assert "#define M2 (B || 0) -> (B)" in captured.out
+    assert "#define M2 (B || 0) -> (!!B)" in captured.out
 
 
 def test_cli_json_disabled_conditionals_emits_empty_groups(tmp_path, capsys):

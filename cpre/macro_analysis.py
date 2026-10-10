@@ -31,6 +31,7 @@ from .model import (
     Negation,
     Predicate,
     SymbolicLiteral,
+    Variable,
 )
 from .parser import logical_lines
 from .robdd import (
@@ -65,6 +66,7 @@ class MacroAnalysisResult:
     incomplete: AnalysisIncomplete | None = None
     replacement_range: SourceRange | None = None
     symbolic_literals: tuple[int, ...] = ()
+    rewritable: bool = True
 
     @property
     def semantics(self) -> str:
@@ -104,6 +106,7 @@ class MacroAnalysisResult:
         """Structured edit suggestion when a simpler equivalent expression is proven."""
         if (
             self.simplified
+            and self.rewritable
             and self.is_equivalent is True
             and self.complete
             and self.replacement_range is not None
@@ -248,6 +251,32 @@ def _symbolize(expression: Expression, literals: tuple[int, ...]) -> Expression:
     return expression
 
 
+_UNPARENTHESIZED_REASON = (
+    "not rewritten: the replacement has a top-level && or || outside parentheses, so "
+    "it binds with the operators around each use; wrapping the simplified form in "
+    "parentheses would change what those uses mean. Parenthesize the original "
+    "replacement to allow the rewrite"
+)
+
+
+def _has_top_level_binary_operator(replacement: str) -> bool:
+    """True if ``&&`` or ``||`` appears outside every pair of parentheses.
+
+    Such a replacement is not substitution-safe: ``#define M A || B`` makes
+    ``!M`` mean ``!A || B``. Any rewrite adds outer parentheses, which would
+    change the meaning of those uses, so it must not be applied.
+    """
+    depth = 0
+    for token in tokens(replacement):
+        if token.text == "(":
+            depth += 1
+        elif token.text == ")":
+            depth -= 1
+        elif depth == 0 and token.text in ("&&", "||"):
+            return True
+    return False
+
+
 def analyze_macro(
     definition: MacroDefinition,
     *,
@@ -317,15 +346,23 @@ def analyze_macro(
             symbolic_literals=literals,
         )
 
+    # The operators of every candidate yield 0 or 1, but an identifier can hold
+    # any value: keep a lone identifier normalized so the macro's integer value
+    # is unchanged (``!!X`` must not become ``X``). A symbolic literal stands for
+    # the literal itself, which is already 0 or 1.
+    if isinstance(simplified_expr, Variable) and not isinstance(simplified_expr, SymbolicLiteral):
+        simplified_expr = Negation(Negation(simplified_expr))
+
     differ = expressions_differ(expr, simplified_expr)
     if differ:
         formatted = format_expression(simplified_expr)
         simplified_replacement = f"({formatted})"
+        rewritable = not _has_top_level_binary_operator(definition.replacement)
         return MacroAnalysisResult(
             name=definition.name,
             definition=definition,
             candidate=True,
-            reason=None,
+            reason=None if rewritable else _UNPARENTHESIZED_REASON,
             original_replacement=definition.replacement,
             original_expression=expr,
             simplified_expression=simplified_expr,
@@ -334,6 +371,7 @@ def analyze_macro(
             incomplete=None,
             replacement_range=replacement_range,
             symbolic_literals=literals,
+            rewritable=rewritable,
         )
     else:
         return MacroAnalysisResult(

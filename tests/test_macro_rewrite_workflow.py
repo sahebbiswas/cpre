@@ -24,7 +24,11 @@ def test_simplify_macros_cli_report_only_does_not_modify_source(tmp_path, capsys
     assert source.read_text(encoding="utf-8") == original
 
     # Report distinguishes original, simplified, proof/equivalence status, and location
-    assert "line 1: #define FEAT_1 (0 && A) || B -> (B) [proven equivalent]" in captured.out
+    # FEAT_1 is unparenthesized, so it is reported but never rewritten (#143).
+    assert (
+        "line 1: #define FEAT_1 (0 && A) || B -> (!!B) "
+        "[proven equivalent; not rewritten: parenthesize the original first]" in captured.out
+    )
     assert "BUFFER_SIZE" not in captured.out
 
 
@@ -37,12 +41,14 @@ def test_analyze_macros_cli_alias_behavior(tmp_path, capsys):
     assert code == 0
     captured = capsys.readouterr()
     assert source.read_text(encoding="utf-8") == original
-    assert "line 1: #define FEAT_1 (A && A) -> (A) [proven equivalent]" in captured.out
+    assert "line 1: #define FEAT_1 (A && A) -> (!!A) [proven equivalent]" in captured.out
 
 
 def test_simplify_macros_cli_rewrite_in_place(tmp_path, capsys):
     source = tmp_path / "test.c"
-    source.write_text("#define FEAT_1 (0 && A) || B\n#define BUFFER_SIZE 1024\n", encoding="utf-8")
+    source.write_text(
+        "#define FEAT_1 ((0 && A) || B)\n#define BUFFER_SIZE 1024\n", encoding="utf-8"
+    )
 
     code = main(["simplify-macros", "--rewrite", str(source)])
     assert code == 0
@@ -50,12 +56,13 @@ def test_simplify_macros_cli_rewrite_in_place(tmp_path, capsys):
 
     # Reporting output reflects rewrite status
     assert (
-        "line 1: #define FEAT_1 (0 && A) || B -> (B) [rewritten, proven equivalent]" in captured.out
+        "line 1: #define FEAT_1 ((0 && A) || B) -> (!!B) [rewritten, proven equivalent]"
+        in captured.out
     )
 
     # Source was rewritten in-place
     rewritten = source.read_text(encoding="utf-8")
-    assert "#define FEAT_1 (B)\n" in rewritten
+    assert "#define FEAT_1 (!!B)\n" in rewritten
     assert "#define BUFFER_SIZE 1024\n" in rewritten
 
     # Verification: re-analyzing rewritten source finds no simplifiable macros
@@ -70,12 +77,12 @@ def test_simplify_macros_cli_in_place_flag_alias(tmp_path, capsys):
 
     code = main(["simplify-macros", "--in-place", str(source)])
     assert code == 0
-    assert source.read_text(encoding="utf-8") == "#define M (A)\n"
+    assert source.read_text(encoding="utf-8") == "#define M (!!A)\n"
 
 
 def test_simplify_macros_cli_symbolic_zero_report_and_rewrite(tmp_path, capsys):
     source = tmp_path / "test.c"
-    content = "#define FEAT_1 (0 && A) || B\n#define FEAT_2 (0 && A) || (0 && B)\n"
+    content = "#define FEAT_1 ((0 && A) || B)\n#define FEAT_2 ((0 && A) || (0 && B))\n"
     source.write_text(content, encoding="utf-8")
 
     # In report mode with --symbolic-zero:
@@ -85,7 +92,8 @@ def test_simplify_macros_cli_symbolic_zero_report_and_rewrite(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "FEAT_1" not in captured.out
     assert (
-        "#define FEAT_2 (0 && A) || (0 && B) -> (0 && (A || B)) [proven equivalent]" in captured.out
+        "#define FEAT_2 ((0 && A) || (0 && B)) -> (0 && (A || B)) [proven equivalent]"
+        in captured.out
     )
     assert source.read_text(encoding="utf-8") == content
 
@@ -93,7 +101,7 @@ def test_simplify_macros_cli_symbolic_zero_report_and_rewrite(tmp_path, capsys):
     code = main(["simplify-macros", "--rewrite", "--symbolic-zero", str(source)])
     assert code == 0
     rewritten = source.read_text(encoding="utf-8")
-    assert "#define FEAT_1 (0 && A) || B\n" in rewritten
+    assert "#define FEAT_1 ((0 && A) || B)\n" in rewritten
     assert "#define FEAT_2 (0 && (A || B))\n" in rewritten
 
 
@@ -118,8 +126,8 @@ def test_simplify_macros_formatting_preservation_comments_indentation(tmp_path):
         "/* Header comment */\n"
         "#include <stdbool.h>\n"
         "\n"
-        "    #define FOO   (A) /* inline comment */\n"
-        "#define BAR (B) // C++ comment\n"
+        "    #define FOO   (!!A) /* inline comment */\n"
+        "#define BAR (!!B) // C++ comment\n"
         "\n"
         "int main() { return 0; }\n"
     )
@@ -135,7 +143,7 @@ def test_simplify_macros_formatting_preservation_continuations(tmp_path):
     assert code == 0
 
     rewritten = source.read_text(encoding="utf-8")
-    expected = "#define FLAG1 \\\n    (A)\n#define FLAG2 (A)\n"
+    expected = "#define FLAG1 \\\n    (!!A)\n#define FLAG2 (!!A)\n"
     assert rewritten == expected
 
 
@@ -148,7 +156,7 @@ def test_simplify_macros_preserves_crlf_line_endings(tmp_path):
     assert code == 0
 
     rewritten_bytes = source.read_bytes()
-    expected_bytes = b"#define M1 (A)\r\n#define M2 (B)\r\n"
+    expected_bytes = b"#define M1 (!!A)\r\n#define M2 (!!B)\r\n"
     assert rewritten_bytes == expected_bytes
 
 
@@ -163,13 +171,13 @@ def test_simplify_macros_multiple_in_one_file(tmp_path):
     assert code == 0
 
     rewritten = source.read_text(encoding="utf-8")
-    expected = "#define M1 (A)\n#define M2 (B)\n#define M3 (C)\n#define M4 (1)\n"
+    expected = "#define M1 (!!A)\n#define M2 (!!B)\n#define M3 (!!C)\n#define M4 (1)\n"
     assert rewritten == expected
 
 
 def test_simplify_macros_cli_json_single_file(tmp_path, capsys):
     source = tmp_path / "test.c"
-    source.write_text("#define FEAT_1 (0 && A) || B\n", encoding="utf-8")
+    source.write_text("#define FEAT_1 ((0 && A) || B)\n", encoding="utf-8")
 
     # Report mode JSON
     code = main(["simplify-macros", "--json", str(source)])
@@ -183,8 +191,9 @@ def test_simplify_macros_cli_json_single_file(tmp_path, capsys):
     assert data["symbolic_literals"] == []
     assert len(data["macros"]) == 1
     assert data["macros"][0]["name"] == "FEAT_1"
-    assert data["macros"][0]["replacement"] == "(B)"
+    assert data["macros"][0]["replacement"] == "(!!B)"
     assert data["macros"][0]["equivalent"] is True
+    assert data["macros"][0]["rewritable"] is True
 
     # Rewrite mode JSON
     code = main(["simplify-macros", "--rewrite", "--json", str(source)])
@@ -221,9 +230,9 @@ def test_simplify_macros_cli_batch_text(tmp_path, capsys):
     assert code == 0
     captured = capsys.readouterr()
     assert "f1.c" in captured.out
-    assert "#define M1 (A && A) -> (A) [proven equivalent]" in captured.out
+    assert "#define M1 (A && A) -> (!!A) [proven equivalent]" in captured.out
     assert "f2.h" in captured.out
-    assert "#define M2 (B || 0) -> (B) [proven equivalent]" in captured.out
+    assert "#define M2 (B || 0) -> (!!B) [proven equivalent]" in captured.out
 
 
 def test_simplify_macros_cli_fail_on_findings(tmp_path):
@@ -249,7 +258,7 @@ def test_simplify_macros_cli_verbose_shows_skipped_and_unchanged(tmp_path, capsy
     code = main(["simplify-macros", "--verbose", str(source)])
     assert code == 0
     captured = capsys.readouterr()
-    assert "#define SIMPLIFIABLE (A && A) -> (A) [proven equivalent]" in captured.out
+    assert "#define SIMPLIFIABLE (A && A) -> (!!A) [proven equivalent]" in captured.out
     assert (
         "#define UNCHANGED (A || B) (expression is already in simplest equivalent form)"
         in captured.out
@@ -259,7 +268,7 @@ def test_simplify_macros_cli_verbose_shows_skipped_and_unchanged(tmp_path, capsy
 
 def test_python_api_simplify_macros_report_and_rewrite():
     source = (
-        "#define FEAT_1 (0 && A) || B\n"
+        "#define FEAT_1 ((0 && A) || B)\n"
         "#define BUFFER_SIZE 1024\n"
         "#define FEAT_2 ((A && B) || (A && !B))\n"
     )
@@ -280,13 +289,13 @@ def test_python_api_simplify_macros_report_and_rewrite():
     assert simps[0].name == "FEAT_1"
     assert simps[0].edit == cpre.SuggestedEdit(
         range=simps[0].replacement_range,
-        replacement="(B)",
+        replacement="(!!B)",
         confidence=cpre.FixConfidence.EXACT,
     )
     assert simps[1].name == "FEAT_2"
     assert simps[1].edit == cpre.SuggestedEdit(
         range=simps[1].replacement_range,
-        replacement="(A)",
+        replacement="(!!A)",
         confidence=cpre.FixConfidence.EXACT,
     )
 
@@ -295,9 +304,9 @@ def test_python_api_simplify_macros_report_and_rewrite():
     assert rw_res.rewritten is True
     assert rw_res.applied_count == 2
     assert rw_res.verified is True
-    assert "#define FEAT_1 (B)\n" in rw_res.rewritten_source
+    assert "#define FEAT_1 (!!B)\n" in rw_res.rewritten_source
     assert "#define BUFFER_SIZE 1024\n" in rw_res.rewritten_source
-    assert "#define FEAT_2 (A)\n" in rw_res.rewritten_source
+    assert "#define FEAT_2 (!!A)\n" in rw_res.rewritten_source
 
     # Convenience rewrite_macros
     rewritten_str = cpre.rewrite_macros(source)
@@ -305,15 +314,15 @@ def test_python_api_simplify_macros_report_and_rewrite():
 
 
 def test_python_api_rewrite_macros_symbolic_zero():
-    source = "#define FEAT_1 (0 && A) || B\n#define FEAT_2 (0 && A) || (0 && B)\n"
+    source = "#define FEAT_1 ((0 && A) || B)\n#define FEAT_2 ((0 && A) || (0 && B))\n"
 
     # Ordinary semantics
     ord_rw = cpre.rewrite_macros(source)
-    assert ord_rw == "#define FEAT_1 (B)\n#define FEAT_2 (0)\n"
+    assert ord_rw == "#define FEAT_1 (!!B)\n#define FEAT_2 (0)\n"
 
     # Symbolic zero semantics
     sym_rw = cpre.rewrite_macros(source, symbolic_literals=(0,))
-    assert sym_rw == "#define FEAT_1 (0 && A) || B\n#define FEAT_2 (0 && (A || B))\n"
+    assert sym_rw == "#define FEAT_1 ((0 && A) || B)\n#define FEAT_2 (0 && (A || B))\n"
 
 
 def test_backward_compatibility_unified_cpre_cli(tmp_path, capsys):
@@ -327,7 +336,10 @@ def test_backward_compatibility_unified_cpre_cli(tmp_path, capsys):
     assert code == 0
     captured = capsys.readouterr()
     assert "#elif A [dead]" in captured.out
-    assert "#define FEAT_1 (0 && A) || B -> (B) [proven equivalent]" in captured.out
+    assert (
+        "#define FEAT_1 (0 && A) || B -> (!!B) [proven equivalent; not rewritten: parenthesize the original first]"
+        in captured.out
+    )
 
 
 def test_resource_limit_exceeded_macro_never_rewritten(tmp_path):
@@ -379,7 +391,8 @@ def test_reparsing_reanalyzing_verification_rigorous():
     # Simplify and rewrite
     res = cpre.simplify_macros(source, rewrite=True)
     assert res.rewritten is True
-    assert res.applied_count == 3
+    # M3 (!(!A)) is already simplest: !!A keeps the value normalized to 0/1 (#144).
+    assert res.applied_count == 2
     assert res.verified is True
 
     # Rigorous verification: parse and analyze rewritten source independently
@@ -395,7 +408,7 @@ def test_reparsing_reanalyzing_verification_rigorous():
 def test_rewrite_macros_duplicate_macro_names_verified_by_index():
     source = "#define FOO (A && A)\n#undef FOO\n#define FOO (B || 0)\n"
     rewritten = cpre.rewrite_macros(source)
-    assert rewritten == ("#define FOO (A)\n#undef FOO\n#define FOO (B)\n")
+    assert rewritten == ("#define FOO (!!A)\n#undef FOO\n#define FOO (!!B)\n")
 
 
 def test_rewrite_verification_length_mismatch(monkeypatch):
@@ -533,7 +546,7 @@ def _apply_unified_diff(original, diff):
 
 def test_simplify_macros_diff_matches_rewrite_and_leaves_files_untouched(tmp_path, capsys):
     source = tmp_path / "test.c"
-    original = "#define FEAT_1 (0 && A) || B\nint x;\n#define FEAT_2 (C && C)\n#define N 1024\n"
+    original = "#define FEAT_1 ((0 && A) || B)\nint x;\n#define FEAT_2 (C && C)\n#define N 1024\n"
     source.write_bytes(original.encode("utf-8"))
 
     code = main(["simplify-macros", "--diff", str(source)])
@@ -546,11 +559,11 @@ def test_simplify_macros_diff_matches_rewrite_and_leaves_files_untouched(tmp_pat
         f"--- {source}\n"
         f"+++ {source}\n"
         "@@ -1,4 +1,4 @@\n"
-        "-#define FEAT_1 (0 && A) || B\n"
-        "+#define FEAT_1 (B)\n"
+        "-#define FEAT_1 ((0 && A) || B)\n"
+        "+#define FEAT_1 (!!B)\n"
         " int x;\n"
         "-#define FEAT_2 (C && C)\n"
-        "+#define FEAT_2 (C)\n"
+        "+#define FEAT_2 (!!C)\n"
         " #define N 1024\n"
     )
     rewritten = _rewrite_copy(tmp_path, "test.c", original)
@@ -594,7 +607,7 @@ def test_simplify_macros_diff_stdout_is_byte_exact(tmp_path):
 
     assert completed.stdout == (
         f"--- {source}\n+++ {source}\n@@ -1,2 +1,2 @@\n".encode()
-        + b"-#define W (X || X)\r\n+#define W (X)\r\n int y;\r\n"
+        + b"-#define W (X || X)\r\n+#define W (!!X)\r\n int y;\r\n"
     )
 
 
@@ -603,12 +616,12 @@ def test_unified_diff_splits_lines_on_newline_only():
 
     # str.splitlines() would also split on the form feed and the lone CR.
     before = "\f\nint y;\r\f\n#define W (X || X)\n"
-    after = "\f\nint y;\r\f\n#define W (X)\n"
+    after = "\f\nint y;\r\f\n#define W (!!X)\n"
 
     diff = _unified_diff(Path("w.c"), before, after)
 
     assert diff == (
-        "--- w.c\n+++ w.c\n@@ -1,3 +1,3 @@\n \f\n int y;\r\f\n-#define W (X || X)\n+#define W (X)\n"
+        "--- w.c\n+++ w.c\n@@ -1,3 +1,3 @@\n \f\n int y;\r\f\n-#define W (X || X)\n+#define W (!!X)\n"
     )
     assert _apply_unified_diff(before, diff) == after
 
@@ -654,15 +667,15 @@ def test_simplify_macros_check_with_diff_prints_every_changed_file(tmp_path, cap
 
     assert code == 1
     assert captured.out == (
-        f"--- {first}\n+++ {first}\n@@ -1 +1 @@\n-#define A1 (A && A)\n+#define A1 (A)\n"
-        f"--- {second}\n+++ {second}\n@@ -1 +1 @@\n-#define B1 (B || B)\n+#define B1 (B)\n"
+        f"--- {first}\n+++ {first}\n@@ -1 +1 @@\n-#define A1 (A && A)\n+#define A1 (!!A)\n"
+        f"--- {second}\n+++ {second}\n@@ -1 +1 @@\n-#define B1 (B || B)\n+#define B1 (!!B)\n"
     )
     assert captured.err == f"would rewrite {first}\nwould rewrite {second}\n"
 
 
 def test_simplify_macros_check_respects_symbolic_literals(tmp_path, capsys):
     source = tmp_path / "switch.c"
-    source.write_bytes(b"#define FEAT (0 && A) || B\n")
+    source.write_bytes(b"#define FEAT ((0 && A) || B)\n")
 
     # Ordinary semantics fold the disabled switch away; symbolic-zero keeps it.
     assert main(["simplify-macros", "--check", str(source)]) == 1
@@ -706,3 +719,35 @@ def test_simplify_macros_preview_flags_reject_conflicts(tmp_path, capsys, flags)
     assert caught.value.code == 2
     assert "cannot be combined with --diff or --check" in capsys.readouterr().err
     assert source.read_bytes() == original.encode("utf-8")
+
+
+def test_unparenthesized_replacement_is_reported_but_never_rewritten(tmp_path, capsys):
+    # #define FEAT A || (A && B) makes #if !FEAT mean !A || (A && B); rewriting it to
+    # (!!A) would change that, so every mode leaves the file alone (#143).
+    source = tmp_path / "test.c"
+    original = b"#define FEAT A || (A && B)\n#define SAFE (A && A)\n"
+    source.write_bytes(original)
+
+    assert main(["simplify-macros", str(source)]) == 0
+    report = capsys.readouterr().out
+    assert "#define FEAT A || (A && B) -> (!!A) [proven equivalent; not rewritten:" in report
+    assert "#define SAFE (A && A) -> (!!A) [proven equivalent]" in report
+
+    assert main(["simplify-macros", "--diff", str(source)]) == 0
+    diff = capsys.readouterr().out
+    assert "-#define FEAT" not in diff
+    assert "+#define SAFE (!!A)\n" in diff
+
+    assert main(["simplify-macros", "--json", str(source)]) == 0
+    feat, safe = json.loads(capsys.readouterr().out)["macros"]
+    assert (feat["rewritable"], safe["rewritable"]) == (False, True)
+    assert feat["reason"].startswith("not rewritten:")
+
+    assert main(["simplify-macros", "--rewrite", str(source)]) == 0
+    assert source.read_bytes() == b"#define FEAT A || (A && B)\n#define SAFE (!!A)\n"
+    report = capsys.readouterr().out
+    assert "#define FEAT A || (A && B) -> (!!A) [proven equivalent; not rewritten:" in report
+    assert "#define SAFE (A && A) -> (!!A) [rewritten, proven equivalent]" in report
+
+    # Nothing left that --rewrite would change.
+    assert main(["simplify-macros", "--check", str(source)]) == 0
