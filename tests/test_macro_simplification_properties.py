@@ -12,6 +12,12 @@ undefined, 0 or 1. Uses that bind to an unparenthesized replacement, and
 integer values other than 0 and 1 in value contexts, are known gaps tracked in
 #143 and #144; their regressions are below as strict xfails.
 
+Definedness: every atom is tried undefined as well as defined as 0 or 1, and
+two contexts combine the macro with ``defined`` tests on its atoms, where
+undefined and 0 differ. The ``defined`` operator inside a replacement list is
+outside the documented grammar, so the unsupported-construct property checks
+that such replacements are never rewritten.
+
 Runs are derandomized so CI is reproducible, and every regression the search
 found is kept as an explicit ``@example``.
 """
@@ -32,7 +38,15 @@ NAMES = ("A", "B", "C")
 
 # Contexts that use the macro as a whole operand. Truth contexts depend only on
 # whether the macro is zero; value contexts also depend on its integer value.
-TRUTH_CONTEXTS = ("(M)", "!(M)", "(M) && C", "!(M) || !C", "(M) ? 1 : 0")
+TRUTH_CONTEXTS = (
+    "(M)",
+    "!(M)",
+    "(M) && C",
+    "!(M) || !C",
+    "(M) ? 1 : 0",
+    "defined(A) && (M)",
+    "!defined B || !(M)",
+)
 VALUE_CONTEXTS = ("(M) == 1", "(M) + (M) == 2")
 CONTEXTS = TRUTH_CONTEXTS + VALUE_CONTEXTS
 
