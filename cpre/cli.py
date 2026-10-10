@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import json
 import sys
 from collections.abc import Sequence
@@ -330,6 +331,41 @@ def _build_simplify_macros_json(
     return f_data, has_visible
 
 
+def _diff_lines(text: str) -> list[str]:
+    """Split on ``\\n`` only; ``str.splitlines`` also splits on form feeds and lone CRs."""
+    lines = [line + "\n" for line in text.split("\n")]
+    lines[-1] = lines[-1][:-1]
+    return lines if lines[-1] else lines[:-1]
+
+
+def _unified_diff(path: Path, before: str, after: str) -> str:
+    """Deterministic unified diff of one file, applicable with ``patch -p0``."""
+    lines: list[str] = []
+    for line in difflib.unified_diff(
+        _diff_lines(before),
+        _diff_lines(after),
+        fromfile=str(path),
+        tofile=str(path),
+    ):
+        if line.endswith("\n"):
+            lines.append(line)
+        else:
+            # Last line without a newline, marked the way diff and patch expect.
+            lines.append(line + "\n\\ No newline at end of file\n")
+    return "".join(lines)
+
+
+def _write_exact(text: str) -> None:
+    """Write to stdout without newline translation, so CRLF diffs stay applicable."""
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is None:
+        sys.stdout.write(text)
+        return
+    sys.stdout.flush()
+    buffer.write(text.encode("utf-8"))
+    buffer.flush()
+
+
 def _build_simplify_macros_parser(prog: str) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=prog,
@@ -352,6 +388,19 @@ def _build_simplify_macros_parser(prog: str) -> argparse.ArgumentParser:
         dest="rewrite",
         action="store_true",
         help="rewrite source files in-place with proven-equivalent simplified definitions",
+    )
+    parser.add_argument(
+        "--diff",
+        action="store_true",
+        help="print the rewrite as a unified diff instead of a report; never modifies files",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help=(
+            "exit with status 1 if --rewrite would change any file, naming each such file "
+            "on stderr; never modifies files"
+        ),
     )
     parser.add_argument(
         "--json",
@@ -390,6 +439,11 @@ def simplify_macros_main(
 ) -> int:
     parser = _build_simplify_macros_parser(prog)
     args = parser.parse_args(argv)
+    preview = args.diff or args.check
+    if args.rewrite and preview:
+        parser.error("--rewrite cannot be combined with --diff or --check")
+    if args.json and preview:
+        parser.error("--json cannot be combined with --diff or --check")
 
     symbolic_literals: tuple[int, ...] = ()
     if args.symbolic_zero or args.symbolic_literals:
@@ -419,7 +473,9 @@ def simplify_macros_main(
             res = simplify_macros(
                 source,
                 filename=str(path),
-                rewrite=args.rewrite,
+                # --diff and --check run the same rewrite and verification as
+                # --rewrite, so they report exactly what it would write.
+                rewrite=args.rewrite or preview,
                 symbolic_literals=symbolic_literals,
             )
             for r in res.results:
@@ -437,7 +493,15 @@ def simplify_macros_main(
             print(f"{path}: {error}", file=sys.stderr)
             had_errors = True
 
-    if args.json:
+    changed = [(path, res) for path, res in file_results if res.rewritten_source != res.source]
+    if preview:
+        if args.diff:
+            for path, res in changed:
+                _write_exact(_unified_diff(path, res.source, res.rewritten_source))
+        if args.check:
+            for path, _ in changed:
+                print(f"would rewrite {path}", file=sys.stderr)
+    elif args.json:
         if batch_mode:
             files = []
             for path, res in file_results:
@@ -482,6 +546,8 @@ def simplify_macros_main(
 
     if had_errors:
         return 2
+    if args.check and changed:
+        return 1
     has_findings = any(res.has_findings for _, res in file_results)
     return 1 if args.fail_on_findings and has_findings else 0
 
