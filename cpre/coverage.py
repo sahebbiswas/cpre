@@ -200,6 +200,7 @@ def cover_branches(
     skip_includes: bool = False,
     include_resolver: IncludeResolver | None = None,
     max_include_depth: int = DEFAULT_MAX_INCLUDE_DEPTH,
+    has_include_from_resolver: bool = False,
 ) -> BranchCoverageResult:
     """Generate concrete macro configurations that cover conditional-branch outcomes.
 
@@ -216,7 +217,7 @@ def cover_branches(
     components are combined, and a deterministic false-first witness becomes a
     closed-world :class:`MacroConfiguration`. Each configuration is then
     run through :func:`cpre.preprocess_source` (with ``context``, ``include_query``,
-    ``pragma_handler``, and the include options) and credited only with the
+    ``pragma_handler``, and the include and ``__has_include`` options) and credited only with the
     outcomes preprocessing actually selected. Outcomes still uncovered get one
     more configuration that targets each of them alone. Configurations whose outcomes are
     all covered by others are dropped. The set is therefore sufficient for every
@@ -313,6 +314,7 @@ def cover_branches(
                 skip_includes=skip_includes,
                 include_resolver=include_resolver,
                 max_include_depth=max_include_depth,
+                has_include_from_resolver=has_include_from_resolver,
             )
         finally:
             _SELECTED_BRANCHES.reset(token)
@@ -433,7 +435,7 @@ def cover_branches(
                 for atom, value in local_needed.items()
                 if value and not isinstance(atom, Variable)
             )
-            if predicates:
+            if predicates and failure_reason is None:
                 failure += (
                     "; it requires "
                     + ", ".join(f"`{text}`" for text in predicates)

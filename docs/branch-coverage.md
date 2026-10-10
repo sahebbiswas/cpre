@@ -69,7 +69,7 @@ Path conditions use the Boolean model of `analyze_source()`, which treats each m
 - **Source-order `#define`/`#undef`.** In `#define A 1` / `#if A` / `#else`, the `#else` is unreachable from outside the file. The reason names the overriding macro.
 - **Opaque comparisons.** `#if VERSION >= 3` is a predicate the Boolean model cannot solve, and cpre never invents integer values. The reason names the predicate.
 - **Names fixed by `context`.** Standard macros supplied through `PreprocessingContext` are never configured, so outcomes that need a different value stay uncovered.
-- **Incomplete preprocessing.** An unresolved `#include`, an unsupported directive, or an unanswered `__has_include` yields `preprocessing was incomplete: line N: ...`. Pass `skip_includes`, `include_resolver`, `include_query`, or `pragma_handler` to `cover_branches()`; they are forwarded to each verification run, together with `context`.
+- **Incomplete preprocessing.** An unresolved `#include`, an unsupported directive, or an unanswered `__has_include` yields `preprocessing was incomplete: line N: ...`. Pass `skip_includes`, `include_resolver`, `max_include_depth`, `include_query`, `has_include_from_resolver`, or `pragma_handler` to `cover_branches()`; they are forwarded to each verification run, together with `context`.
 
 ## Incomplete results
 
@@ -82,5 +82,5 @@ For the same input and options, `cover_branches()` returns the same configuratio
 ## Current boundaries
 
 - Only conditionals in the primary source are targets. Included headers are preprocessed during verification but their branches are not counted.
-- There is no CLI command yet.
-- Macro values are limited to `1`, `0`, and undefined.
+- There is no CLI command yet ([#126](https://github.com/sahebbiswas/cpre/issues/126)).
+- Macro values are limited to `1`, `0`, and undefined, so integer comparisons such as `VERSION >= 3` are not solved ([#125](https://github.com/sahebbiswas/cpre/issues/125)).

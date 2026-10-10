@@ -9,6 +9,7 @@ import pytest
 import cpre
 from cpre import BranchOutcomeStatus as Status
 from cpre import WitnessAssignment, WitnessAtomKind, cover_branches
+from cpre.includes import ResolvedInclude
 
 COVERED = Status.COVERED
 
@@ -201,6 +202,27 @@ def test_skipped_includes_keep_configured_names_resolvable():
     assert [o.status for o in result.outcomes] == [COVERED, COVERED]
 
 
+def test_has_include_from_resolver_is_forwarded_to_verification():
+    source = "#if __has_include(<present.h>) && A\nint a;\n#endif\n"
+
+    def resolver(request):
+        if request.header == "present.h":
+            return ResolvedInclude("present.h", "")
+        return None
+
+    unanswered = cover_branches(source, include_resolver=resolver)
+    assert [o.status for o in unanswered.outcomes] == [Status.NOT_COVERED, COVERED]
+    # The reason is the incomplete preprocessing, not an opaque-predicate hint.
+    assert unanswered.outcomes[0].reason == (
+        "preprocessing was incomplete: line 1: "
+        "__has_include requires caller-provided include availability"
+    )
+
+    result = cover_branches(source, include_resolver=resolver, has_include_from_resolver=True)
+    _assert_verified(source, result, include_resolver=resolver, has_include_from_resolver=True)
+    assert [o.status for o in result.outcomes] == [COVERED, COVERED]
+
+
 def test_incomplete_preprocessing_is_reported_as_not_covered():
     source = '#include "config.h"\n#ifdef A\nint a;\n#endif\n'
     result = cover_branches(source)
@@ -268,15 +290,28 @@ def test_independent_components_are_combined():
     assert len(result.configurations) == 4
 
 
-def test_verification_resource_limit_is_atomic_incomplete():
-    # Each component is small, but concrete preprocessing of the whole file is not.
+def test_many_independent_groups_cover_under_default_limits():
+    # Concrete preprocessing applies atom limits per condition (#124), so
+    # verifying a file with many small components stays within default limits.
     source = "".join(f"#ifdef F{index}\nint f{index};\n#endif\n" for index in range(40))
     result = cover_branches(source)
+    _assert_verified(source, result)
+    assert all(outcome.status is COVERED for outcome in result.outcomes)
+    assert len(result.configurations) == 2
+
+
+def test_verification_resource_limit_is_atomic_incomplete(monkeypatch):
+    # A generated configuration whose concrete preprocessing exceeds a resource
+    # limit makes the whole result incomplete rather than NOT_COVERED.
+    limit = cpre.AnalysisIncomplete(
+        cpre.ErrorCode.ANALYSIS_LIMIT_EXCEEDED, "work", 10, 11, "work limit exceeded"
+    )
+
+    def exhausted(*args, **kwargs):
+        return cpre.PreprocessResult(source=None, incomplete=(limit,))
+
+    monkeypatch.setattr("cpre.coverage.preprocess_source", exhausted)
+    result = cover_branches("#ifdef A\nint a;\n#endif\n")
     assert not result.complete
     assert result.configurations is None and result.outcomes is None
-    assert result.incomplete.code is cpre.ErrorCode.ANALYSIS_LIMIT_EXCEEDED
-    assert result.incomplete.resource == "atoms"
-
-    raised = cover_branches(source, options=cpre.AnalysisOptions(max_atoms=100))
-    _assert_verified(source, raised, options=cpre.AnalysisOptions(max_atoms=100))
-    assert len(raised.configurations) == 2
+    assert result.incomplete is limit
