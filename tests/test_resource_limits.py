@@ -129,3 +129,46 @@ def test_analysis_options_require_positive_integer_limits(name):
         cpre.AnalysisOptions(**values)
 
     assert caught.value.code is cpre.ErrorCode.ANALYSIS_FAILURE
+
+
+def _feature_groups(count):
+    return "".join(f"#ifdef F{i}\nint a{i};\n#endif\n" for i in range(count))
+
+
+@pytest.mark.parametrize("count", [40, 300])
+def test_preprocessing_many_independent_conditionals_completes_under_default_limits(count):
+    # Regression for #124: the atom and node limits used to cap the whole file.
+    configuration = cpre.MacroConfiguration(
+        presence=[f"F{i}" for i in range(0, count, 3)], unknown_names="undefined"
+    )
+
+    result = cpre.preprocess_source(_feature_groups(count), configuration=configuration)
+
+    assert result.complete
+    kept = [line for line in result.source.splitlines() if line.strip()]
+    assert kept == [f"int a{i};" for i in range(0, count, 3)]
+
+
+def test_preprocessing_applies_atom_limit_per_condition():
+    source = "#if A\n#endif\n#if B\n#endif\n#if C && D\nint x;\n#endif\n"
+    options = cpre.AnalysisOptions(max_atoms=2)
+    configuration = cpre.MacroConfiguration(unknown_names="undefined")
+
+    result = cpre.preprocess_source(source, configuration=configuration, options=options)
+
+    # A and B fit alone (value and definedness atoms); C && D needs four atoms.
+    assert not result.complete
+    assert result.source is None
+    [diagnostic] = result.incomplete
+    assert diagnostic.resource == "atoms"
+    assert (diagnostic.limit, diagnostic.observed) == (2, 4)
+    assert diagnostic.location == cpre.SourceLocation(5)
+
+
+def test_preprocessing_unreached_condition_does_not_count_against_limits():
+    source = "#if 0\n#if A || B || C\n#endif\n#endif\nint x;\n"
+
+    result = cpre.preprocess_source(source, options=cpre.AnalysisOptions(max_atoms=2))
+
+    assert result.complete
+    assert result.source.strip() == "int x;"
