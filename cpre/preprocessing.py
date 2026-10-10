@@ -234,6 +234,8 @@ class _Run:
     # pragmas as unsupported directives rather than emitting inert markers.
     dispatch_pragmas: bool = False
     include_query: _has_include.IncludeQueryProvider | None = None
+    # Answer __has_include queries the callback leaves open from the include resolver.
+    has_include_from_resolver: bool = False
 
 
 @dataclass(frozen=True)
@@ -543,6 +545,7 @@ def preprocess_source(
     max_include_depth: int = DEFAULT_MAX_INCLUDE_DEPTH,
     _dispatch_included_pragmas: bool = False,
     _include_query: _has_include.IncludeQueryProvider | None = None,
+    _has_include_from_resolver: bool = False,
 ) -> PreprocessResult:
     """Select conditional branches under an explicit concrete macro state.
 
@@ -598,6 +601,16 @@ def preprocess_source(
             "include_resolver must be callable",
             code=ErrorCode.INVALID_CONFIGURATION,
         )
+    if type(_has_include_from_resolver) is not bool:
+        raise AnalysisError(
+            "has_include_from_resolver must be True or False",
+            code=ErrorCode.INVALID_CONFIGURATION,
+        )
+    if _has_include_from_resolver and include_resolver is None:
+        raise AnalysisError(
+            "has_include_from_resolver requires an include_resolver",
+            code=ErrorCode.INVALID_CONFIGURATION,
+        )
     if type(max_include_depth) is not int or max_include_depth < 1:
         raise AnalysisError(
             "max_include_depth must be a positive integer",
@@ -640,6 +653,7 @@ def preprocess_source(
         [],
         _dispatch_included_pragmas,
         _include_query,
+        _has_include_from_resolver,
     )
     unit = _preprocess_unit(source, run, identity=None, filename=filename, depth=0)
     if unit.diagnostics:
@@ -712,7 +726,9 @@ def _preprocess_unit(
     expansion = Expansion(source, budget)
     logical_states: dict[int, _LogicalPreprocessingState] = {}
     environment = _PredefinedMacroEnvironment(base_environment, expansion, logical_states)
-    view = _has_include.ConditionView(environment, queries, run.include_query is not None)
+    view = _has_include.ConditionView(
+        environment, queries, run.include_query is not None or run.has_include_from_resolver
+    )
     offsets = [0]
     for physical_line in physical:
         offsets.append(offsets[-1] + len(physical_line))
@@ -748,7 +764,7 @@ def _preprocess_unit(
                 occurrence,
             )
             return False
-        if run.include_query is None:
+        if run.include_query is None and not run.has_include_from_resolver:
             has_include_diagnostic(
                 ErrorCode.UNRESOLVED_CONDITION,
                 "__has_include requires caller-provided include availability",
@@ -778,7 +794,31 @@ def _preprocess_unit(
                 )
             )
             return False
-        available = run.include_query(query)
+        available = run.include_query(query) if run.include_query is not None else None
+        if available is not None and type(available) is not bool:
+            raise AnalysisError(
+                "include_query must return True, False, or None",
+                code=ErrorCode.INVALID_CONFIGURATION,
+                location=occurrence.location,
+                filename=filename,
+            )
+        if available is None and run.has_include_from_resolver:
+            assert includes is not None
+            # Available exactly when the equivalent #include would resolve; quoted
+            # forms search relative to the source containing the query.
+            includer = identity if identity is not None else filename
+            request = IncludeRequest(
+                query.header, query.form, "include", occurrence.location, includer, depth
+            )
+            resolved = includes.resolver(request)
+            if resolved is not None and not isinstance(resolved, ResolvedInclude):
+                raise AnalysisError(
+                    "include_resolver must return a ResolvedInclude or None",
+                    code=ErrorCode.INVALID_CONFIGURATION,
+                    location=occurrence.location,
+                    filename=includer,
+                )
+            available = resolved is not None
         if available is None:
             delimiter = (
                 f'"{query.header}"' if query.form is IncludeForm.QUOTED else f"<{query.header}>"
@@ -789,13 +829,6 @@ def _preprocess_unit(
                 occurrence,
             )
             return False
-        if type(available) is not bool:
-            raise AnalysisError(
-                "include_query must return True, False, or None",
-                code=ErrorCode.INVALID_CONFIGURATION,
-                location=occurrence.location,
-                filename=filename,
-            )
         view.answers[occurrence.placeholder] = available
         return True
 

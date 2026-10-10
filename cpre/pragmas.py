@@ -296,6 +296,7 @@ def preprocess_source(
     skip_includes: bool = False,
     include_resolver: IncludeResolver | None = None,
     max_include_depth: int = DEFAULT_MAX_INCLUDE_DEPTH,
+    has_include_from_resolver: bool = False,
 ) -> PreprocessResult:
     """Concrete preprocessing with caller-owned pragma semantics.
 
@@ -325,6 +326,7 @@ def preprocess_source(
         skip_includes=skip_includes,
         include_resolver=include_resolver,
         max_include_depth=max_include_depth,
+        has_include_from_resolver=has_include_from_resolver,
         _dispatch_included_pragmas=True,
     )
     if not result.complete or result.source is None or result.source_map is None:
