@@ -355,6 +355,17 @@ def _unified_diff(path: Path, before: str, after: str) -> str:
     return "".join(lines)
 
 
+def _write_exact(text: str) -> None:
+    """Write to stdout without newline translation, so CRLF diffs stay applicable."""
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is None:
+        sys.stdout.write(text)
+        return
+    sys.stdout.flush()
+    buffer.write(text.encode("utf-8"))
+    buffer.flush()
+
+
 def _build_simplify_macros_parser(prog: str) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=prog,
@@ -486,7 +497,7 @@ def simplify_macros_main(
     if preview:
         if args.diff:
             for path, res in changed:
-                sys.stdout.write(_unified_diff(path, res.source, res.rewritten_source))
+                _write_exact(_unified_diff(path, res.source, res.rewritten_source))
         if args.check:
             for path, _ in changed:
                 print(f"would rewrite {path}", file=sys.stderr)

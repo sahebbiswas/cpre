@@ -1,6 +1,8 @@
 """Tests for user-facing macro simplification report and rewrite workflow (issue #80)."""
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -487,7 +489,11 @@ def test_rewrite_verification_non_equivalent_expression(monkeypatch):
 
 
 def _rewrite_copy(tmp_path, name, text):
-    """Rewrite a copy of ``text`` with --rewrite and return the result."""
+    """Rewrite a copy of ``text`` with --rewrite and return the result.
+
+    Files are written and read as bytes throughout, so Windows newline
+    translation cannot change the line endings under test.
+    """
     copy = tmp_path / "rewritten" / name
     copy.parent.mkdir(exist_ok=True)
     copy.write_bytes(text.encode("utf-8"))
@@ -528,13 +534,13 @@ def _apply_unified_diff(original, diff):
 def test_simplify_macros_diff_matches_rewrite_and_leaves_files_untouched(tmp_path, capsys):
     source = tmp_path / "test.c"
     original = "#define FEAT_1 (0 && A) || B\nint x;\n#define FEAT_2 (C && C)\n#define N 1024\n"
-    source.write_text(original, encoding="utf-8")
+    source.write_bytes(original.encode("utf-8"))
 
     code = main(["simplify-macros", "--diff", str(source)])
     captured = capsys.readouterr()
 
     assert code == 0
-    assert source.read_text(encoding="utf-8") == original
+    assert source.read_bytes() == original.encode("utf-8")
     assert captured.err == ""
     assert captured.out == (
         f"--- {source}\n"
@@ -574,6 +580,24 @@ def test_simplify_macros_diff_preserves_line_endings(tmp_path, capsys, original)
     assert _apply_unified_diff(original, diff) == _rewrite_copy(tmp_path, "test.c", original)
 
 
+def test_simplify_macros_diff_stdout_is_byte_exact(tmp_path):
+    # Text-mode stdout on Windows would turn the CRLF diff lines into CR CR LF.
+    source = tmp_path / "test.c"
+    original = b"#define W (X || X)\r\nint y;\r\n"
+    source.write_bytes(original)
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "cpre", "simplify-macros", "--diff", str(source)],
+        capture_output=True,
+        check=True,
+    )
+
+    assert completed.stdout == (
+        f"--- {source}\n+++ {source}\n@@ -1,2 +1,2 @@\n".encode()
+        + b"-#define W (X || X)\r\n+#define W (X)\r\n int y;\r\n"
+    )
+
+
 def test_unified_diff_splits_lines_on_newline_only():
     from cpre.cli import _unified_diff
 
@@ -592,23 +616,23 @@ def test_unified_diff_splits_lines_on_newline_only():
 def test_simplify_macros_diff_and_check_without_changes(tmp_path, capsys):
     source = tmp_path / "clean.c"
     original = "#define FEAT (A || B)\n#define N 1024\n"
-    source.write_text(original, encoding="utf-8")
+    source.write_bytes(original.encode("utf-8"))
 
     assert main(["simplify-macros", "--diff", str(source)]) == 0
     assert main(["simplify-macros", "--check", str(source)]) == 0
     assert main(["simplify-macros", "--check", "--diff", str(source)]) == 0
     captured = capsys.readouterr()
     assert captured.out == "" and captured.err == ""
-    assert source.read_text(encoding="utf-8") == original
+    assert source.read_bytes() == original.encode("utf-8")
 
 
 def test_simplify_macros_check_names_files_that_would_change(tmp_path, capsys):
     changed_a = tmp_path / "a.c"
     clean = tmp_path / "b.c"
     changed_c = tmp_path / "c.c"
-    changed_a.write_text("#define A1 (A && A)\n", encoding="utf-8")
-    clean.write_text("#define B1 B\n", encoding="utf-8")
-    changed_c.write_text("#define C1 (0 || C)\n#define C2 (D && 1)\n", encoding="utf-8")
+    changed_a.write_bytes(b"#define A1 (A && A)\n")
+    clean.write_bytes(b"#define B1 B\n")
+    changed_c.write_bytes(b"#define C1 (0 || C)\n#define C2 (D && 1)\n")
 
     code = main(["simplify-macros", "--check", str(tmp_path)] + ["--recursive"])
     captured = capsys.readouterr()
@@ -616,14 +640,14 @@ def test_simplify_macros_check_names_files_that_would_change(tmp_path, capsys):
     assert code == 1
     assert captured.out == ""
     assert captured.err == f"would rewrite {changed_a}\nwould rewrite {changed_c}\n"
-    assert changed_a.read_text(encoding="utf-8") == "#define A1 (A && A)\n"
+    assert changed_a.read_bytes() == b"#define A1 (A && A)\n"
 
 
 def test_simplify_macros_check_with_diff_prints_every_changed_file(tmp_path, capsys):
     first = tmp_path / "a.c"
     second = tmp_path / "b.c"
-    first.write_text("#define A1 (A && A)\n", encoding="utf-8")
-    second.write_text("#define B1 (B || B)\n", encoding="utf-8")
+    first.write_bytes(b"#define A1 (A && A)\n")
+    second.write_bytes(b"#define B1 (B || B)\n")
 
     code = main(["simplify-macros", "--check", "--diff", str(first), str(second)])
     captured = capsys.readouterr()
@@ -638,7 +662,7 @@ def test_simplify_macros_check_with_diff_prints_every_changed_file(tmp_path, cap
 
 def test_simplify_macros_check_respects_symbolic_literals(tmp_path, capsys):
     source = tmp_path / "switch.c"
-    source.write_text("#define FEAT (0 && A) || B\n", encoding="utf-8")
+    source.write_bytes(b"#define FEAT (0 && A) || B\n")
 
     # Ordinary semantics fold the disabled switch away; symbolic-zero keeps it.
     assert main(["simplify-macros", "--check", str(source)]) == 1
@@ -648,7 +672,7 @@ def test_simplify_macros_check_respects_symbolic_literals(tmp_path, capsys):
 
 def test_simplify_macros_check_errors_exit_2(tmp_path, capsys):
     changed = tmp_path / "a.c"
-    changed.write_text("#define A1 (A && A)\n", encoding="utf-8")
+    changed.write_bytes(b"#define A1 (A && A)\n")
     unreadable = tmp_path / "b.c"
     unreadable.write_bytes(b"#define B1 \xff\n")
 
@@ -674,11 +698,11 @@ def test_simplify_macros_check_errors_exit_2(tmp_path, capsys):
 def test_simplify_macros_preview_flags_reject_conflicts(tmp_path, capsys, flags):
     source = tmp_path / "test.c"
     original = "#define A1 (A && A)\n"
-    source.write_text(original, encoding="utf-8")
+    source.write_bytes(original.encode("utf-8"))
 
     with pytest.raises(SystemExit) as caught:
         main(["simplify-macros", *flags, str(source)])
 
     assert caught.value.code == 2
     assert "cannot be combined with --diff or --check" in capsys.readouterr().err
-    assert source.read_text(encoding="utf-8") == original
+    assert source.read_bytes() == original.encode("utf-8")
