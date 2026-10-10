@@ -199,6 +199,7 @@ def _macro_to_dict(result: MacroAnalysisResult) -> dict[str, object]:
         "original": result.original_replacement,
         "replacement": result.simplified_replacement,
         "equivalent": result.is_equivalent,
+        "rewritable": result.rewritable,
         "reason": result.reason,
         "semantics": result.semantics,
         "symbolic_literals": list(result.symbolic_literals),
@@ -218,7 +219,12 @@ def _render_macro_report(
         loc = f"line {r.location.line}: " if r.location and r.location.line else ""
         if r.simplified:
             has_entries = True
-            tag = "rewritten, proven equivalent" if rewritten else "proven equivalent"
+            if not r.rewritable:
+                tag = "proven equivalent; not rewritten: parenthesize the original first"
+            elif rewritten:
+                tag = "rewritten, proven equivalent"
+            else:
+                tag = "proven equivalent"
             line = (
                 f"{loc}#define {r.name} {r.original_replacement} -> "
                 f"{r.simplified_replacement} [{tag}]"

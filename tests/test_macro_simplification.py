@@ -33,20 +33,20 @@ def test_issue_examples_candidates():
     assert r1_spaced.simplified_replacement == "(A || B)"
     assert r1_spaced.is_equivalent is True
 
-    # FEAT_2 ((A && B) || (A && !B)) -> (A)
+    # FEAT_2 ((A && B) || (A && !B)) -> (!!A): a lone identifier stays normalized to 0/1
     d2 = MacroDefinition("FEAT_2", "((A && B) || (A && !B))")
     r2 = analyze_macro(d2)
     assert r2.candidate is True
     assert r2.simplified is True
-    assert r2.simplified_replacement == "(A)"
+    assert r2.simplified_replacement == "(!!A)"
     assert r2.is_equivalent is True
 
-    # FEAT_3 (!!A) -> (A)
+    # FEAT_3 (!!A) is already simplest: !!A normalizes A to 0/1, which (A) would not
     d3 = MacroDefinition("FEAT_3", "(!!A)")
     r3 = analyze_macro(d3)
     assert r3.candidate is True
-    assert r3.simplified is True
-    assert r3.simplified_replacement == "(A)"
+    assert r3.simplified is False
+    assert r3.simplified_replacement is None
     assert r3.is_equivalent is True
 
 
@@ -161,25 +161,24 @@ def test_more_non_candidates():
 
 def test_boolean_identities_and_simplifications():
     cases = [
-        ("(A && 1)", "(A)"),
-        ("(1 && A)", "(A)"),
-        ("(0 || B)", "(B)"),
-        ("(B || 0)", "(B)"),
+        ("(A && 1)", "(!!A)"),
+        ("(1 && A)", "(!!A)"),
+        ("(0 || B)", "(!!B)"),
+        ("(B || 0)", "(!!B)"),
         ("(0 && A)", "(0)"),
         ("(A && 0)", "(0)"),
         ("(1 || A)", "(1)"),
         ("(A || 1)", "(1)"),
         ("(A && !A)", "(0)"),
         ("(A || !A)", "(1)"),
-        ("(A && (A || B))", "(A)"),
-        ("(A || (A && B))", "(A)"),
+        ("(A && (A || B))", "(!!A)"),
+        ("(A || (A && B))", "(!!A)"),
         ("((!A && !B) || (!A && B))", "(!A)"),
         ("(A && B && A)", "(A && B)"),
         ("(A || B || A)", "(A || B)"),
         ("(!0)", "(1)"),
         ("(!1)", "(0)"),
-        ("(!(!A))", "(A)"),
-        ("((A && B) || (A && !B && C) || (A && !B && !C))", "(A)"),
+        ("((A && B) || (A && !B && C) || (A && !B && !C))", "(!!A)"),
     ]
 
     for original, expected in cases:
@@ -192,37 +191,46 @@ def test_boolean_identities_and_simplifications():
         assert r.is_equivalent is True
 
 
+@pytest.mark.parametrize("original", ["!!A", "(!!A)", "(!(!A))", "!(!A)"])
+def test_double_negation_of_identifier_is_already_simplest(original):
+    # !!A yields 0 or 1 whatever A holds; (A) would not, so it is not simpler.
+    r = analyze_macro(MacroDefinition("TEST", original))
+    assert r.candidate is True
+    assert r.simplified is False
+    assert r.simplified_replacement is None
+    assert r.reason == "expression is already in simplest equivalent form"
+
+
 def test_unwrapped_replacements():
-    # Emitted replacements are always safely parenthesized to prevent precedence hazards
-    # when the macro is expanded in outer expressions (e.g. !M).
-    d1 = MacroDefinition("FEAT", "A || (!A && B)")
-    r1 = analyze_macro(d1)
-    assert r1.candidate is True
-    assert r1.simplified is True
-    assert r1.simplified_replacement == "(A || B)"
-    assert r1.is_equivalent is True
+    # A replacement with && or || outside parentheses binds with the operators
+    # around each use (#define M A || B makes !M mean !A || B). The emitted form
+    # is parenthesized, so rewriting would change those uses: the simplification
+    # is reported but not rewritable (#143).
+    for original, expected in [
+        ("A || (!A && B)", "(A || B)"),
+        ("!!A && A", "(!!A)"),
+        ("A || !A", "(1)"),
+        ("(A) || (B && !B)", "(!!A)"),
+    ]:
+        r = analyze_macro(MacroDefinition("FEAT", original))
+        assert r.candidate is True
+        assert r.simplified is True
+        assert r.simplified_replacement == expected
+        assert r.is_equivalent is True
+        assert r.rewritable is False, original
+        assert r.reason is not None and r.reason.startswith("not rewritten:")
 
-    d2 = MacroDefinition("FEAT", "!!A")
-    r2 = analyze_macro(d2)
-    assert r2.candidate is True
-    assert r2.simplified is True
-    assert r2.simplified_replacement == "(A)"
-    assert r2.is_equivalent is True
+    # A top-level unary ! binds tighter than every binary operator, so the
+    # replacement is substitution-safe and the rewrite is allowed.
+    r = analyze_macro(MacroDefinition("FEAT", "!(!(!A))"))
+    assert r.simplified_replacement == "(!A)"
+    assert r.rewritable is True
+    assert r.reason is None
 
-    d3 = MacroDefinition("FEAT", "!(!(!A))")
-    r3 = analyze_macro(d3)
-    assert r3.candidate is True
-    assert r3.simplified is True
-    assert r3.simplified_replacement == "(!A)"
-    assert r3.is_equivalent is True
-
-    # Precedence hazard case: #define M A || !A simplifies to (1)
-    d4 = MacroDefinition("M", "A || !A")
-    r4 = analyze_macro(d4)
-    assert r4.candidate is True
-    assert r4.simplified is True
-    assert r4.simplified_replacement == "(1)"
-    assert r4.is_equivalent is True
+    # Parenthesizing the original makes it rewritable.
+    r = analyze_macro(MacroDefinition("M", "(A || !A)"))
+    assert r.simplified_replacement == "(1)"
+    assert r.rewritable is True
 
 
 def test_already_simplest_form():
@@ -327,15 +335,14 @@ def test_analyze_macros_from_source_with_provenance_and_ranges():
     assert r2.name == "FEAT_2"
     assert r2.candidate is True
     assert r2.simplified is True
-    assert r2.simplified_replacement == "(A)"
+    assert r2.simplified_replacement == "(!!A)"
 
     assert r3.name == "API"
     assert r3.candidate is False
 
     assert r4.name == "FEAT_3"
     assert r4.candidate is True
-    assert r4.simplified is True
-    assert r4.simplified_replacement == "(A)"
+    assert r4.simplified is False
 
 
 def test_multiline_and_commented_macros():

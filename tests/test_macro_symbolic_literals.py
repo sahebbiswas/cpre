@@ -28,7 +28,7 @@ def test_default_semantics_is_ordinary_and_unchanged():
     result = _ordinary("(0 && A) || B")
     assert result.semantics == "ordinary"
     assert result.symbolic_literals == ()
-    assert result.simplified_replacement == "(B)"
+    assert result.simplified_replacement == "(!!B)"
 
     explicit_none = analyze_macro(MacroDefinition("FEAT", "(0 && A) || B"), symbolic_literals=None)
     explicit_empty = analyze_macro(MacroDefinition("FEAT", "(0 && A) || B"), symbolic_literals=())
@@ -40,16 +40,16 @@ def test_default_semantics_is_ordinary_and_unchanged():
 
 COMPARISON_CASES = [
     # (replacement, ordinary result, symbolic-zero result); None means "already simplest".
-    ("(0 && A) || B", "(B)", None),
+    ("(0 && A) || B", "(!!B)", None),
     ("(0 && A) || (0 && B)", "(0)", "(0 && (A || B))"),
     ("0 && A", "(0)", None),
-    ("(A || 0)", "(A)", None),
+    ("(A || 0)", "(!!A)", None),
     ("0x0 && A || 00 && A", "(0)", "(0 && A)"),
     ("0 || !0", "(1)", "(1)"),
     ("0 && !0", "(0)", "(0)"),
     ("!(!0)", "(0)", "(0)"),
-    ("(0 && A) || (!0 && A)", "(A)", "(A)"),
-    ("(A && 1) || (0 && A)", "(A)", "(A)"),
+    ("(0 && A) || (!0 && A)", "(!!A)", "(!!A)"),
+    ("(A && 1) || (0 && A)", "(!!A)", "(!!A)"),
     ("(A || (!A && B))", "(A || B)", "(A || B)"),
 ]
 
@@ -190,7 +190,7 @@ def test_analyze_macros_forwards_symbolic_literals_to_every_result():
     assert [r.semantics for r in plain] == ["ordinary"] * len(plain)
     assert [r.semantics for r in sym] == ["symbolic-literal"] * len(sym)
 
-    assert plain[0].simplified_replacement == "(B)"
+    assert plain[0].simplified_replacement == "(!!B)"
     assert sym[0].simplified_replacement is None
     assert plain[1].simplified_replacement == "(0)"
     assert sym[1].simplified_replacement == "(0 && (A || B))"
