@@ -59,6 +59,8 @@ config = cpre.MacroConfiguration.from_source(
 
 The string is evaluated as a normal preprocessing run. The resulting definitions are categorized into `presence`, `integers`, `undefined`, and `definitions` according to their replacement text. If the seed source is incomplete (e.g. contains an active `#include`), an `IncompleteConfigurationError` is raised.
 
+When `context=` is supplied, its standard macros are visible to the seed but are not part of the result: the context still supplies them when the configuration is later used with that context. A seed may therefore not change them. An active `#define` or `#undef` of a name the context supplies raises `AnalysisError` with `ErrorCode.INVALID_CONFIGURATION`, the seed's `filename`, and the directive's line, because the resulting configuration would always conflict with the same context during preprocessing. Directives in inactive branches are ignored, and without `context=` such names are ordinary seed definitions. To give a standard macro a different value, change the context instead.
+
 ### Layering on a base configuration
 
 Pass `base=` to evaluate a seed on top of an existing concrete configuration:
@@ -74,7 +76,7 @@ The last definition wins across categories, and each name ends up in exactly one
 - a seed `#define` replaces whatever category the base used (for example, a base function-like `FOO` followed by `#define FOO 3` becomes integers only);
 - a seed `#undef` leaves the name only undefined.
 
-The unknown-name policy used for evaluation and stored on the result is always the explicit `unknown_names=` argument, never `base.unknown_names`. Context-injected standard macros that the seed leaves unchanged are still omitted. `base` must be `None` or a `MacroConfiguration`; any other value raises `AnalysisError` with `ErrorCode.INVALID_CONFIGURATION` before preprocessing.
+The unknown-name policy used for evaluation and stored on the result is always the explicit `unknown_names=` argument, never `base.unknown_names`. Context-injected standard macros are still omitted, and a seed that changes one is rejected as described above. `base` must be `None` or a `MacroConfiguration`; any other value raises `AnalysisError` with `ErrorCode.INVALID_CONFIGURATION` before preprocessing.
 
 ### Automatic include guard detection and `exclude=`
 

@@ -256,7 +256,7 @@ Precedence is deterministic:
 2. `--config-from` may be repeated; seeds are applied in command-line order, each layered on the previous result with the API's last-definition-wins `base=` semantics.
 3. Explicit `-D` and `-U` options are then re-applied, so they always win over any seed `#define` or `#undef` of the same name.
 
-A seed that cannot be read, is malformed, contains an active `#include`, or has a condition that is not determined fails before the target is read, with diagnostics such as `flags.h: invalid --config-from seed: line 1: ...` on stderr and exit status `2`. Seeds never read headers from the filesystem; `-I` and `--iquote` apply only to the target. See [Construction from source](concrete-configuration.md#construction-from-source).
+A seed that cannot be read, is malformed, contains an active `#include`, has a condition that is not determined, or defines or undefines a `--standard-macro` name fails before the target is read, with diagnostics such as `flags.h: invalid --config-from seed: line 1: ...` on stderr and exit status `2`. Seeds never read headers from the filesystem; `-I` and `--iquote` apply only to the target. A seed `#define __STDC__ 0` run with `--standard-macro __STDC__=1`, for example, reports `s.h: invalid --config-from seed: line 1: seed redefines __STDC__, which the preprocessing context supplies`; pass the value you want with `--standard-macro` instead. See [Construction from source](concrete-configuration.md#construction-from-source).
 
 ### Unresolved conditions and unknown macros
 

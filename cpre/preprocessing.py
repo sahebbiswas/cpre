@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
+from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 
@@ -236,6 +237,15 @@ class _Run:
     include_query: _has_include.IncludeQueryProvider | None = None
     # Answer __has_include queries the callback leaves open from the include resolver.
     has_include_from_resolver: bool = False
+
+
+# Names a seed source being evaluated by ``MacroConfiguration.from_source()`` may
+# not #define or #undef because the preprocessing context supplies them; None
+# outside seed evaluation. A configuration naming them could never be used with
+# that context, so the seed is rejected at the directive instead.
+_seed_context_names: ContextVar[frozenset[str] | None] = ContextVar(
+    "_seed_context_names", default=None
+)
 
 
 @dataclass(frozen=True)
@@ -1149,6 +1159,20 @@ def _preprocess_unit(
                         if definition_match is None or definition_match[1] != kind:
                             raise ValueError("ambiguous directive after physical line splicing")
                         remainder = definition_match[2]
+                        protected = _seed_context_names.get()
+                        if protected:
+                            target = re.match(r"\s*([A-Za-z_]\w*)", remainder)
+                            if target is not None and target[1] in protected:
+                                verb = "redefines" if kind == "define" else "undefines"
+                                diagnostics.append(
+                                    located(
+                                        ErrorCode.INVALID_CONFIGURATION,
+                                        f"seed {verb} {target[1]}, which the preprocessing "
+                                        "context supplies",
+                                        current_line,
+                                    )
+                                )
+                                break
                         _apply_macro_directive(
                             environment, kind, remainder, SourceLocation(current_line)
                         )
