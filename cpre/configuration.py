@@ -182,16 +182,35 @@ class MacroConfiguration:
                 undefined=base.undefined,
                 unknown_names=unknown_names,
             )
-        result = preprocess_source(
-            text,
-            filename=filename,
-            configuration=seed_config,
-            context=context,
-            options=options,
+        from .preprocessing import PreprocessingContext, _seed_context_names
+
+        guard = _seed_context_names.set(
+            frozenset(context.standard_macros)
+            if isinstance(context, PreprocessingContext)
+            else None
         )
+        try:
+            result = preprocess_source(
+                text,
+                filename=filename,
+                configuration=seed_config,
+                context=context,
+                options=options,
+            )
+        finally:
+            _seed_context_names.reset(guard)
 
         if not result.complete:
             first = result.incomplete[0]
+            if getattr(first, "code", None) is ErrorCode.INVALID_CONFIGURATION:
+                # A seed #define or #undef of a context-supplied macro: the seed
+                # is invalid for this context, not merely incomplete.
+                raise AnalysisError(
+                    first.message,
+                    code=ErrorCode.INVALID_CONFIGURATION,
+                    location=getattr(first, "location", None),
+                    filename=filename,
+                )
             raise IncompleteConfigurationError(
                 getattr(first, "message", "incomplete configuration"),
                 code=getattr(first, "code", ErrorCode.ANALYSIS_FAILURE),

@@ -105,14 +105,44 @@ def test_context_stripping():
     assert config == expected
 
 
-def test_context_undef():
+@pytest.mark.parametrize(
+    ("directive", "verb"),
+    [
+        ("#undef __STDC__", "undefines"),
+        ("#define __STDC__ 0", "redefines"),
+        ("#define __STDC__ 1", "redefines"),
+        ("#define __STDC__(x) x", "redefines"),
+    ],
+)
+def test_seed_changing_context_macro_is_rejected_at_directive(directive, verb):
+    # A configuration carrying the change could never be used with the same
+    # context, so the seed is rejected and the seed (not the target) is named.
     context = PreprocessingContext(standard_macros={"__STDC__": "1"})
-    text = """
-#undef __STDC__
-"""
+    text = f"#define FEATURE 1\n{directive}\n"
+    with pytest.raises(AnalysisError) as excinfo:
+        MacroConfiguration.from_source(text, filename="seed.h", context=context)
+    error = excinfo.value
+    assert error.code is ErrorCode.INVALID_CONFIGURATION
+    assert error.filename == "seed.h"
+    assert error.location is not None and error.location.line == 2
+    assert f"seed {verb} __STDC__" in error.message
+    assert not isinstance(error, IncompleteConfigurationError)
+
+
+def test_seed_inactive_change_to_context_macro_is_allowed():
+    context = PreprocessingContext(standard_macros={"__STDC__": "1"})
+    text = "#if 0\n#undef __STDC__\n#endif\n#ifndef __STDC__\n#define __STDC__ 0\n#endif\n"
     config = MacroConfiguration.from_source(text, context=context)
-    expected = MacroConfiguration(undefined={"__STDC__"})
-    assert config == expected
+    assert config == MacroConfiguration()
+    result = preprocess_source("int x = __STDC__;\n", configuration=config, context=context)
+    assert result.complete
+
+
+def test_context_names_are_not_protected_without_context():
+    config = MacroConfiguration.from_source("#undef __STDC__\n")
+    assert config == MacroConfiguration(undefined={"__STDC__"})
+    result = preprocess_source("#undef __STDC__\nint x;\n")
+    assert result.complete
 
 
 def test_unknown_names_policy():
@@ -312,11 +342,13 @@ def test_base_with_context_still_strips_injected_names():
     assert config == MacroConfiguration(integers={"FEATURE": 1, "OTHER": 2})
 
 
-def test_base_with_context_keeps_seed_changes_to_injected_names():
+def test_base_with_context_rejects_seed_changes_to_injected_names():
     context = PreprocessingContext(standard_macros={"__STDC__": "1"})
     base = MacroConfiguration(integers={"FEATURE": 1})
-    config = MacroConfiguration.from_source("#undef __STDC__\n", base=base, context=context)
-    assert config == MacroConfiguration(integers={"FEATURE": 1}, undefined={"__STDC__"})
+    with pytest.raises(AnalysisError) as excinfo:
+        MacroConfiguration.from_source("#undef __STDC__\n", base=base, context=context)
+    assert excinfo.value.code is ErrorCode.INVALID_CONFIGURATION
+    assert excinfo.value.location is not None and excinfo.value.location.line == 1
 
 
 def test_base_is_not_mutated():

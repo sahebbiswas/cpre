@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 import cpre
 from cpre.cli import main
 
@@ -149,6 +151,20 @@ def test_config_from_seed_with_include_is_rejected(tmp_path, capsys):
     target = _write(tmp_path / "target.c", "int x;\n")
     assert main(["preprocess", "--config-from", str(flags), str(target)]) == 2
     assert f"{flags}: invalid --config-from seed: line 1:" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("directive", ["#define __STDC__ 0", "#undef __STDC__"])
+def test_config_from_seed_changing_context_macro_names_the_seed(tmp_path, capsys, directive):
+    """A seed that changes a --standard-macro name is reported against the seed."""
+    seed = _write(tmp_path / "s.h", f"#define FEATURE 1\n{directive}\n")
+    target = _write(tmp_path / "t.c", "int x = __STDC__;\n")
+    argv = ["preprocess", "--standard-macro", "__STDC__=1", "--config-from", str(seed)]
+    assert main([*argv, str(target)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert f"{seed}: invalid --config-from seed: line 2: seed " in captured.err
+    assert "__STDC__, which the preprocessing context supplies" in captured.err
+    assert str(target) not in captured.err
 
 
 def test_config_from_missing_or_directory_seed(tmp_path, capsys):
