@@ -60,6 +60,14 @@ We use `tox` to run checks consistently across all supported Python versions.
   pytest
   ```
 
+- **Search deeper with the property-based tests.** The Hypothesis tests run a
+  small, derandomized number of examples so CI stays fast. Raise it locally
+  when changing macro simplification or rewriting:
+  ```bash
+  CPRE_PROPERTY_EXAMPLES=2000 pytest tests/test_macro_simplification_properties.py
+  ```
+  Keep every regression the search finds as an explicit `@example`.
+
 ## Code Style
 
 - **Formatting & Linting**: We use `ruff`.
