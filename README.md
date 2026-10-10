@@ -176,7 +176,7 @@ python -m build
 python -m twine check dist/*
 ```
 
-GitHub Actions runs tests across supported Python versions on Linux, macOS, and Windows, plus a build/twine/public-wheel-contract job.
+GitHub Actions runs tests across supported Python versions on Linux, macOS, and Windows, plus a build/twine/public-wheel-contract job. The release workflow tests the built wheel and sdist, uploads to TestPyPI and checks that install before publishing to PyPI; see [CONTRIBUTING](https://github.com/sahebbiswas/cpre/blob/main/CONTRIBUTING.md#releasing).
 
 When extending cpre, keep downstream integrations on the documented top-level `cpre` API. Preserve deterministic ordering, structured diagnostics, and complete/incomplete semantics rather than requiring consumers to parse human-readable output.
 
