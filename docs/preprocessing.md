@@ -277,6 +277,12 @@ result = cpre.preprocess_source(source, configuration=config, options=options)
 
 When a deterministic limit is exhausted, preprocessing returns an incomplete result and exposes no partial transformed source.
 
+Preprocessing decides each reachable condition on its own, against the macro state at that point, so the limits apply as follows:
+
+- **Per condition.** `max_atoms` and `max_bdd_nodes` apply to each reachable `#if`/`#elif`/`#ifdef`/`#ifndef` condition separately. A condition's atoms are its own Boolean atoms plus the value and definedness atoms of every macro it names, so `#ifdef A` counts two atoms and `#if A && B` counts four. A file with hundreds of independent `#ifdef FEATURE_n` blocks completes under the default `max_atoms=64`; a single condition with too many atoms is still incomplete. Conditions in skipped branches are never evaluated and never count.
+- **Per run.** `max_work` is one cap shared by every condition in the primary source and in every included source.
+- **Diagnostics.** An `atoms` or `bdd_nodes` diagnostic is located at the condition that exceeded the limit, and `observed` is that condition's count.
+
 ## Downstream integration checklist
 
 For coordinate-sensitive downstream analyzers:

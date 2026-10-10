@@ -260,7 +260,7 @@ cpre.analyze_source(
 ).complete                                                  # True: two independent components
 ```
 
-Partitioning applies to `analyze_source()`. The exact Boolean queries and macro simplification reason about a single expression at a time and apply `max_atoms` to that whole expression.
+Partitioning applies to `analyze_source()`. The exact Boolean queries and macro simplification reason about a single expression at a time and apply `max_atoms` to that whole expression. Concrete preprocessing applies `max_atoms` and `max_bdd_nodes` to each reachable condition; see [Resource limits](preprocessing.md#resource-limits).
 
 ### Partial results and incomplete components
 

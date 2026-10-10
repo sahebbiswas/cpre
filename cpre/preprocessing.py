@@ -10,7 +10,6 @@ from types import MappingProxyType
 
 from . import _has_include
 from ._pragma_syntax import _mask_source_pragmas, _output_offset_for_source, _SourcePragma
-from .analysis import _macro_semantics, tree_expressions
 from .api import (
     AnalysisIncomplete,
     AnalysisOptions,
@@ -27,7 +26,7 @@ from .configuration import (
 )
 from .errors import AnalysisError, ErrorCode, SourceLocation
 from .expansion import Expansion, ExpansionError, SourceMapping, Token, tokenize
-from .expressions import conjunction, expression_atoms_in_order, negate
+from .expressions import conjunction, disjunction, expression_atoms_in_order, negate
 from .includes import (
     DEFAULT_MAX_INCLUDE_DEPTH,
     IncludeForm,
@@ -824,6 +823,17 @@ def _preprocess_unit(
             )
             return None
         condition = branch.expression if branch.expression is not None else TRUE
+        # The macro context constrains each name independently (C semantics couple
+        # only a name's value and definedness), so whether it decides the condition
+        # depends on the condition's own names alone. A manager per condition keeps
+        # max_atoms and max_bdd_nodes from scaling with the number of conditionals
+        # in the file; max_work stays shared by the whole run.
+        atoms = list(expression_atoms_in_order(condition))
+        names = sorted({atom.name for atom in atoms if isinstance(atom, Variable)})
+        semantics = conjunction(
+            *(disjunction(negate(Variable(name)), DefinedVariable(name)) for name in names)
+        )
+        bdd = BDD([*atoms, *expression_atoms_in_order(semantics)], limits=limits, budget=budget)
         while True:
             terms = [semantics]
             for name in names:
@@ -1017,14 +1027,6 @@ def _preprocess_unit(
         return True
 
     try:
-        semantics = _macro_semantics(tree, legacy_symbolic=False)
-        atoms = [
-            atom
-            for expression in (*tree_expressions(tree.groups), semantics)
-            for atom in expression_atoms_in_order(expression)
-        ]
-        bdd = BDD(atoms, limits=limits, budget=budget)
-        names = sorted({atom.name for atom in atoms if isinstance(atom, Variable)})
         starts = {group.line: group for group in tree.groups}
 
         def index_groups(groups: list[ConditionalGroup]) -> None:
