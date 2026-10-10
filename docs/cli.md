@@ -217,6 +217,7 @@ cpre preprocess source.c --standard-macro __STDC__=1
 cpre preprocess source.c --skip-includes
 cpre preprocess src/main.c -I include --iquote src
 cpre preprocess --unknown-names undefined --config-from flags.h target.c
+cpre preprocess --config-from-unknown-names undefined --config-from flags.h target.c
 cpre preprocess --list-unknown-macros target.c
 cpre preprocess --json source.c
 ```
@@ -232,7 +233,7 @@ cpre preprocess source.c --compact --max-blank-lines 1
 
 Incomplete preprocessing never emits partial transformed source. Diagnostics are written to stderr and the command exits with status `2`. A successful preprocessing run exits `0`; this command does not use findings-oriented `--fail-on-findings` semantics.
 
-`--config-from PATH` seeds the configuration from a macro file instead of spelling each macro out as `-D/-U`. The seed is evaluated exactly like `MacroConfiguration.from_source()`: its final macro state becomes the initial state for the target, and a standard include guard is detected and stripped. The seed is evaluated with the command's `--unknown-names` policy and `--standard-macro` context, so a guard such as `#ifndef FLAGS_H` needs `--unknown-names undefined` (the command prints a hint when it does). For example, with this `flags.h`:
+`--config-from PATH` seeds the configuration from a macro file instead of spelling each macro out as `-D/-U`. The seed is evaluated exactly like `MacroConfiguration.from_source()`: its final macro state becomes the initial state for the target, and a standard include guard is detected and stripped. The seed is evaluated with the command's `--standard-macro` context and, by default, its `--unknown-names` policy. A condition on a name nobody set, such as the guard `#ifndef FLAGS_H` or `#ifndef LEVEL`, is therefore not determined in the default open-world mode (the command prints a hint when that happens). For example, with this `flags.h`:
 
 ```c
 #ifndef FLAGS_H
@@ -249,6 +250,23 @@ Incomplete preprocessing never emits partial transformed source. Diagnostics are
 cpre preprocess --unknown-names undefined --config-from flags.h target.c            # FEATURE, LEVEL=1, LEGACY undefined
 cpre preprocess --unknown-names undefined --config-from flags.h -D LEVEL=2 target.c # LEVEL=2
 ```
+
+Both commands make the target closed-world too: every name the target tests that neither the seed nor `-D`/`-U` settles is treated as undefined. To read the seed with normal C semantics while the target stays open-world, set the seed policy on its own with `--config-from-unknown-names`:
+
+```bash
+cpre preprocess --config-from-unknown-names undefined --config-from flags.h target.c
+# flags.h: FLAGS_H and LEVEL start undefined, so FEATURE, LEVEL=1, LEGACY undefined
+# target.c: any other name stays unknown and is reported if a reachable condition needs it
+```
+
+The two policies are independent:
+
+| Option | Applies to | Default |
+|--------|------------|---------|
+| `--config-from-unknown-names {open,undefined}` | every `--config-from` seed | the `--unknown-names` value |
+| `--unknown-names {open,undefined}` | the target | `open` |
+
+Without `--config-from-unknown-names`, behavior is unchanged: seeds use the target's policy. `--config-from-unknown-names` without `--config-from` is a usage error. The seed's detected include guard is stripped whatever the policy, so an open-world target that tests `FLAGS_H` still sees it as unknown. The API equivalent is `MacroConfiguration.from_source(text, unknown_names="undefined")`, with the result passed on in a configuration that uses the target's policy.
 
 Precedence is deterministic:
 
