@@ -34,7 +34,7 @@ A macro definition is recognized as a candidate for Boolean simplification if an
 2. **Non-empty replacement**: Empty `#define` statements (e.g., `#define FEATURE_PRESENT`) are excluded.
 3. **Supported Boolean grammar**: The replacement list must consist strictly of:
    - Identifiers (`[A-Za-z_]\w*`), which are treated as Boolean atoms;
-   - Boolean integer literals: only `0` (false) and `1` (true);
+   - Boolean integer literals: only `0` (false) and `1` (true), in any spelling of those values (`00`, `0x0`, `0L`, `1u`, `0x1`, ...);
    - Boolean operators: logical AND (`&&`), logical OR (`||`), and logical NOT (`!`);
    - Grouping parentheses: `(` and `)`.
 4. **No unmodeled C operators or constructs**: The replacement list must not contain:
