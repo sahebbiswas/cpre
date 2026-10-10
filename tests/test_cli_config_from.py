@@ -131,6 +131,7 @@ def test_config_from_open_world_guard_reports_hint(tmp_path, capsys):
     captured = capsys.readouterr()
     assert captured.out == ""
     assert f"{flags}: invalid --config-from seed: line 1:" in captured.err
+    assert "--config-from-unknown-names undefined" in captured.err
     assert "--unknown-names undefined" in captured.err
 
 
@@ -167,6 +168,80 @@ def test_config_from_seed_changing_context_macro_names_the_seed(tmp_path, capsys
     assert str(target) not in captured.err
 
 
+# The stripped FLAGS_H guard stays unknown in an open-world target, so these
+# targets test only names the seed settles.
+OPEN_TARGET = TARGET.replace("#ifdef FLAGS_H\nint guarded;\n#endif\n", "")
+
+
+def _seed_for_open_target(flags: Path) -> cpre.MacroConfiguration:
+    """The API equivalent: closed-world seed, open-world target."""
+    seeded = cpre.MacroConfiguration.from_source(
+        flags.read_text(encoding="utf-8"), filename=str(flags), unknown_names="undefined"
+    )
+    return cpre.MacroConfiguration(
+        definitions=seeded.definitions, undefined=seeded.undefined, unknown_names="open"
+    )
+
+
+def test_config_from_closed_seed_with_open_target(tmp_path, capsys):
+    """A guarded seed is read closed-world while the target stays open-world."""
+    flags = _write(tmp_path / "flags.h", FLAGS)
+    target = _write(tmp_path / "target.c", OPEN_TARGET)
+    argv = ["preprocess", "--config-from-unknown-names", "undefined", "--config-from"]
+    assert main([*argv, str(flags), str(target)]) == 0
+    configuration = _seed_for_open_target(flags)
+    assert configuration.unknown_names is cpre.UnknownNamePolicy.OPEN
+    assert capsys.readouterr().out == _expected(target, configuration)
+
+
+def test_config_from_seed_policy_does_not_close_the_target(tmp_path, capsys):
+    """Names neither the seed nor -D/-U settle stay unknown in an open-world target."""
+    flags = _write(tmp_path / "flags.h", FLAGS)
+    target = _write(tmp_path / "target.c", OPEN_TARGET + "#ifdef UNSET\nint unset;\n#endif\n")
+    argv = ["preprocess", "--config-from-unknown-names", "undefined", "--config-from", str(flags)]
+    assert main([*argv, "--list-unknown-macros", str(target)]) == 0
+    assert capsys.readouterr().out.split("\t")[0] == "UNSET"
+    assert main([*argv, str(target)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert f"{target}: line 9:" in captured.err
+    assert "supply -D UNSET or -U UNSET" in captured.err
+
+    # Closing the target as well resolves UNSET as undefined.
+    assert main([*argv, "--unknown-names", "undefined", str(target)]) == 0
+    assert "int unset;" not in capsys.readouterr().out
+
+
+def test_config_from_open_seed_with_closed_target(tmp_path, capsys):
+    """An explicit open seed policy still rejects an undetermined seed condition."""
+    flags = _write(tmp_path / "flags.h", FLAGS)
+    target = _write(tmp_path / "target.c", TARGET)
+    argv = ["preprocess", "--unknown-names", "undefined", "--config-from-unknown-names", "open"]
+    assert main([*argv, "--config-from", str(flags), str(target)]) == 2
+    captured = capsys.readouterr()
+    assert f"{flags}: invalid --config-from seed: line 1:" in captured.err
+    assert "hint:" in captured.err
+
+
+def test_config_from_seed_policy_defaults_to_target_policy(tmp_path, capsys):
+    """Without the option the seed uses --unknown-names, as before."""
+    flags = _write(tmp_path / "flags.h", FLAGS)
+    target = _write(tmp_path / "target.c", TARGET)
+    closed = ["preprocess", "--unknown-names", "undefined", "--config-from", str(flags)]
+    assert main([*closed, str(target)]) == 0
+    default_output = capsys.readouterr().out
+    assert main([*closed, "--config-from-unknown-names", "undefined", str(target)]) == 0
+    assert capsys.readouterr().out == default_output
+
+
+def test_config_from_unknown_names_requires_config_from(tmp_path, capsys):
+    target = _write(tmp_path / "target.c", "int x;\n")
+    with pytest.raises(SystemExit) as excinfo:
+        main(["preprocess", "--config-from-unknown-names", "undefined", str(target)])
+    assert excinfo.value.code == 2
+    assert "--config-from-unknown-names requires --config-from" in capsys.readouterr().err
+
+
 def test_config_from_missing_or_directory_seed(tmp_path, capsys):
     """Unreadable seeds fail with exit status 2 and name the seed path."""
     target = _write(tmp_path / "target.c", "int x;\n")
@@ -186,6 +261,7 @@ def test_config_from_help_includes_example(capsys):
         assert exit_.code == 0
     out = capsys.readouterr().out
     assert "--config-from PATH" in out
+    assert "--config-from-unknown-names" in out
     assert "cpre preprocess --unknown-names undefined --config-from flags.h" in " ".join(
         out.split()
     )

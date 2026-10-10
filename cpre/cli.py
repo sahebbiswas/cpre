@@ -553,6 +553,17 @@ def _build_preprocess_parser(prog: str) -> argparse.ArgumentParser:
         help=("policy for names absent from the external configuration (default: open)"),
     )
     parser.add_argument(
+        "--config-from-unknown-names",
+        dest="config_from_unknown_names",
+        choices=[policy.value for policy in UnknownNamePolicy],
+        default=None,
+        help=(
+            "policy for names absent from the configuration while --config-from seeds are "
+            "evaluated (default: the --unknown-names policy); 'undefined' reads a guarded "
+            "flags header with normal C semantics without making the target closed-world"
+        ),
+    )
+    parser.add_argument(
         "--standard-macro",
         action="append",
         default=[],
@@ -638,7 +649,9 @@ def _build_preprocess_parser(prog: str) -> argparse.ArgumentParser:
     parser.epilog = (
         "example: cpre preprocess --unknown-names undefined --config-from flags.h "
         "-D LEVEL=2 target.c "
-        "(flags.h macros seed the configuration; LEVEL=2 overrides any seed value)"
+        "(flags.h macros seed the configuration; LEVEL=2 overrides any seed value); "
+        "use --config-from-unknown-names undefined instead of --unknown-names undefined "
+        "to read the seed closed-world while the target stays open-world"
     )
     return parser
 
@@ -666,8 +679,13 @@ def _load_seed_configuration(
     seed: Path,
     base: MacroConfiguration,
     context: PreprocessingContext | None,
+    unknown_names: UnknownNamePolicy,
 ) -> MacroConfiguration | None:
-    """Evaluate one ``--config-from`` seed file, reporting failures on stderr."""
+    """Evaluate one ``--config-from`` seed file, reporting failures on stderr.
+
+    ``unknown_names`` is the seed policy; the target policy is restored by
+    ``_overlay_configuration`` once every seed is applied.
+    """
     if seed.is_dir():
         print(f"{seed}: --config-from requires a file, not a directory", file=sys.stderr)
         return None
@@ -678,7 +696,7 @@ def _load_seed_configuration(
             text,
             filename=str(seed),
             context=context,
-            unknown_names=base.unknown_names,
+            unknown_names=unknown_names,
             base=base,
         )
     except IncompleteConfigurationError as error:
@@ -695,12 +713,13 @@ def _load_seed_configuration(
                 f"{origin}: invalid --config-from seed: {_format_incomplete(diagnostic)}",
                 file=sys.stderr,
             )
-        if base.unknown_names is UnknownNamePolicy.OPEN and any(
+        if unknown_names is UnknownNamePolicy.OPEN and any(
             diagnostic.code is ErrorCode.UNRESOLVED_CONDITION for diagnostic in diagnostics
         ):
             print(
                 f"{seed}: hint: seed conditions such as include guards on undefined names "
-                "need --unknown-names undefined",
+                "need --config-from-unknown-names undefined (seed only) or "
+                "--unknown-names undefined (seed and target)",
                 file=sys.stderr,
             )
     except CpreError as error:
@@ -739,6 +758,8 @@ def preprocess_main(
         parser.error("--compact cannot be combined with --list-unknown-macros")
     if args.has_include_from_search and not (args.include_dirs or args.quote_dirs):
         parser.error("--has-include-from-search requires -I or --iquote")
+    if args.config_from_unknown_names is not None and not args.config_from:
+        parser.error("--config-from-unknown-names requires --config-from")
     if len(args.sources) != 1:
         parser.error("preprocess currently accepts exactly one source file")
     path = args.sources[0]
@@ -778,8 +799,9 @@ def preprocess_main(
         context = PreprocessingContext(standard_macros=standard_macros) if standard_macros else None
         if args.config_from:
             explicit = configuration
+            seed_policy = UnknownNamePolicy(args.config_from_unknown_names or args.unknown_names)
             for seed in args.config_from:
-                seeded = _load_seed_configuration(seed, configuration, context)
+                seeded = _load_seed_configuration(seed, configuration, context, seed_policy)
                 if seeded is None:
                     return 2
                 configuration = seeded
