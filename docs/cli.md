@@ -410,6 +410,44 @@ cpre simplify-macros --rewrite --json source.c
 
 The output contains `path`, `rewritten`, `applied_count`, `verified`, `semantics`, `symbolic_literals`, and the array of analyzed `macros`.
 
+### Diff and check modes
+
+`--diff` and `--check` preview the rewrite without modifying any file. They run the same rewrite and verification as `--rewrite`, so they report exactly what `--rewrite` would write.
+
+```bash
+# Print the proposed changes as a unified diff
+cpre simplify-macros --diff source.c
+
+# CI gate: exit 1 if --rewrite would change any file
+cpre simplify-macros --check --recursive src
+
+# Both: print the diff and fail if it is not empty
+cpre simplify-macros --check --diff --recursive src
+```
+
+`--diff` prints only the proposed changes: one unified diff per changed file, in the order the files are processed, with both header lines naming the path as given on the command line and no timestamps. A file that would not change produces no output. Apply the diff with `patch -p0`. Original line endings are kept, and a last line without a newline is marked with `\ No newline at end of file`.
+
+```diff
+--- source.c
++++ source.c
+@@ -1,2 +1,2 @@
+-#define FEAT_1 (0 && A) || B
++#define FEAT_1 (B)
+ int x;
+```
+
+`--check` prints `would rewrite PATH` on stderr for each file that would change, and nothing on stdout unless `--diff` is also given. `--symbolic-literal` and `--symbolic-zero` apply as in the other modes.
+
+Exit status with `--diff` or `--check`:
+
+| Status | Meaning |
+| --- | --- |
+| `0` | No error. With `--check`, no file would change. |
+| `1` | With `--check`, at least one file would change. Without `--check`, `--fail-on-findings` is given and a simplifiable macro was found. |
+| `2` | A file could not be read or decoded, a macro could not be fully analyzed, rewrite verification failed, or the options are invalid. Files that were processed are still reported. |
+
+`--diff` and `--check` cannot be combined with `--rewrite`/`--in-place` or with `--json`; doing so is a usage error with exit status `2`.
+
 ## Arbitrary Boolean expression testing with test-input
 
 The `cpre test-input` subcommand accepts an arbitrary Boolean macro equation or expression, runs it through cpre's Boolean parser and ROBDD simplification machinery, and prints the optimized equivalent expression:

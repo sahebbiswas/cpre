@@ -74,6 +74,10 @@ cpre simplify-macros source.c
 
 # Explicit in-place rewrite mode
 cpre simplify-macros --rewrite source.c
+
+# Preview the rewrite as a unified diff, or fail CI when a rewrite is available
+cpre simplify-macros --diff source.c
+cpre simplify-macros --check source.c
 ```
 
 Select a concrete configuration and emit preprocessed source:

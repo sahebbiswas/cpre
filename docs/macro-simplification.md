@@ -238,11 +238,19 @@ cpre simplify-macros --rewrite --symbolic-zero src/example.c
 
 # Machine-readable JSON output
 cpre simplify-macros --json src/example.c
+
+# Preview the rewrite as a unified diff (never modifies source)
+cpre simplify-macros --diff src/example.c
+
+# CI gate: exit 1 if --rewrite would change any file (never modifies source)
+cpre simplify-macros --check src/example.c
 ```
+
+`--diff` and `--check` run the same rewrite and verification as `--rewrite`. See [Diff and check modes](cli.md#diff-and-check-modes) for output and exit status.
 
 ### Safety and verification contract
 
-1. **Reporting never mutates source**: running without `--rewrite` (or `rewrite=True`) is strictly read-only.
+1. **Reporting never mutates source**: running without `--rewrite` (or `rewrite=True`) is strictly read-only, including `--diff` and `--check`.
 2. **Rewriting requires an explicit flag**: source mutation must be requested intentionally.
 3. **Only proven-equivalent transformations are applied**: transformations must be verified equivalent under the active semantic mode (`ordinary` or `symbolic-literal`).
 4. **Reparsing and re-analysis verification**: after applying edits, the resulting source is reparsed and reanalyzed to ensure it remains syntactically valid, reached simplest form, and preserves semantic equivalence.
