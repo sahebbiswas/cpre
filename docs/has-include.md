@@ -25,7 +25,7 @@ result = cpre.preprocess_source(
 assert result.complete
 ```
 
-`IncludeQuery` exposes the macro-expanded header spelling, whether the source used quoted or angle-bracket form, the physical source location of `__has_include` in the source that contains it, and that source's identity in `filename`: the caller-supplied `filename` for the primary source, or the resolved identity of an included source. The callback must return `True`, `False`, or `None`. `None` means the host cannot answer and produces an atomic incomplete `PreprocessResult` with `ErrorCode.UNRESOLVED_CONDITION`; cpre never guesses `False`.
+`IncludeQuery` exposes the macro-expanded header spelling, whether the source used quoted or angle-bracket form, the physical source location of `__has_include` in the source that contains it, and that source's identity in `filename`: the caller-supplied `filename` for the primary source, or the resolved identity of an included source. The callback must return `True`, `False`, or `None`. `None` means the host cannot answer. With [`has_include_from_resolver=True`](#answers-from-the-include-resolver) the include resolver then answers, and a header it cannot resolve is unavailable (`False`). Otherwise `None` produces an atomic incomplete `PreprocessResult` with `ErrorCode.UNRESOLVED_CONDITION`; cpre never guesses `False`.
 
 The operand is macro-expanded using the active source-order macro state before cpre interprets it as a header name. Both of these forms are supported:
 
@@ -106,7 +106,7 @@ On the command line, `cpre preprocess --has-include-from-search` answers queries
 
 ## Feature tests
 
-`defined(__has_include)`, `defined __has_include`, and `#ifdef __has_include` are true when `include_query` is given or `has_include_from_resolver=True`. Without a callback they are unknown, under either unknown-name policy, so cpre never guesses. `__has_include_next` is not implemented: `defined(__has_include_next)` is false, so the usual feature-test fallback is selected, and a reachable `__has_include_next(...)` that decides a condition is an `unsupported_condition_expression` incomplete result.
+`defined(__has_include)`, `defined __has_include`, and `#ifdef __has_include` are true when `include_query` is given or `has_include_from_resolver=True`. Without either source of answers they are unknown, under either unknown-name policy, so cpre never guesses. `__has_include_next` is not implemented: `defined(__has_include_next)` is false, so the usual feature-test fallback is selected, and a reachable `__has_include_next(...)` that decides a condition is an `unsupported_condition_expression` incomplete result.
 
 ## Boundary
 
@@ -114,7 +114,7 @@ This feature does **not** resolve `#include`, `#include_next`, or `#import` dire
 
 cpre also does not:
 
-- probe the filesystem by default (the CLI's `--has-include-from-search` searches only the `-I`/`--iquote` directories you give it);
+- probe the filesystem by default. The CLI's `--has-include-from-search` probes exactly where `#include` would look: for quoted queries, the directory of the file containing the query, then the `--iquote` and `-I` directories; for angle-bracket queries, only the `-I` directories. An absolute header path is checked as given. Search directories set lookup order; they are not a sandbox, and a probe reads the header it finds;
 - interpret compiler `-I`, `-isystem`, sysroot, framework, or builtin-header search rules;
 - invoke a compiler;
 - implement `__has_include_next` (see [Feature tests](#feature-tests));

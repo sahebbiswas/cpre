@@ -134,21 +134,18 @@ def test_feature_test_is_defined_with_resolver_answers(test):
 
 
 def test_resolver_answers_queries_in_included_sources_relative_to_their_includer(tmp_path):
-    (tmp_path / "src").mkdir()
-    (tmp_path / "inc" / "lib").mkdir(parents=True)
-    (tmp_path / "src" / "main.c").write_text(
-        "#include <lib/config.h>\n#if HAVE_SIBLING\nint ok;\n#endif\n"
+    main_source = "#include <lib/config.h>\n#if HAVE_SIBLING\nint ok;\n#endif\n"
+    _write(tmp_path / "src" / "main.c", main_source)
+    _write(
+        tmp_path / "inc" / "lib" / "config.h",
+        '#if __has_include("sibling.h")\n#define HAVE_SIBLING 1\n#endif\n',
     )
-    (tmp_path / "inc" / "lib" / "config.h").write_text(
-        '#if __has_include("sibling.h")\n#define HAVE_SIBLING 1\n#endif\n'
-    )
-    (tmp_path / "inc" / "lib" / "sibling.h").write_text("")
-    main_c = str(tmp_path / "src" / "main.c")
+    _write(tmp_path / "inc" / "lib" / "sibling.h", "")
     resolver = SearchPathResolver([tmp_path / "inc"])
 
     result = preprocess_source(
-        (tmp_path / "src" / "main.c").read_text(),
-        filename=main_c,
+        main_source,
+        filename=str(tmp_path / "src" / "main.c"),
         include_resolver=resolver,
         has_include_from_resolver=True,
     )
@@ -206,7 +203,8 @@ def test_resolver_returning_wrong_type_is_rejected():
 
 def _write(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
+    # Bytes keep LF line endings on Windows; cpre preserves the source's endings.
+    path.write_bytes(text.encode("utf-8"))
 
 
 def test_cli_answers_has_include_from_search(tmp_path, capsys):
