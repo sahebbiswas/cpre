@@ -61,6 +61,14 @@ def _normalize_payload(payload: str) -> str:
     return " ".join(payload.split())
 
 
+def parse_reference_output(output: str) -> Outcome:
+    """Tokens and ``#pragma`` payloads of a reference compiler's ``-E -P`` output."""
+    # Compilers on Windows write CRLF; only the line structure matters here.
+    output = re.sub(r"\r\n?", "\n", output)
+    pragmas = tuple(_normalize_payload(m["payload"]) for m in _PRAGMA_LINE.finditer(output))
+    return Outcome("accepted", tokens(_PRAGMA_LINE.sub("", output)), pragmas)
+
+
 @dataclass(frozen=True)
 class Case:
     path: Path
@@ -107,9 +115,7 @@ class Reference:
         )
         if completed.returncode != 0:
             return Outcome("rejected", detail=completed.stderr.decode("utf-8", "replace").strip())
-        output = completed.stdout.decode("utf-8")
-        pragmas = tuple(_normalize_payload(m["payload"]) for m in _PRAGMA_LINE.finditer(output))
-        return Outcome("accepted", tokens(_PRAGMA_LINE.sub("", output)), pragmas)
+        return parse_reference_output(completed.stdout.decode("utf-8"))
 
     @cache  # noqa: B019 - references live for the whole session
     def standard_macros(self, std: str) -> dict[str, str]:
@@ -299,6 +305,12 @@ PAIRS = [
 @pytest.mark.skipif(not REFERENCES, reason=_NO_REFERENCE)
 @pytest.mark.parametrize(("case", "reference"), PAIRS or [pytest.param(None, None, id="none")])
 def test_cpre_matches_reference(case: Case, reference: Reference) -> None:
+    # cpre never invents a standard macro's value, so a case using one the reference
+    # leaves undefined (clang targeting MSVC has no __STDC__) cannot be compared.
+    standard = reference.standard_macros(case.std)
+    missing = [name for name in STANDARD_MACROS if name not in standard and name in case.source]
+    if missing:
+        pytest.skip(f"{reference.family} does not define {', '.join(missing)} on this target")
     theirs, ours = reference.run(case), run_cpre(case, reference)
     known = _known(case, reference)
 
@@ -346,6 +358,16 @@ def test_known_differences_are_documented() -> None:
 )
 def test_tokens_normalize_only_whitespace_and_comments(text, expected):
     assert tokens(text) == expected
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_reference_output_extracts_pragma_lines(newline):
+    output = newline.join(["int a;", "#pragma omp   parallel", "  # pragma pack(1)", "int b;", ""])
+
+    outcome = parse_reference_output(output)
+
+    assert outcome.tokens == ("int", "a", ";", "int", "b", ";")
+    assert outcome.pragmas == ("omp parallel", "pack(1)")
 
 
 def test_configuration_maps_compiler_flags():

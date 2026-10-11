@@ -12,11 +12,13 @@ pytest tests/test_compiler_differential.py
 
 The harness looks for `gcc` and `clang` on `PATH` and uses each one it finds that works, at most one per family. To use a specific compiler, set `CPRE_REFERENCE_CC` to its command, for example `CPRE_REFERENCE_CC="clang-18"`. If that command does not work, the tests fail instead of quietly using another one. When no compiler is found, the comparison tests are skipped with the reason `no reference C preprocessor found`. The other tests in the file, which check the corpus and the known-differences record, still run.
 
-In CI, the Linux runners have GCC and the macOS runners have Clang (installed as `gcc` and `clang`), so the comparison runs there. A runner with neither compiler on `PATH` skips it.
+In CI the comparison runs on every runner: the Linux runners have GCC (and Clang), the macOS runners have Apple Clang (installed as both `gcc` and `clang`, so it runs once), and the Windows runners have MinGW GCC and Clang. A runner with neither compiler on `PATH` skips it.
 
 ## What is compared
 
-Every reference run uses `-E -P -undef -nostdinc -x c -std=c11` (or the case's own `-std=`). That means preprocessing only, with no line markers, no target or vendor predefined macros and no system headers. The values of `__STDC__`, `__STDC_VERSION__` and `__STDC_HOSTED__` are read from the reference compiler for the same `-std=` and passed to cpre through `PreprocessingContext`. cpre runs with `unknown_names="undefined"`, the compiler's closed-world model.
+Every reference run uses `-E -P -undef -nostdinc -x c -std=c11` (or the case's own `-std=`). That means preprocessing only, with no line markers, no target or vendor predefined macros and no system headers. The values of `__STDC__`, `__STDC_VERSION__` and `__STDC_HOSTED__` are read from the reference compiler for the same `-std=` and passed to cpre through `PreprocessingContext`. cpre runs with `unknown_names="undefined"`, the compiler's closed-world model. If a reference leaves one of those macros undefined (Clang targeting MSVC has no `__STDC__`), a case that uses it is skipped for that reference with the reason, because cpre never invents a standard macro's value.
+
+Compiler output is read with its line endings normalized (Windows compilers write CRLF) before `#pragma` lines are found.
 
 Both outputs are normalized the same way, and only in ways that cannot change meaning:
 
