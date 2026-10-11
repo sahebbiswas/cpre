@@ -19,9 +19,13 @@ def test_main_version_prints_installed_version(capsys: pytest.CaptureFixture[str
     assert capsys.readouterr().out.strip() == f"cpre {__version__}"
 
 
-@pytest.mark.parametrize("args", [["--version"], ["-m", "cpre", "--version"]])
-def test_python_entrypoint_version(args: list[str]) -> None:
-    result = subprocess.run([sys.executable, *args], capture_output=True, text=True, check=False)
+def test_python_module_version() -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "cpre", "--version"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == f"cpre {__version__}"
