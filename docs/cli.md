@@ -1,5 +1,16 @@
 # Command-line interface
 
+## Version
+
+Use `--version` to identify the installed cpre release without opening a source file:
+
+```bash
+cpre --version
+python -m cpre --version
+```
+
+Both commands print `cpre X.Y.Z` and exit successfully. The option is available on the top-level CLI; subcommands do not define a separate version option.
+
 The `cpre` CLI provides symbolic analysis of C/C++ preprocessor conditions and object-like macros, a dedicated `preprocess` command for selecting one explicit concrete configuration and emitting the resulting source, and a `test-input` command for quickly evaluating and optimizing arbitrary Boolean expressions.
 
 For Python integrations, use the [Python API guide](api.md). For concrete configuration selection and macro expansion, use the [preprocessing guide](preprocessing.md).
@@ -197,7 +208,6 @@ cpre --symbolic-zero source.c
 Currently only `0` is supported as a symbolic literal. Passing an unsupported value terminates with an error and status `2`.
 
 See [Macro Boolean simplification](macro-simplification.md) for full semantic details and warnings.
-
 ### Disabling specific analyses
 
 If an integration requires checking only conditional branches or only macro definitions, use the opt-out flags:
@@ -398,7 +408,6 @@ line 12: #define FEAT_1 ((0 && A) || B) -> (!!B) [rewritten, proven equivalent]
 ### Symbolic-literal mode in rewrites
 
 Symbolic-literal options are supported in both report and rewrite modes:
-
 ```bash
 # Preserve disabled switches such as (0 && A) || B
 cpre simplify-macros --symbolic-zero source.c
@@ -598,7 +607,6 @@ An incomplete ROBDD computation is never reported as a successful simplification
 
 --symbolic-zero
     Convenience shorthand for --symbolic-literal 0.
-
 --no-macros
     Disable macro Boolean simplification analysis.
 
