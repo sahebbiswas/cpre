@@ -794,7 +794,8 @@ def _load_seed_configuration(
     except CpreError as error:
         print(f"{seed}: invalid --config-from seed: {_format_error(error)}", file=sys.stderr)
     except OSError as error:
-        print(f"{seed}: cannot read --config-from seed: {error.strerror or error}", file=sys.stderr)    except UnicodeDecodeError as error:
+        print(f"{seed}: cannot read --config-from seed: {error.strerror or error}", file=sys.stderr)
+    except UnicodeDecodeError as error:
         print(f"{seed}: cannot read --config-from seed: {error}", file=sys.stderr)
     return None
 
