@@ -197,8 +197,7 @@ def _macro_to_dict(result: MacroAnalysisResult) -> dict[str, object]:
         "candidate": result.candidate,
         "simplified": result.simplified,
         "original": result.original_replacement,
-        "replacement": result.simplified_replacement,
-        "equivalent": result.is_equivalent,
+        "replacement": result.simplified_replacement,        "equivalent": result.is_equivalent,
         "rewritable": result.rewritable,
         "reason": result.reason,
         "semantics": result.semantics,
@@ -397,8 +396,7 @@ def _build_simplify_macros_parser(prog: str) -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--diff",
-        action="store_true",
-        help="print the rewrite as a unified diff instead of a report; never modifies files",
+        action="store_true",        help="print the rewrite as a unified diff instead of a report; never modifies files",
     )
     parser.add_argument(
         "--check",
@@ -597,8 +595,7 @@ def _build_preprocess_parser(prog: str) -> argparse.ArgumentParser:
         help="define an external object-like macro; NAME alone defines an empty macro",
     )
     parser.add_argument(
-        "--undef",
-        "-U",
+        "--undef",        "-U",
         dest="undefined",
         action="append",
         default=[],
@@ -797,8 +794,7 @@ def _load_seed_configuration(
     except CpreError as error:
         print(f"{seed}: invalid --config-from seed: {_format_error(error)}", file=sys.stderr)
     except OSError as error:
-        print(f"{seed}: cannot read --config-from seed: {error.strerror or error}", file=sys.stderr)
-    except UnicodeDecodeError as error:
+        print(f"{seed}: cannot read --config-from seed: {error.strerror or error}", file=sys.stderr)    except UnicodeDecodeError as error:
         print(f"{seed}: cannot read --config-from seed: {error}", file=sys.stderr)
     return None
 
@@ -997,8 +993,7 @@ def _build_test_input_parser(prog: str) -> argparse.ArgumentParser:
         help="maximum number of distinct Boolean atoms before aborting (default: 64)",
     )
     parser.add_argument(
-        "--max-bdd-nodes",
-        type=int,
+        "--max-bdd-nodes",        type=int,
         metavar="N",
         help="maximum number of BDD nodes before aborting (default: 100000)",
     )
@@ -1115,6 +1110,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         description="Analyze Boolean C/C++ preprocessor conditional directives and macros."
     )
     parser.add_argument(
+        "--version",
+        action="version",
+        version=f"cpre {__version__}",
+        help="show the installed version and exit",
+    )
+    parser.add_argument(
         "sources",
         nargs="+",
         type=Path,
@@ -1197,8 +1198,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             _engine.ConditionalTree | None,
             tuple[MacroAnalysisResult, ...],
             AnalysisResult | None,
-        ]
-    ] = []
+        ]    ] = []
     analyses: list[AnalysisResult] = []
     sarif_notifications: list[ToolNotification] = []
     had_errors = False
