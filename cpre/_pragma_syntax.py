@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from ._lines import split_lines
 from .errors import AnalysisError, ErrorCode, SourceLocation
 from .expansion import SourceMapping, tokenize
 from .parser import logical_lines
@@ -21,7 +22,7 @@ class _SourcePragma:
 
 def _physical_line_starts(source: str) -> list[int]:
     starts = [0]
-    for line in source.splitlines(keepends=True):
+    for line in split_lines(source, keepends=True):
         starts.append(starts[-1] + len(line))
     return starts
 
@@ -68,7 +69,7 @@ def _mask_source_pragmas(
     decide reachability. Active markers survive; markers in discarded branches
     are blanked by the existing conditional-selection machinery.
     """
-    physical = source.splitlines(keepends=True)
+    physical = split_lines(source, keepends=True)
     logical = list(logical_lines(source))
     starts = _physical_line_starts(source)
     characters = list(source)

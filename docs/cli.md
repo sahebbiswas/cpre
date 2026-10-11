@@ -392,7 +392,7 @@ line 12: #define FEAT_1 ((0 && A) || B) -> (!!B) [rewritten, proven equivalent]
 - **Report-only by default**: reporting never modifies source files. Source mutation requires the explicit `--rewrite` (or `--in-place`) flag.
 - **Proof-verified transformations**: only transformations proven equivalent under the selected semantic mode are applied.
 - **Reparsing and re-analysis verification**: after rewriting in-place, the resulting definitions are re-parsed and re-analyzed to verify that they parse cleanly, reached the simplest form, and remain semantically equivalent. If verification fails, the rewrite is aborted and reported with exit status `2`.
-- **Formatting and comment preservation**: rewriting operates on exact replacement ranges; leading directive whitespace, macro names, inline comments (`/* ... */` and `// ...`), unrelated code, and original line endings (CRLF / LF) are preserved.
+- **Formatting and comment preservation**: rewriting operates on exact replacement ranges; leading directive whitespace, macro names, inline comments (`/* ... */` and `// ...`), unrelated code, and original line endings (LF, CRLF or lone CR) are preserved.
 - **Incomplete expressions protected**: macros that exceed analysis resource limits or contain unmodeled constructs are never emitted as rewrites.
 
 ### Symbolic-literal mode in rewrites

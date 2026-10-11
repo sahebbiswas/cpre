@@ -12,6 +12,7 @@ from bisect import bisect_right
 from dataclasses import dataclass, field
 from enum import Enum
 
+from ._lines import LINE_BREAK, line_starts, split_lines
 from .model import (
     Conjunction,
     Constant,
@@ -137,7 +138,7 @@ def _logical_source(source: str) -> tuple[str, str, list[int]]:
     while index < len(source):
         if source.startswith("\\\r\n", index):
             index += 3
-        elif source.startswith("\\\n", index):
+        elif source.startswith(("\\\n", "\\\r"), index):
             index += 2
         else:
             chars.append(source[index])
@@ -173,8 +174,8 @@ def _logical_source(source: str) -> tuple[str, str, list[int]]:
             continue
 
         if text.startswith("//", index):
-            end = text.find("\n", index)
-            end = len(text) if end < 0 else end
+            line_break = LINE_BREAK.search(text, index)
+            end = len(text) if line_break is None else line_break.start()
         elif text.startswith("/*", index):
             end = text.find("*/", index + 2)
             end = len(text) if end < 0 else end + 2
@@ -341,14 +342,14 @@ def parse_conditionals(
     if filename is not None and not isinstance(filename, str):
         raise TypeError("filename must be a string or None")
 
-    line_starts = [0] + [match.end() for match in re.finditer("\n", source)]
+    starts = line_starts(source)
 
     def location(offset: int) -> StructuralSourceLocation:
-        line = bisect_right(line_starts, offset)
+        line = bisect_right(starts, offset)
         return StructuralSourceLocation(
             offset=offset,
             line=line,
-            column=offset - line_starts[line - 1] + 1,
+            column=offset - starts[line - 1] + 1,
         )
 
     def span(start: int, end: int) -> StructuralSourceRange:
@@ -369,8 +370,7 @@ def parse_conditionals(
         diagnostics.append(StructureDiagnostic(code, message, where))
 
     cursor = 0
-    for line_match in re.finditer(r"[^\n]*\n|[^\n]+$", logical):
-        line_text = line_match[0]
+    for line_text in split_lines(logical, keepends=True):
         line_start = cursor
         cursor += len(line_text)
         masked_line = recognition_mask[line_start:cursor]
@@ -383,7 +383,7 @@ def parse_conditionals(
 
         kind = match[1]
         begin = offsets[line_start - 1] + 1 if line_start else 0
-        end = offsets[cursor - 1] + 1 if line_text.endswith("\n") else len(source)
+        end = offsets[cursor - 1] + 1 if line_text.endswith(("\n", "\r")) else len(source)
         directive_range = span(begin, end)
         token_matches = tuple(_TOKEN.finditer(line_text, match.end()))
         tokens = tuple(

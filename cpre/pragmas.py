@@ -9,6 +9,7 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Protocol
 
+from ._lines import split_lines
 from ._pragma_syntax import (
     _mask_source_pragmas,
     _normalize_pragma_payload,
@@ -95,11 +96,11 @@ def _source_location(source: str, offset: int) -> SourceLocation:
 
 def _output_line(output: str, offset: int) -> int:
     """Return the one-based canonical output line containing ``offset``."""
-    lines = output[:offset].splitlines(keepends=True)
+    lines = split_lines(output[:offset], keepends=True)
     if not lines:
         return 1
     last = lines[-1]
-    return len(lines) + (1 if last.splitlines()[0] != last else 0)
+    return len(lines) + (1 if split_lines(last)[0] != last else 0)
 
 
 def _location_for_output(
@@ -120,10 +121,10 @@ def _location_for_output(
         # Unexpanded included text is copied verbatim, so the output spelling between
         # the mapping start and the offset locates it within the included source.
         assert mapping.start.column is not None
-        lines = output[mapping.output_start : output_offset].splitlines(keepends=True)
+        lines = split_lines(output[mapping.output_start : output_offset], keepends=True)
         if not lines:
             location = mapping.start
-        elif lines[-1].splitlines()[0] != lines[-1]:
+        elif split_lines(lines[-1])[0] != lines[-1]:
             location = SourceLocation(mapping.start.line + len(lines), 1)
         elif len(lines) == 1:
             location = SourceLocation(mapping.start.line, mapping.start.column + len(lines[0]))

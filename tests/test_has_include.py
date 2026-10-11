@@ -224,9 +224,10 @@ def test_malformed_unclosed_has_include_is_structured_incomplete():
     assert result.incomplete[0].code is ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION
 
 
-def test_has_include_offsets_follow_parser_splitlines_semantics():
+def test_has_include_offsets_follow_the_shared_line_model():
     provider, seen = _provider({(IncludeForm.ANGLE, "optional.h"): True})
-    source = "int before;\f#if __has_include(<optional.h>)\nint yes;\n#endif\n"
+    # A lone CR ends a line, as in GCC and Clang (#140).
+    source = "int before;\r#if __has_include(<optional.h>)\nint yes;\n#endif\n"
 
     result = preprocess_source(source, include_query=provider)
 
@@ -234,6 +235,17 @@ def test_has_include_offsets_follow_parser_splitlines_semantics():
     assert "int before;" in result.source
     assert "int yes;" in result.source
     assert seen == [IncludeQuery("optional.h", IncludeForm.ANGLE, SourceLocation(2, 5), None)]
+
+
+def test_form_feed_does_not_start_a_has_include_directive():
+    provider, seen = _provider({(IncludeForm.ANGLE, "optional.h"): True})
+    # A form feed is whitespace within a line, so ``#if`` is ordinary text and the
+    # ``#endif`` is unmatched, as GCC and Clang also report.
+    source = "int before;\f#if __has_include(<optional.h>)\nint yes;\n#endif\n"
+
+    with pytest.raises(cpre.ParseError, match="#endif has no matching #if"):
+        preprocess_source(source, include_query=provider)
+    assert seen == []
 
 
 def test_closed_world_policy_still_queries_has_include():

@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 from typing import Protocol
 
+from ._lines import split_lines
 from .errors import AnalysisError, ErrorCode, SourceLocation
 from .expansion import Expansion, tokenize
 from .includes import IncludeForm
@@ -64,7 +65,7 @@ class HeaderOperandError(ValueError):
 def _physical_line_starts(source: str) -> list[int]:
     starts = [0]
     offset = 0
-    for line in source.splitlines(keepends=True):
+    for line in split_lines(source, keepends=True):
         offset += len(line)
         starts.append(offset)
     return starts
