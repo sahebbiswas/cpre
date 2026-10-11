@@ -28,7 +28,7 @@ Both outputs are normalized the same way, and only in ways that cannot change me
 A case agrees with a reference when:
 
 - the reference accepts it and cpre returns complete output with the same tokens and pragmas, or
-- the reference rejects it (non-zero exit status) and cpre does not return complete output: it raises an error or returns an incomplete result.
+- the reference rejects it (non-zero exit status), and cpre does not return complete output (it raises an error or returns an incomplete result) and reports the problem on the same physical line as the reference's first `file:line: error` diagnostic. The message text is not compared, because GCC and Clang word the same error differently.
 
 A failing case reports the case file, what each side did and, when both produced output, a token-by-token diff.
 
@@ -58,7 +58,7 @@ Keep cases deterministic: no `__DATE__`, `__TIME__` or `__FILE__` in included he
 - `issue`: the issue tracking it, or the one that decided the behaviour;
 - `kind`: `bug`, `gap` (a missing feature) or `intentional`;
 - `reference`: what the compiler does (`accepted` or `rejected`);
-- `cpre`: exactly what cpre currently does. For accepted output this includes the tokens.
+- `cpre`: exactly what cpre currently does, including the line it reports. For accepted output this includes the tokens.
 - `compilers` (optional): the families it applies to, when only one differs.
 
 A recorded case is still run, and it fails if the difference changes in any way, including disappearing. So when a fix lands, the test tells you to delete the entry, and a partial fix or a new divergence is noticed. Every entry must also be listed here.

@@ -57,6 +57,13 @@ def tokens(text: str) -> tuple[str, ...]:
     return tuple(token for token in _TOKEN.findall(text) if not token.startswith(("/*", "//")))
 
 
+def first_error_line(stderr: str, filename: str) -> int | None:
+    """The line of the first ``file:line[:column]: error`` diagnostic for ``filename``."""
+    pattern = rf"^{re.escape(filename)}:(\d+)(?::\d+)?: (?:fatal )?error\b"
+    match = re.search(pattern, stderr, re.MULTILINE)
+    return int(match[1]) if match else None
+
+
 def _normalize_payload(payload: str) -> str:
     return " ".join(payload.split())
 
@@ -114,7 +121,10 @@ class Reference:
             check=False,
         )
         if completed.returncode != 0:
-            return Outcome("rejected", detail=completed.stderr.decode("utf-8", "replace").strip())
+            stderr = completed.stderr.decode("utf-8", "replace")
+            return Outcome(
+                "rejected", detail=stderr.strip(), line=first_error_line(stderr, case.name)
+            )
         return parse_reference_output(completed.stdout.decode("utf-8"))
 
     @cache  # noqa: B019 - references live for the whole session
@@ -199,11 +209,13 @@ class Outcome:
     tokens: tuple[str, ...] = ()
     pragmas: tuple[str, ...] = ()
     detail: str = ""
+    line: int | None = None  # physical line of the first error, when rejected or incomplete
 
     def describe(self) -> str:
         if self.kind == "accepted":
             return "accepted"
-        return f"{self.kind}: {self.detail}"
+        where = f" at line {self.line}" if self.line is not None else ""
+        return f"{self.kind}{where}: {self.detail}"
 
     def signature(self) -> str:
         """``describe()``, plus the output itself for an accepted run."""
@@ -252,10 +264,13 @@ def run_cpre(case: Case, reference: Reference) -> Outcome:
             include_resolver=cpre.includes.SearchPathResolver(search, quote_paths=[CASES]),
         )
     except cpre.CpreError as error:
-        return Outcome("rejected", detail=f"{type(error).__name__}: {error}")
+        location = getattr(error, "location", None)
+        line = location.line if location is not None else None
+        return Outcome("rejected", detail=f"{type(error).__name__}: {error}", line=line)
     if not result.complete:
         codes = ", ".join(sorted({str(item.code.value) for item in result.incomplete}))
-        return Outcome("incomplete", detail=codes)
+        lines = [item.location.line for item in result.incomplete if item.location is not None]
+        return Outcome("incomplete", detail=codes, line=min(lines, default=None))
     assert result.source is not None
     return Outcome("accepted", tokens(result.source), tuple(pragmas))
 
@@ -267,8 +282,9 @@ def agrees(reference: Outcome, ours: Outcome) -> bool:
             reference.tokens,
             reference.pragmas,
         )
-    # The reference rejects the input: cpre must not claim complete output.
-    return ours.kind != "accepted"
+    # The reference rejects the input: cpre must not claim complete output, and must
+    # report the problem on the same physical line. Message wording is not compared.
+    return ours.kind != "accepted" and ours.line == reference.line
 
 
 def _report(case: Case, reference: Reference, theirs: Outcome, ours: Outcome) -> str:
@@ -368,6 +384,19 @@ def test_reference_output_extracts_pragma_lines(newline):
 
     assert outcome.tokens == ("int", "a", ";", "int", "b", ";")
     assert outcome.pragmas == ("omp parallel", "pack(1)")
+
+
+@pytest.mark.parametrize(
+    ("stderr", "expected"),
+    [
+        ("x.c:2:2: error: #endif without #if\n", 2),
+        ("x.c:1: error: unterminated #if\n", 1),
+        ("x.c:3:1: warning: unused\nx.c:7:5: fatal error: oops\n", 7),
+        ("other.h:4:1: error: elsewhere\n", None),
+    ],
+)
+def test_first_error_line(stderr, expected):
+    assert first_error_line(stderr, "x.c") == expected
 
 
 def test_configuration_maps_compiler_flags():
