@@ -131,15 +131,19 @@ jobs:
           SRC: ${{ github.workspace }}
         run: |
           export PATH="$RUNNER_TEMP/venv/bin:$PATH"
+          cpre --version
+          python -m cpre --version
           cpre --help
           python -m cpre --help
           python - <<'PY'
-          import json, os, subprocess
+          import json, os, subprocess, sys
           from pathlib import Path
 
           import cpre
 
           assert "site-packages" in cpre.__file__, cpre.__file__
+          assert subprocess.run(["cpre", "--version"], capture_output=True, text=True, check=True).stdout.strip() == f"cpre {cpre.__version__}"
+          assert subprocess.run([sys.executable, "-m", "cpre", "--version"], capture_output=True, text=True, check=True).stdout.strip() == f"cpre {cpre.__version__}"
           fixture = Path(os.environ["SRC"]) / "tests/compatibility/fixtures/nested_conditionals.c"
           a = cpre.Variable("A")
           assert cpre.normalize(cpre.conjunction(a, a)) == a
@@ -215,7 +219,26 @@ jobs:
             sleep $((attempt * 15))
           done
           "$RUNNER_TEMP/venv/bin/cpre" --help > /dev/null
-          "$RUNNER_TEMP/venv/bin/python" -c "import cpre, sys; print(cpre.__version__); sys.exit(cpre.__version__ != '$VERSION')"
+          "$RUNNER_TEMP/venv/bin/python" -m cpre --help > /dev/null
+          "$RUNNER_TEMP/venv/bin/python" - <<'PY'
+          import os
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          import cpre
+
+          expected = f"cpre {cpre.__version__}"
+          assert cpre.__version__ == os.environ["VERSION"], cpre.__version__
+          for command in (
+              [str(Path(sys.executable).with_name("cpre")), "--version"],
+              [sys.executable, "-m", "cpre", "--version"],
+          ):
+              result = subprocess.run(command, capture_output=True, text=True, check=True)
+              assert result.stdout.strip() == expected, (command, result.stdout, expected)
+              assert not result.stderr, (command, result.stderr)
+          print(expected)
+          PY
 
   publish-pypi:
     name: Publish to PyPI

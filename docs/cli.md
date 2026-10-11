@@ -1,5 +1,16 @@
 # Command-line interface
 
+## Version
+
+Use `--version` to identify the installed cpre release without opening a source file:
+
+```bash
+cpre --version
+python -m cpre --version
+```
+
+Both commands print `cpre X.Y.Z` and exit successfully. The option is available on the top-level CLI; subcommands do not define a separate version option.
+
 The `cpre` CLI provides symbolic analysis of C/C++ preprocessor conditions and object-like macros, a dedicated `preprocess` command for selecting one explicit concrete configuration and emitting the resulting source, and a `test-input` command for quickly evaluating and optimizing arbitrary Boolean expressions.
 
 For Python integrations, use the [Python API guide](api.md). For concrete configuration selection and macro expansion, use the [preprocessing guide](preprocessing.md).
