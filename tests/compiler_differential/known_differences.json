@@ -1,0 +1,44 @@
+{
+  "comment_across_directive.c": {
+    "issue": "#150",
+    "kind": "bug",
+    "reference": "accepted",
+    "cpre": "accepted: + 2 int x = 1 ;",
+    "reason": "A block comment that spans lines ends the #define at the first newline, so X is 1 and '+ 2' leaks into the output."
+  },
+  "if_character_constants.c": {
+    "issue": "#50",
+    "kind": "intentional",
+    "reference": "accepted",
+    "cpre": "incomplete: unsupported_condition_expression",
+    "reason": "The value of an ordinary character constant depends on the implementation's execution character set, so cpre declines to evaluate it instead of assuming ASCII."
+  },
+  "linemodel_nel.c": {
+    "issue": "#148",
+    "kind": "bug",
+    "reference": "accepted",
+    "cpre": "rejected: ParseError: #if has no matching #endif",
+    "reason": "Python's \\s matches NEL (U+0085), so cpre treats '\\u0085#if' as a directive; compilers treat it as ordinary text."
+  },
+  "macro_stringify_indirect.c": {
+    "issue": "#149",
+    "kind": "bug",
+    "reference": "accepted",
+    "cpre": "accepted: const char * s = \"ab\" ;",
+    "reason": "Stringifying an argument passed in by another macro drops the spaces between its tokens."
+  },
+  "macro_va_opt_omitted.c": {
+    "issue": "#151",
+    "kind": "gap",
+    "reference": "accepted",
+    "cpre": "incomplete: unsupported_macro_expansion",
+    "reason": "C23 lets a variadic macro call omit the variadic argument entirely; cpre requires it, even if empty."
+  },
+  "pragma_operator_indirect.c": {
+    "issue": "#149",
+    "kind": "bug",
+    "reference": "accepted",
+    "cpre": "accepted: #pragma ompparallelfor",
+    "reason": "Same stringification bug: the _Pragma payload built through two macros loses its spaces."
+  }
+}
