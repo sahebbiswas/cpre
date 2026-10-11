@@ -12,6 +12,7 @@ from cpre.cli import main
 
 
 def test_main_version_prints_installed_version(capsys: pytest.CaptureFixture[str]) -> None:
+    """Print the installed package version when invoked with --version."""
     with pytest.raises(SystemExit) as exc_info:
         main(["--version"])
 
@@ -20,6 +21,7 @@ def test_main_version_prints_installed_version(capsys: pytest.CaptureFixture[str
 
 
 def test_python_module_version() -> None:
+    """Print the installed package version when invoked via python -m cpre --version."""
     result = subprocess.run(
         [sys.executable, "-m", "cpre", "--version"],
         capture_output=True,
