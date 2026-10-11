@@ -6,6 +6,7 @@ import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 
+from ._lines import split_lines
 from .expressions import ExpressionParser
 from .model import (
     ConditionalBranch,
@@ -47,7 +48,7 @@ class LogicalLine:
 
 
 def logical_lines(source: str) -> Iterator[LogicalLine]:
-    lines = strip_comments(source).splitlines()
+    lines = split_lines(strip_comments(source))
     index = 0
     while index < len(lines):
         start = index + 1

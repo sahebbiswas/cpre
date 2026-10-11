@@ -162,6 +162,8 @@ if edit is not None:
 
 `SourceRange.end` is exclusive. Locations are physical, one-based source positions. Backslash-continued directives retain physical line/column provenance.
 
+Every cpre component uses the same physical line model as GCC and Clang: a line ends at `\n`, `\r\n` or a lone `\r`. Form feed, vertical tab and the other characters Python's `str.splitlines()` treats as line boundaries (`\x1c`–`\x1e`, `\x85`, U+2028, U+2029) are ordinary characters within a line, so a `#` after one of them does not start a directive.
+
 Dead/redundant branch findings intentionally do not imply mechanical branch deletion. Do not synthesize destructive fixes merely because a branch is unreachable or redundant; apply automatic changes only when an explicit structured edit is present and suitable for the host tool's policy.
 
 ## Macro assumptions

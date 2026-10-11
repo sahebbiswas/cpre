@@ -10,6 +10,7 @@ from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 
 from . import _has_include
+from ._lines import split_lines
 from ._pragma_syntax import _mask_source_pragmas, _output_offset_for_source, _SourcePragma
 from .api import (
     AnalysisIncomplete,
@@ -532,7 +533,7 @@ def compact(
 
     output: list[str] = []
     removed_run = 0
-    for line_number, line in enumerate(result.source.splitlines(keepends=True), 1):
+    for line_number, line in enumerate(split_lines(result.source, keepends=True), 1):
         if line_number not in result.removed_lines:
             output.append(line)
             removed_run = 0
@@ -722,7 +723,7 @@ def _preprocess_unit(
     limits = run.limits
     budget = run.budget
     includes = run.includes
-    physical = source.splitlines(keepends=True)
+    physical = split_lines(source, keepends=True)
     logical = list(logical_lines(source))
     ends = {
         line.start_line: (
@@ -1293,7 +1294,7 @@ def _preprocess_unit(
         ):
             characters[token.start : token.end] = source[token.start : token.end]
     restored = "".join(characters)
-    restored_lines = restored.splitlines(keepends=True)
+    restored_lines = split_lines(restored, keepends=True)
     removed_lines = frozenset(
         line_number
         for line_number, (line, keep) in enumerate(zip(restored_lines, retained), 1)
@@ -1495,7 +1496,7 @@ def _splice(
         )
         removed.update(line + end_line + line_shift for line in child.removed_lines)
         char_shift += len(child.source)
-        line_shift += len(child.source.splitlines())
+        line_shift += len(split_lines(child.source))
     own(len(output), None)
     return _UnitOutput(
         (),

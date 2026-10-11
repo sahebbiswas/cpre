@@ -6,6 +6,7 @@ import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
+from ._lines import line_starts as _line_starts
 from .api import (
     AnalysisIncomplete,
     AnalysisOptions,
@@ -530,14 +531,6 @@ class MacroSimplificationResult:
         return any(r.simplified for r in self.results)
 
 
-def _compute_line_starts(source: str) -> list[int]:
-    starts = [0]
-    for idx, ch in enumerate(source):
-        if ch == "\n":
-            starts.append(idx + 1)
-    return starts
-
-
 def _location_to_offset(line_starts: list[int], source_len: int, location: SourceLocation) -> int:
     line_idx = location.line - 1
     if line_idx < 0:
@@ -575,7 +568,7 @@ def _apply_and_verify_rewrites(
     if not candidates_to_rewrite:
         return source, False, 0, True
 
-    line_starts = _compute_line_starts(source)
+    line_starts = _line_starts(source)
     source_len = len(source)
     edits_with_offsets: list[tuple[MacroAnalysisResult, int, int]] = []
 
