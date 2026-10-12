@@ -65,8 +65,14 @@ def first_error_line(stderr: str, filename: str) -> int | None:
     return int(match[1]) if match else None
 
 
+_LITERAL_OR_SPACE = re.compile(
+    r"""((?:u8|u|U|L)?"(?:\\.|[^"\\])*"|(?:u8|u|U|L)?'(?:\\.|[^'\\])*')|\s+"""
+)
+
+
 def _normalize_payload(payload: str) -> str:
-    return " ".join(payload.split())
+    """Collapse whitespace in a pragma payload, except inside string and character literals."""
+    return _LITERAL_OR_SPACE.sub(lambda m: m[1] or " ", payload).strip()
 
 
 def parse_reference_output(output: str) -> Outcome:
@@ -231,8 +237,9 @@ class Outcome:
 
 
 def _configuration(case: Case) -> cpre.MacroConfiguration:
-    definitions = []
-    undefined = []
+    # Options apply in command-line order, as for the compiler driver: the last -D or -U
+    # for a name wins (None marks a name left undefined).
+    final: dict[str, cpre.MacroDefinition | None] = {}
     for flag in case.flags:
         define = _DEFINE.fullmatch(flag)
         if define:
@@ -244,9 +251,13 @@ def _configuration(case: Case) -> cpre.MacroConfiguration:
                 names = [name.strip() for name in define["params"].split(",") if name.strip()]
                 variadic = bool(names) and names[-1] == "..."
                 parameters = tuple(names[:-1] if variadic else names)
-            definitions.append(cpre.MacroDefinition(define["name"], value, parameters, variadic))
+            final[define["name"]] = cpre.MacroDefinition(
+                define["name"], value, parameters, variadic
+            )
         elif flag.startswith("-U"):
-            undefined.append(flag[2:])
+            final[flag[2:]] = None
+    definitions = [definition for definition in final.values() if definition is not None]
+    undefined = [name for name, definition in final.items() if definition is None]
     return cpre.MacroConfiguration(
         definitions=definitions, undefined=undefined, unknown_names="undefined"
     )
@@ -405,6 +416,37 @@ def test_reference_output_extracts_pragma_lines(newline):
 )
 def test_first_error_line(stderr, expected):
     assert first_error_line(stderr, "x.c") == expected
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        ("omp   parallel\tfor ", "omp parallel for"),
+        ('message("a  b")', 'message("a  b")'),
+        ('message(  \'x\'  ,  L"a \\"  b" )', 'message( \'x\' , L"a \\"  b" )'),
+    ],
+)
+def test_pragma_payloads_keep_whitespace_inside_literals(payload, expected):
+    assert _normalize_payload(payload) == expected
+
+
+def test_pragma_payloads_with_different_string_spacing_differ():
+    assert _normalize_payload('message("a  b")') != _normalize_payload('message("a b")')
+
+
+@pytest.mark.parametrize(
+    ("flags", "source", "expected"),
+    [
+        (("-DX=1", "-UX"), "#ifdef X\nyes\n#endif\nX\n", ("X",)),
+        (("-UX", "-DX=2"), "X\n", ("2",)),
+        (("-DX=1", "-DX=2"), "X\n", ("2",)),
+        (("-DX", "-UY", "-DY=3"), "X Y\n", ("1", "3")),
+    ],
+)
+def test_configuration_applies_flags_in_order(flags, source, expected):
+    configuration = _configuration(Case(CASES / "x.c", flags))
+    result = cpre.preprocess_source(source, configuration=configuration)
+    assert tokens(result.source) == expected
 
 
 def test_configuration_maps_compiler_flags():

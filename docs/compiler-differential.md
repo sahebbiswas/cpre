@@ -23,7 +23,7 @@ Compiler output is read with its line endings normalized (Windows compilers writ
 Both outputs are normalized the same way, and only in ways that cannot change meaning:
 
 - Output is split into preprocessing tokens. Whitespace and comments between tokens are dropped, so spacing and line placement are not compared. String literals are compared exactly, so spacing produced by `#` is checked.
-- `#pragma` lines in the compiler's output, including those `_Pragma` produces, are taken out of the token stream and compared, in order and with whitespace collapsed, with the payloads cpre passes to its `pragma_handler`. The harness's handler consumes every pragma.
+- `#pragma` lines in the compiler's output, including those `_Pragma` produces, are taken out of the token stream and compared, in order and with whitespace collapsed outside string and character literals, with the payloads cpre passes to its `pragma_handler`. The harness's handler consumes every pragma.
 
 A case agrees with a reference when:
 
@@ -47,7 +47,7 @@ A case is a `.c` file in `tests/compiler_differential/cases`. Its name starts wi
 | `-Idir` | as given, relative to the cases directory | `SearchPathResolver` search path |
 | `-std=` | as given | standard macro values read from the compiler |
 
-Any other option is rejected, so a case cannot depend on something cpre is not told about. To add a case, add a file. If it differs from a compiler, fix cpre, or record the difference as described below.
+Options apply in order, as for the compiler driver, so the last `-D` or `-U` for a name wins. Any other option is rejected, so a case cannot depend on something cpre is not told about. To add a case, add a file. If it differs from a compiler, fix cpre, or record the difference as described below.
 
 Keep cases deterministic: no `__DATE__`, `__TIME__` or `__FILE__` in included headers, and nothing that depends on the target. Put a construct that differs into a case of its own, so recording it does not stop the rest of a file from being checked.
 
