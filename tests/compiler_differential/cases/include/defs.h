@@ -1,0 +1,2 @@
+#define HAVE_DEFS
+#define DEFS_VALUE (BUFFER_SIZE / 2)

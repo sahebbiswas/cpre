@@ -28,5 +28,6 @@ Use this index to choose the guide that matches your integration surface.
 - [C-GULL concrete preprocessing migration profile](cgull-migration-profile.md) — bounded `preprocess_source()`/`pcpp` replacement profile for C-GULL.
 - [C-GULL symbolic migration readiness](cgull-symbolic-migration-readiness.md) — versioned expression, structure, proof, witness, and configuration-semantics compatibility gate for replacing C-GULL's local symbolic preprocessor modules.
 - [pcpp replacement readiness](pcpp-readiness.md) — measured concrete-preprocessing compatibility gate and remaining migration boundaries.
+- [Compiler differential tests](compiler-differential.md) — how cpre's concrete preprocessing is checked against GCC and Clang, the case format, and the recorded known differences.
 
 The repository [README](../README.md) is intentionally the short release/PyPI landing page. Detailed behavior belongs in these guides so each contract has one authoritative home.

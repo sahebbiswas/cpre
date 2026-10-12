@@ -68,6 +68,13 @@ We use `tox` to run checks consistently across all supported Python versions.
   ```
   Keep every regression the search finds as an explicit `@example`.
 
+- **Compare with GCC and Clang.** `tests/test_compiler_differential.py`
+  preprocesses every case in `tests/compiler_differential/cases` with each
+  compiler found on `PATH` and with cpre, and fails on any difference that is
+  not recorded. When changing concrete preprocessing, add a case for the
+  construct you touched. See
+  [Compiler differential tests](docs/compiler-differential.md).
+
 ## Code Style
 
 - **Formatting & Linting**: We use `ruff`.

@@ -1,0 +1,2 @@
+# Differential cases test exact line endings and control characters; keep their bytes.
+tests/compiler_differential/cases/** -text
