@@ -35,6 +35,7 @@ BASE_FLAGS = ("-E", "-P", "-undef", "-nostdinc", "-x", "c")
 DEFAULT_STD = "-std=c11"
 STANDARD_MACROS = ("__STDC__", "__STDC_VERSION__", "__STDC_HOSTED__")
 DIRECTIVE = "// cpre-differential:"
+TIMEOUT = 60  # seconds for one compiler run, so a hung compiler names its case
 
 _TOKEN = re.compile(
     r"""
@@ -114,12 +115,16 @@ class Reference:
     family: str
 
     def run(self, case: Case) -> Outcome:
-        completed = subprocess.run(
-            [*self.command, *BASE_FLAGS, case.std, *_compiler_flags(case), case.name],
-            cwd=CASES,
-            capture_output=True,
-            check=False,
-        )
+        try:
+            completed = subprocess.run(
+                [*self.command, *BASE_FLAGS, case.std, *_compiler_flags(case), case.name],
+                cwd=CASES,
+                capture_output=True,
+                check=False,
+                timeout=TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            pytest.fail(f"{self.family} did not finish {case.name} within {TIMEOUT} seconds")
         if completed.returncode != 0:
             stderr = completed.stderr.decode("utf-8", "replace")
             return Outcome(
@@ -137,6 +142,7 @@ class Reference:
                 [*self.command, *BASE_FLAGS, std, str(probe)],
                 capture_output=True,
                 check=True,
+                timeout=TIMEOUT,
             )
         values = completed.stdout.decode("utf-8").split()
         return {name: value for name, value in zip(STANDARD_MACROS, values) if value != name}
@@ -155,7 +161,7 @@ def _family(command: tuple[str, ...]) -> str | None:
                 [*command, "-dM", "-E", "-x", "c", str(probe)],
                 capture_output=True,
                 check=False,
-                timeout=60,
+                timeout=TIMEOUT,
             )
         except (OSError, subprocess.TimeoutExpired):
             return None
@@ -284,7 +290,9 @@ def agrees(reference: Outcome, ours: Outcome) -> bool:
         )
     # The reference rejects the input: cpre must not claim complete output, and must
     # report the problem on the same physical line. Message wording is not compared.
-    return ours.kind != "accepted" and ours.line == reference.line
+    # A reference error we cannot place (say, in an included header) is no evidence that
+    # cpre agrees, so it does not count as a match.
+    return ours.kind != "accepted" and reference.line is not None and ours.line == reference.line
 
 
 def _report(case: Case, reference: Reference, theirs: Outcome, ours: Outcome) -> str:
