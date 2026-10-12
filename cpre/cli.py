@@ -1115,6 +1115,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         description="Analyze Boolean C/C++ preprocessor conditional directives and macros."
     )
     parser.add_argument(
+        "--version",
+        action="version",
+        version=f"cpre {__version__}",
+        help="show the installed version and exit",
+    )
+    parser.add_argument(
         "sources",
         nargs="+",
         type=Path,
