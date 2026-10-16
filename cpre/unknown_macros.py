@@ -38,7 +38,9 @@ _NOT_CONFIGURABLE = frozenset(
     {"defined", "__has_include", "__has_include_next", "__LINE__", "__FILE__", "__VA_ARGS__"}
 )
 _DEFINEDNESS_DIRECTIVES = frozenset({"ifdef", "ifndef", "elifdef", "elifndef"})
-_MACRO_DIRECTIVE_RE = re.compile(rf"{DIRECTIVE_PREFIX}{DIRECTIVE_LEADING_WHITESPACE}*(define|undef)\b(.*)$")
+_MACRO_DIRECTIVE_RE = re.compile(
+    rf"{DIRECTIVE_PREFIX}{DIRECTIVE_LEADING_WHITESPACE}*(define|undef)\b(.*)$"
+)
 
 
 class MacroUse(str, Enum):
