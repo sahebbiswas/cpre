@@ -21,7 +21,11 @@ from .model import (
     Variable,
 )
 
-DIRECTIVE_RE = re.compile(r"^\s*#\s*(if|ifdef|ifndef|elif|elifdef|elifndef|else|endif)\b(.*)$")
+DIRECTIVE_LEADING_WHITESPACE = r"[ \t\f\v]"
+DIRECTIVE_PREFIX = rf"^{DIRECTIVE_LEADING_WHITESPACE}*#"
+DIRECTIVE_RE = re.compile(
+    rf"{DIRECTIVE_PREFIX}[ \t]*(if|ifdef|ifndef|elif|elifdef|elifndef|else|endif)\b(.*)$"
+)
 
 
 def strip_comments(source: str) -> str:
@@ -217,6 +221,8 @@ def parse_source(source: str, *, distinguish_defined: bool = False) -> Condition
 
 
 __all__ = [
+    "DIRECTIVE_LEADING_WHITESPACE",
+    "DIRECTIVE_PREFIX",
     "DIRECTIVE_RE",
     "LogicalLine",
     "directive_expression",
