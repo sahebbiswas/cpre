@@ -48,7 +48,7 @@ from .model import (
     Variable,
 )
 from .numeric_conditions import NumericConditionError, evaluate_numeric_condition
-from .parser import logical_lines, parse_source
+from .parser import DIRECTIVE_PREFIX, logical_lines, parse_source
 from .robdd import BDD, AnalysisBudget, AnalysisLimitExceeded, ResourceLimits
 from .unknown_macros import UnknownMacro, _unresolved_macros
 
@@ -469,7 +469,7 @@ def _include_header(
     operand is macro expanded and must produce one of those forms.
     """
     spliced = re.sub(r"\\(?:\r\n|\r|\n)", "", raw).rstrip("\r\n")
-    prefix = re.match(r"\s*#\s*(?:include_next|include|import)\b[ \t\f\v]*", spliced)
+    prefix = re.match(r"[ \t\f\v]*#[ \t]*(?:include_next|include|import)\b[ \t\f\v]*", spliced)
     if prefix is not None:
         rest = spliced[prefix.end() :]
         direct = re.match(r'"([^"\r\n]*)"|<([^>\r\n]*)>', rest)
@@ -1100,7 +1100,7 @@ def _preprocess_unit(
                     logical_file_literal,
                 )
             line_state = logical_states[current_line]
-            is_directive = re.match(r"^\s*#", line.text) is not None
+            is_directive = re.match(rf"{DIRECTIVE_PREFIX}", line.text) is not None
             if is_directive:
                 environment.logical_override = None
                 expansion.flush(environment)
@@ -1130,7 +1130,7 @@ def _preprocess_unit(
                 frame[2] = active
                 continue
             match = re.match(
-                r"^\s*#\s*(endif|define|undef|line|include|include_next|import)\b(.*)$",
+                rf"{DIRECTIVE_PREFIX}[ \t]*(endif|define|undef|line|include|include_next|import)\b(.*)$",
                 line.text,
             )
             if match and match[1] == "endif":
