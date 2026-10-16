@@ -17,9 +17,9 @@ def test_non_ascii_and_non_whitespace_prefixes_do_not_start_directives() -> None
         assert cpre.unknown_macros_in_source(source) == ()
 
 
-def test_allowed_directive_leading_whitespace_is_consistent() -> None:
-    for prefix in ("", "\f", "\v"):
-        source = f"{prefix}#if 0\nhidden\n#endif\n"
+def test_allowed_directive_whitespace_before_and_after_hash_is_consistent() -> None:
+    for prefix, after_hash in (("", ""), ("\f", ""), ("\v", ""), ("", "\f"), ("", "\v")):
+        source = f"{prefix}#{after_hash}if 0\nhidden\n{prefix}#{after_hash}endif\n"
 
         assert [item.kind for item in cpre.parse_conditionals(source).directives] == [
             "if",
