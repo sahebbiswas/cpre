@@ -23,6 +23,7 @@ from .model import (
     Predicate,
     Variable,
 )
+from .parser import DIRECTIVE_LEADING_WHITESPACE
 
 
 @dataclass(frozen=True)
@@ -375,7 +376,7 @@ def parse_conditionals(
         cursor += len(line_text)
         masked_line = recognition_mask[line_start:cursor]
         match = re.match(
-            r"^[ \t\v\f\r]*#[ \t]*([A-Za-z_][A-Za-z0-9_]*)",
+            rf"^{DIRECTIVE_LEADING_WHITESPACE}*#{DIRECTIVE_LEADING_WHITESPACE}*([A-Za-z_][A-Za-z0-9_]*)",
             masked_line,
         )
         if match is None or match[1] not in _FORMS:

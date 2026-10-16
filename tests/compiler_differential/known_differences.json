@@ -13,13 +13,6 @@
     "cpre": "incomplete at line 1: unsupported_condition_expression",
     "reason": "The value of an ordinary character constant depends on the implementation's execution character set, so cpre declines to evaluate it instead of assuming ASCII."
   },
-  "linemodel_nel.c": {
-    "issue": "#148",
-    "kind": "bug",
-    "reference": "accepted",
-    "cpre": "rejected at line 1: ParseError: #if has no matching #endif",
-    "reason": "Python's \\s matches NEL (U+0085), so cpre treats '\\u0085#if' as a directive; compilers treat it as ordinary text."
-  },
   "macro_stringify_indirect.c": {
     "issue": "#149",
     "kind": "bug",
