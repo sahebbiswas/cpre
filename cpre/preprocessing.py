@@ -382,9 +382,7 @@ def _parse_line_directive(
     state: _LogicalPreprocessingState,
     budget: AnalysisBudget,
 ) -> tuple[int, str | None]:
-    match = re.fullmatch(
-        rf"#{DIRECTIVE_LEADING_WHITESPACE}*line\b(.*)", concrete, re.DOTALL
-    )
+    match = re.fullmatch(rf"#{DIRECTIVE_LEADING_WHITESPACE}*line\b(.*)", concrete, re.DOTALL)
     if match is None:
         raise ValueError("malformed #line directive")
     tokens = _line_directive_operands(match[1], environment, state, budget)
