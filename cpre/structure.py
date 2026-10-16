@@ -13,7 +13,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from ._lines import LINE_BREAK, line_starts, split_lines
-from .parser import DIRECTIVE_LEADING_WHITESPACE
 from .model import (
     Conjunction,
     Constant,
@@ -24,6 +23,7 @@ from .model import (
     Predicate,
     Variable,
 )
+from .parser import DIRECTIVE_LEADING_WHITESPACE
 
 
 @dataclass(frozen=True)
