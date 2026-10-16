@@ -377,7 +377,7 @@ def _parse_line_directive(
     state: _LogicalPreprocessingState,
     budget: AnalysisBudget,
 ) -> tuple[int, str | None]:
-    match = re.fullmatch(r"#\s*line\b(.*)", concrete, re.DOTALL)
+    match = re.fullmatch(rf"#{DIRECTIVE_LEADING_WHITESPACE}*line\b(.*)", concrete, re.DOTALL)
     if match is None:
         raise ValueError("malformed #line directive")
     tokens = _line_directive_operands(match[1], environment, state, budget)
@@ -444,7 +444,7 @@ def _unexpanded_predefined_macro(
     return None
 
 
-_INCLUDE_DIRECTIVE_RE = re.compile(r"#\s*(include_next|include|import)\b(.*)", re.DOTALL)
+_INCLUDE_DIRECTIVE_RE = re.compile(rf"#{DIRECTIVE_LEADING_WHITESPACE}*(include_next|include|import)\b(.*)", re.DOTALL)
 
 
 def _include_directive(concrete: str) -> tuple[str, str] | None:
@@ -1170,7 +1170,7 @@ def _preprocess_unit(
                             raise ValueError("ambiguous directive after physical line splicing")
                     else:
                         definition_match = re.fullmatch(
-                            r"#\s*(define|undef)\b(.*)", concrete, re.DOTALL
+                            rf"#{DIRECTIVE_LEADING_WHITESPACE}*(define|undef)\b(.*)", concrete, re.DOTALL
                         )
                         if definition_match is None or definition_match[1] != kind:
                             raise ValueError("ambiguous directive after physical line splicing")
@@ -1217,11 +1217,11 @@ def _preprocess_unit(
                 concrete = expansion.directive_text(
                     offsets[current_line - 1], offsets[ends[current_line]]
                 )
-                if re.fullmatch(r"#\s*", concrete, re.DOTALL):
+                if re.fullmatch(rf"#{DIRECTIVE_LEADING_WHITESPACE}*", concrete, re.DOTALL):
                     blank(current_line, ends[current_line])
                     continue
                 if identity is not None and includes is not None:
-                    if re.fullmatch(r"#\s*pragma\s+once", concrete):
+                    if re.fullmatch(rf"#{DIRECTIVE_LEADING_WHITESPACE}*pragma[ \t\f\v]+once", concrete):
                         includes.once.add(identity)
                         blank(current_line, ends[current_line])
                         continue
@@ -1231,7 +1231,7 @@ def _preprocess_unit(
                         if include_line(directive[0], directive[1], current_line, line_state):
                             continue
                         break
-                directive_match = re.match(r"#\s*([A-Za-z_]\w*)\b", concrete)
+                directive_match = re.match(rf"#{DIRECTIVE_LEADING_WHITESPACE}*([A-Za-z_]\w*)\b", concrete)
                 if directive_match is not None:
                     message = (
                         f"#{directive_match[1]} preprocessing directive is not supported "
