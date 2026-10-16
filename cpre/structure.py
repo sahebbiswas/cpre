@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from ._lines import LINE_BREAK, line_starts, split_lines
+from .parser import DIRECTIVE_LEADING_WHITESPACE
 from .model import (
     Conjunction,
     Constant,
@@ -375,7 +376,7 @@ def parse_conditionals(
         cursor += len(line_text)
         masked_line = recognition_mask[line_start:cursor]
         match = re.match(
-            r"^[ \t\v\f\r]*#[ \t]*([A-Za-z_][A-Za-z0-9_]*)",
+            rf"^{DIRECTIVE_LEADING_WHITESPACE}*#[ \t]*([A-Za-z_][A-Za-z0-9_]*)",
             masked_line,
         )
         if match is None or match[1] not in _FORMS:
