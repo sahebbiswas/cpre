@@ -70,4 +70,3 @@ A recorded case is still run, and it fails if the difference changes in any way,
 | `macro_stringify_indirect.c` | bug | #149 | Stringifying an argument passed in by another macro drops the spaces between its tokens. |
 | `pragma_operator_indirect.c` | bug | #149 | The same bug in a `_Pragma` payload built through two macros. |
 | `macro_va_opt_omitted.c` | gap | #151 | A C23 call that omits the variadic argument entirely is incomplete. |
-| `linemodel_nel.c` | bug | #148 | NEL (U+0085) before `#` is treated as whitespace, so the line becomes a directive. |
