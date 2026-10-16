@@ -24,7 +24,8 @@ from .model import (
 DIRECTIVE_LEADING_WHITESPACE = r"[ \t\f\v]"
 DIRECTIVE_PREFIX = rf"^{DIRECTIVE_LEADING_WHITESPACE}*#"
 DIRECTIVE_RE = re.compile(
-    rf"{DIRECTIVE_PREFIX}{DIRECTIVE_LEADING_WHITESPACE}*(if|ifdef|ifndef|elif|elifdef|elifndef|else|endif)\b(.*)$"
+    rf"{DIRECTIVE_PREFIX}{DIRECTIVE_LEADING_WHITESPACE}*"
+    r"(if|ifdef|ifndef|elif|elifdef|elifndef|else|endif)\b(.*)$"
 )
 
 
