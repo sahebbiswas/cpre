@@ -20,7 +20,13 @@ from .errors import AnalysisError, ErrorCode, SourceLocation
 from .expansion import Expansion, ExpansionError, Token, tokenize
 from .macros import MacroDefinition, MacroEnvironment, _apply_macro_directive
 from .model import ConditionalBranch, ConditionError
-from .parser import DIRECTIVE_LEADING_WHITESPACE, DIRECTIVE_PREFIX, DIRECTIVE_RE, logical_lines, parse_source
+from .parser import (
+    DIRECTIVE_LEADING_WHITESPACE,
+    DIRECTIVE_PREFIX,
+    DIRECTIVE_RE,
+    logical_lines,
+    parse_source,
+)
 from .robdd import AnalysisBudget, AnalysisLimitExceeded
 
 if TYPE_CHECKING:
