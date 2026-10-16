@@ -34,7 +34,7 @@ from .model import (
     SymbolicLiteral,
     Variable,
 )
-from .parser import DIRECTIVE_PREFIX, logical_lines
+from .parser import DIRECTIVE_LEADING_WHITESPACE, DIRECTIVE_PREFIX, logical_lines
 from .robdd import (
     BDD,
     AnalysisBudget,
@@ -414,7 +414,7 @@ def analyze_macros(
     results: list[MacroAnalysisResult] = []
 
     for line in logical_lines(source):
-        match = re.match(rf"{DIRECTIVE_PREFIX}[ \t]*define\b(.*)$", line.text)
+        match = re.match(rf"{DIRECTIVE_PREFIX}{DIRECTIVE_LEADING_WHITESPACE}*define\b(.*)$", line.text)
         if match is None:
             continue
         remainder = match.group(1)
