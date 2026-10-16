@@ -414,7 +414,9 @@ def analyze_macros(
     results: list[MacroAnalysisResult] = []
 
     for line in logical_lines(source):
-        match = re.match(rf"{DIRECTIVE_PREFIX}{DIRECTIVE_LEADING_WHITESPACE}*define\b(.*)$", line.text)
+        match = re.match(
+            rf"{DIRECTIVE_PREFIX}{DIRECTIVE_LEADING_WHITESPACE}*define\b(.*)$", line.text
+        )
         if match is None:
             continue
         remainder = match.group(1)
