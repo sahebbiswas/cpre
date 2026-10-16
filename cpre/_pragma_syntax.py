@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from ._lines import split_lines
 from .errors import AnalysisError, ErrorCode, SourceLocation
 from .expansion import SourceMapping, tokenize
-from .parser import DIRECTIVE_PREFIX, logical_lines
+from .parser import DIRECTIVE_LEADING_WHITESPACE, DIRECTIVE_PREFIX, logical_lines
 
 
 @dataclass(frozen=True)
@@ -76,7 +76,7 @@ def _mask_source_pragmas(
     pragmas: list[_SourcePragma] = []
 
     for index, line in enumerate(logical):
-        match = re.match(rf"{DIRECTIVE_PREFIX}[ \t]*pragma\b(.*)$", line.text, re.DOTALL)
+        match = re.match(rf"{DIRECTIVE_PREFIX}{DIRECTIVE_LEADING_WHITESPACE}*pragma\b(.*)$", line.text, re.DOTALL)
         if match is None:
             continue
         end_line = logical[index + 1].start_line - 1 if index + 1 < len(logical) else len(physical)
