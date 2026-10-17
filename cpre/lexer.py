@@ -177,7 +177,15 @@ def strip_comments(source: str) -> str:
     for match in _REGIONS.finditer(text):
         if match.lastgroup != "comment":
             continue
-        for position in range(offsets.physical(match.start()), offsets.physical_end(match.end())):
+        start = offsets.physical(match.start())
+        end = offsets.physical_end(match.end())
+        comment = match.group()
+        if match.end() == len(text) and not (
+            len(comment) >= 4 and comment.startswith("/*") and comment.endswith("*/")
+        ):
+            # A comment that runs to the end of the source also covers a final splice.
+            end = len(source)
+        for position in range(start, end):
             if characters[position] not in "\r\n":
                 characters[position] = " "
     return "".join(characters)

@@ -79,6 +79,19 @@ def test_tokenize_reports_physical_offsets_across_a_splice():
     assert source[tokens[1].start] == "+"
 
 
+@pytest.mark.parametrize("splice", ["\\\n", "\\ \n", "\\\t\r\n"])
+@pytest.mark.parametrize("opener", ["/* c ", "// c "])
+def test_comment_that_runs_to_the_end_masks_a_final_splice(opener, splice):
+    source = f"x {opener}{splice}"
+    stripped = strip_comments(source)
+    assert len(stripped) == len(source)
+    assert stripped.strip(" \r\n\t") == "x"
+
+
+def test_terminated_block_comment_before_a_final_splice_is_unchanged():
+    assert strip_comments("x /* c */\\\n") == "x" + " " * 8 + "\\\n"
+
+
 # --- issue #157: backslash, blanks, newline ---------------------------------------
 
 
