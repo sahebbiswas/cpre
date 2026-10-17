@@ -32,7 +32,8 @@ from cpre.lexer import (
 from cpre.model import DirectiveStructureError
 from cpre.parser import parse_source
 
-CASES = sorted((Path(__file__).parent / "compiler_differential" / "cases").glob("*.c"))
+CASES_DIR = Path(__file__).parent / "compiler_differential" / "cases"
+CASES = sorted(CASES_DIR.glob("*.c"))
 
 FRAGMENTS = [
     "#if A\n", "#ifdef B\n", "#ifndef C\n", "#elif D\n", "#else\n", "#endif\n",
@@ -115,6 +116,24 @@ def test_157_ifdef_inside_comment_continuation_is_not_a_directive():
     source = "// c \\ \n#if 1\nx\n"
     assert not cpre.parse_conditionals(source).directives
     assert parse_source(source).groups == []
+
+
+@pytest.mark.parametrize("blanks", ["", " ", "\t "])
+def test_has_include_invocation_split_by_a_splice_keeps_the_rest_of_the_condition(blanks):
+    source = (
+        f'#define OTHER 0\n#if __has_include(\\{blanks}\n"h") && OTHER\nyes\n#else\nno\n#endif\n'
+    )
+    result = cpre.preprocess_source(source, include_query=lambda query: True)
+    assert result.complete
+    assert "no" in result.source.split() and "yes" not in result.source.split()
+
+
+def test_trailing_blank_splice_cases_keep_their_blanks():
+    """The cases that test issue #157 are only meaningful with blanks after the backslash."""
+    names = ["directive", "macro_body", "line_comment", "token"]
+    for name in names:
+        data = (CASES_DIR / f"splice_trailing_space_{name}.c").read_bytes()
+        assert re.search(rb"\\[ \t\f\v]+\r?\n", data), name
 
 
 # --- bugs the shared front end fixes by construction ------------------------------

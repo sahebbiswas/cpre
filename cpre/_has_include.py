@@ -10,7 +10,7 @@ from ._lines import line_starts
 from .errors import AnalysisError, ErrorCode, SourceLocation
 from .expansion import Expansion
 from .includes import IncludeForm
-from .lexer import logical_lines
+from .lexer import SPLICE, logical_lines
 from .lexer import scan as scan_tokens
 from .macros import MacroDefinition, MacroEnvironment, MacroState
 from .robdd import AnalysisBudget
@@ -181,11 +181,12 @@ def render(source: str, occurrences: tuple[Occurrence, ...]) -> str:
         writable: list[int] = []
         position = occurrence.start
         while position < occurrence.end:
-            char = source[position]
-            if char in "\r\n":
-                position += 1
+            splice = SPLICE.match(source, position, occurrence.end)
+            if splice is not None:
+                # A whole splice stays: backslash, any blanks, and the line break.
+                position = splice.end()
                 continue
-            if char == "\\" and position + 1 < occurrence.end and source[position + 1] in "\r\n":
+            if source[position] in "\r\n":
                 position += 1
                 continue
             writable.append(position)
