@@ -141,10 +141,10 @@ def test_bind_arguments_checks_the_argument_count():
 # Stage 3: substitution
 
 
-def substitute(definition, raw=None, expanded=None, source=""):
+def substitute(definition, raw=None, expanded=None):
     replacement = parse_replacement(definition)
     raw = raw or {}
-    return Substituter(source).substitute(
+    return Substituter().substitute(
         replacement.body,
         definition,
         raw,
@@ -176,16 +176,14 @@ def test_substitute_uses_raw_arguments_beside_paste():
 def test_substitute_stringifies_the_invocation_spelling():
     source = "F(a   /* c */ b)"
     tokens = [t for t in tokenize(source) if t.kind not in {"space", "comment"}]
-    out = substitute(
-        macro("S", "#x", ("x",)), {"x": tokens[2:4]}, {"x": tokens[2:4]}, source=source
-    )
+    out = substitute(macro("S", "#x", ("x",)), {"x": tokens[2:4]}, {"x": tokens[2:4]})
     assert texts(out) == ['"a b"']
 
 
 def test_substitute_escapes_quotes_and_backslashes_when_stringifying():
     source = r'"a\n"'
     tokens = significant(source)
-    out = substitute(macro("S", "#x", ("x",)), {"x": tokens}, {"x": tokens}, source=source)
+    out = substitute(macro("S", "#x", ("x",)), {"x": tokens}, {"x": tokens})
     assert texts(out) == [r'"\"a\\n\""']
 
 
@@ -227,7 +225,7 @@ def test_substitute_expands_va_opt_only_for_a_non_empty_variadic_argument():
 
 def expand(text: str, *definitions: MacroDefinition, limit: int = 10_000) -> list[str]:
     budget = AnalysisBudget(limit)
-    rescanner = Rescanner(budget, Substituter(text), ReplacementCache())
+    rescanner = Rescanner(budget, Substituter(), ReplacementCache())
     out = rescanner.expand(significant(text), Environment(*definitions))
     return texts([t for t in out if t.kind != "empty"])
 
@@ -262,7 +260,7 @@ def test_rescan_rejects_an_assumed_macro_with_unknown_replacement():
         def get(self, name):
             return MacroState(defined=True) if name == "X" else MacroState()
 
-    rescanner = Rescanner(AnalysisBudget(100), Substituter("X"), ReplacementCache())
+    rescanner = Rescanner(AnalysisBudget(100), Substituter(), ReplacementCache())
     with pytest.raises(ExpansionError, match="assumed macro X is unknown"):
         rescanner.expand(significant("X"), Assumed())
 
@@ -274,7 +272,7 @@ def test_rescan_rejects_a_stray_va_opt():
 
 def test_rescan_records_the_offset_it_reached():
     budget = AnalysisBudget(100)
-    rescanner = Rescanner(budget, Substituter("a b"), ReplacementCache())
+    rescanner = Rescanner(budget, Substituter(), ReplacementCache())
     rescanner.expand(significant("a b"), Environment())
     assert rescanner.current_offset == 2
 

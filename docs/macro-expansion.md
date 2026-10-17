@@ -20,7 +20,7 @@ XSTR(X)     /* -> "7" */
 CAT(X, 7)   /* -> X7 -> 9 */
 ```
 
-Stringification removes leading/trailing preprocessing whitespace, collapses intervening whitespace/comments to a single space, and escapes backslashes and double quotes so the result is a valid string-literal token.
+Stringification removes leading/trailing preprocessing whitespace, collapses intervening whitespace/comments to a single space, and escapes backslashes and double quotes so the result is a valid string-literal token. Whether two tokens are separated is a property of the tokens themselves (`Token.space_before`), recorded where they were written and carried through expansion: an argument that reached `#` through another macro, a macro's replacement list, or a `__VA_OPT__` group is spaced as it was written (an expansion takes the spacing of the invocation it replaces, and an argument's first token the spacing of the parameter it fills), never from the text around the call. For example `#define D(x) S(x)` with `#define S(x) #x` gives `D(a b)` the value `"a b"`, and `#__VA_OPT__(a b)` is `"a b"` wherever the macro is called.
 
 Token pasting joins the boundary preprocessing tokens, then retokenizes the result. The paste must produce exactly one preprocessing token; otherwise preprocessing returns an atomic incomplete result with `ErrorCode.UNSUPPORTED_MACRO_EXPANSION` and an `invalid token paste` diagnostic. Empty macro arguments act as placemarkers. Placemarkers are retained through chained paste operations and removed before rescanning, including when they originate inside `__VA_OPT__`.
 

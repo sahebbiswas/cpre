@@ -41,7 +41,7 @@ class Expansion:
         self.locator = SourceLocator(source)
         self.edits: list[Edit] = []
         self.replacements = ReplacementCache()
-        self.rescanner = Rescanner(budget, Substituter(source), self.replacements)
+        self.rescanner = Rescanner(budget, Substituter(), self.replacements)
 
     @property
     def current_offset(self) -> int:

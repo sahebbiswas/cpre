@@ -118,7 +118,15 @@ def parse_replacement(definition: MacroDefinition) -> Replacement:
             continue
         content, cursor = _read_va_opt(tokens, index, definition)
         binding = f"\x00va_opt_{len(va_opts)}"
-        body.append(Token(binding, VA_OPT_KIND, token.start, tokens[cursor].end))
+        body.append(
+            Token(
+                binding,
+                VA_OPT_KIND,
+                token.start,
+                tokens[cursor].end,
+                space_before=token.space_before,
+            )
+        )
         va_opts[binding] = content
         index = cursor + 1
     return Replacement(body, va_opts)

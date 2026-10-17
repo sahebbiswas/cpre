@@ -14,25 +14,11 @@
     "cpre": "incomplete at line 1: unsupported_condition_expression",
     "reason": "The value of an ordinary character constant depends on the implementation's execution character set, so cpre declines to evaluate it instead of assuming ASCII."
   },
-  "macro_stringify_indirect.c": {
-    "issue": "#149",
-    "kind": "bug",
-    "reference": "accepted",
-    "cpre": "accepted: const char * s = \"ab\" ;",
-    "reason": "Stringifying an argument passed in by another macro drops the spaces between its tokens."
-  },
   "macro_va_opt_omitted.c": {
     "issue": "#151",
     "kind": "gap",
     "reference": "accepted",
     "cpre": "incomplete at line 3: unsupported_macro_expansion",
     "reason": "C23 lets a variadic macro call omit the variadic argument entirely; cpre requires it, even if empty."
-  },
-  "pragma_operator_indirect.c": {
-    "issue": "#149",
-    "kind": "bug",
-    "reference": "accepted",
-    "cpre": "accepted: #pragma ompparallelfor",
-    "reason": "Same stringification bug: the _Pragma payload built through two macros loses its spaces."
   }
 }
