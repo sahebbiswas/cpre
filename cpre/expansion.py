@@ -1,44 +1,32 @@
-"""Token-aware, bounded macro expansion and physical source mappings."""
+"""Token-aware, bounded macro expansion and physical source mappings.
+
+``Expansion`` is the facade over the expansion stages, each in its own module with
+explicit inputs and outputs:
+
+1. ``_replacement``: tokenize a replacement list and lift its ``__VA_OPT__`` groups;
+2. ``_arguments``: collect an invocation's arguments and bind them to parameters;
+3. ``_substitution``: apply ``#``, ``##``, ``__VA_OPT__`` and parameter replacement;
+4. ``_rescan``: prescan arguments and rescan the result against the macro environment;
+5. ``_expansion_output``: merge the generated tokens into edits and render source maps.
+
+This module keeps the buffering of source lines between directives and the adjacency
+rules for invocations that straddle lines.
+"""
 
 from __future__ import annotations
 
-import re
 from bisect import bisect_right
-from collections import deque
-from collections.abc import Generator
-from dataclasses import dataclass, replace
 
-from ._lines import LINE_BREAK, line_starts
+from ._expansion_output import Edit, SourceLocator, SourceMapping, merged_edits, render
+from ._replacement import ExpansionError, ReplacementCache
+from ._rescan import Rescanner
+from ._substitution import Substituter
 from .errors import SourceLocation
-from .lexer import SPLICE, Token, tokenize
+from .lexer import Token, tokenize
 from .macros import MacroDefinition, MacroLookup
 from .robdd import AnalysisBudget, AnalysisLimitExceeded
 
-_VA_OPT_KIND = "va_opt"
-
-
-@dataclass(frozen=True)
-class SourceMapping:
-    """Half-open character offsets; expanded spans map to the invocation range.
-
-    Unexpanded spans map one-to-one. Locations are one-based physical positions;
-    source_end and end are exclusive. Offsets count Python characters, not bytes.
-    ``source_identity`` is ``None`` for the primary source and otherwise names the
-    resolved included source that the offsets and locations refer to.
-    """
-
-    output_start: int
-    output_end: int
-    source_start: int
-    source_end: int
-    start: SourceLocation
-    end: SourceLocation
-    expanded: bool = False
-    source_identity: str | None = None
-
-
-class ExpansionError(ValueError):
-    """An unsupported or malformed invocation encountered during expansion."""
+__all__ = ["Expansion", "ExpansionError", "SourceMapping", "tokenize"]
 
 
 class Expansion:
@@ -50,17 +38,22 @@ class Expansion:
         self.trailing_function: str | None = None
         self.pending_start: int | None = None
         self.pending_end = 0
-        self.current_offset = 0
-        self.line_starts = line_starts(source)
-        self.edits: list[tuple[int, int, str]] = []
-        self.cache: dict[
-            tuple[str, tuple[str, ...] | None, bool],
-            tuple[list[Token], dict[str, list[Token]]],
-        ] = {}
+        self.locator = SourceLocator(source)
+        self.edits: list[Edit] = []
+        self.replacements = ReplacementCache()
+        self.rescanner = Rescanner(budget, Substituter(source), self.replacements)
+
+    @property
+    def current_offset(self) -> int:
+        """Offset of the token being expanded, for locating budget and error reports."""
+        return self.rescanner.current_offset
+
+    @current_offset.setter
+    def current_offset(self, offset: int) -> None:
+        self.rescanner.current_offset = offset
 
     def location(self, offset: int) -> SourceLocation:
-        index = bisect_right(self.line_starts, offset) - 1
-        return SourceLocation(index + 1, offset - self.line_starts[index] + 1)
+        return self.locator.location(offset)
 
     def directive_text(self, start: int, end: int) -> str:
         first = bisect_right(self.starts, start - 1)
@@ -71,411 +64,10 @@ class Expansion:
 
     def validate_definition(self, definition: MacroDefinition) -> None:
         """Validate replacement-list constructs whose legality is definition-local."""
-        if definition.name == "__VA_OPT__":
-            raise ExpansionError("__VA_OPT__ cannot be used as a macro name")
-        if definition.parameters is not None and "__VA_OPT__" in definition.parameters:
-            raise ExpansionError(f"__VA_OPT__ cannot be a named parameter: {definition.name}")
-        self._replacement(definition)
-
-    def _validate_va_opt_content(self, content: list[Token], definition: MacroDefinition) -> None:
-        """Validate #/## placement inside a va-opt replacement list."""
-        if not content:
-            return
-        if self._paste_operator(content[0]) or self._paste_operator(content[-1]):
-            raise ExpansionError(
-                f"token paste operator cannot appear at an edge of __VA_OPT__ in {definition.name}"
-            )
-        parameters = set(definition.parameters or ()) | {"__VA_ARGS__"}
-        for index, part in enumerate(content):
-            if self._paste_operator(part):
-                if index + 1 >= len(content) or self._paste_operator(content[index + 1]):
-                    raise ExpansionError(
-                        f"invalid token paste placement in __VA_OPT__ of {definition.name}"
-                    )
-                continue
-            if self._stringify_operator(part):
-                if index + 1 >= len(content):
-                    raise ExpansionError(
-                        f"stringification operator in __VA_OPT__ of {definition.name} "
-                        "is not followed by a parameter"
-                    )
-                operand = content[index + 1]
-                if operand.kind != "identifier" or operand.text not in parameters:
-                    raise ExpansionError(
-                        f"stringification operator in __VA_OPT__ of {definition.name} "
-                        "is not followed by a parameter"
-                    )
-
-    def _replacement(
-        self, definition: MacroDefinition
-    ) -> tuple[list[Token], dict[str, list[Token]]]:
-        key = (definition.replacement, definition.parameters, definition.variadic)
-        if key in self.cache:
-            return self.cache[key]
-
-        tokens = [t for t in tokenize(definition.replacement) if t.kind not in {"space", "comment"}]
-        body: list[Token] = []
-        va_opts: dict[str, list[Token]] = {}
-        index = 0
-        occurrence = 0
-        while index < len(tokens):
-            token = tokens[index]
-            if token.kind != "identifier" or token.text != "__VA_OPT__":
-                body.append(token)
-                index += 1
-                continue
-            if definition.parameters is None or not definition.variadic:
-                raise ExpansionError(
-                    f"__VA_OPT__ requires a variadic function-like macro: {definition.name}"
-                )
-            if index + 1 >= len(tokens) or tokens[index + 1].text != "(":
-                raise ExpansionError(
-                    f"__VA_OPT__ in {definition.name} must be followed by a parenthesized token sequence"
-                )
-
-            depth = 0
-            cursor = index + 2
-            content: list[Token] = []
-            while cursor < len(tokens):
-                current = tokens[cursor]
-                if current.kind == "identifier" and current.text == "__VA_OPT__":
-                    raise ExpansionError(f"nested __VA_OPT__ is not allowed in {definition.name}")
-                if current.text == "(":
-                    depth += 1
-                elif current.text == ")":
-                    if depth == 0:
-                        break
-                    depth -= 1
-                content.append(current)
-                cursor += 1
-            if cursor >= len(tokens):
-                raise ExpansionError(f"unterminated __VA_OPT__ in {definition.name}")
-
-            self._validate_va_opt_content(content, definition)
-            binding = f"\x00va_opt_{occurrence}"
-            body.append(Token(binding, _VA_OPT_KIND, token.start, tokens[cursor].end))
-            va_opts[binding] = content
-            occurrence += 1
-            index = cursor + 1
-
-        self.cache[key] = (body, va_opts)
-        return body, va_opts
-
-    def _arguments(
-        self, pending: deque[Token], name: str
-    ) -> tuple[list[list[Token]], list[Token], Token]:
-        pending.popleft()  # opening parenthesis
-        arguments = [[]]
-        separators = []
-        depth = 0
-        while pending:
-            token = pending.popleft()
-            self.budget.consume()
-            if token.text == ")" and depth == 0:
-                return arguments, separators, token
-            if token.text == "," and depth == 0:
-                separators.append(token)
-                arguments.append([])
-                continue
-            if token.text == "(":
-                depth += 1
-            elif token.text == ")":
-                depth -= 1
-            arguments[-1].append(token)
-        raise ExpansionError(
-            f"unterminated invocation of {name} (possibly interrupted by a directive)"
-        )
-
-    @staticmethod
-    def _paste_operator(token: Token) -> bool:
-        return token.kind == "other" and token.text in {"##", "%:%:"}
-
-    @staticmethod
-    def _stringify_operator(token: Token) -> bool:
-        return token.kind == "other" and token.text in {"#", "%:"}
-
-    def _stringify(self, tokens: list[Token], start: int, end: int) -> Token:
-        """Stringify an unexpanded argument using its invocation spelling."""
-        pieces: list[str] = []
-        previous: Token | None = None
-        for token in tokens:
-            if token.kind == "empty":
-                continue
-            if previous is not None:
-                gap = ""
-                if not previous.generated and not token.generated and previous.end <= token.start:
-                    gap = SPLICE.sub("", self.source[previous.end : token.start])
-                if gap and (re.search(r"\s", gap) or "/*" in gap or "//" in gap):
-                    pieces.append(" ")
-            pieces.append(token.text)
-            previous = token
-        spelling = "".join(pieces).strip()
-        spelling = spelling.replace("\\", "\\\\").replace('"', '\\"')
-        return Token(f'"{spelling}"', "literal", start, end, generated=True)
-
-    def _paste(
-        self,
-        left: list[Token],
-        right: list[Token],
-        definition: MacroDefinition,
-        start: int,
-        end: int,
-    ) -> list[Token]:
-        """Paste boundary tokens while preserving placemarkers until rescanning."""
-        if not left:
-            return right
-        if not right:
-            return left
-        left_token = left[-1]
-        right_token = right[0]
-        if left_token.kind == "empty" and right_token.kind == "empty":
-            marker = Token("", "empty", start, end, left_token.hidden | right_token.hidden, True)
-            return left[:-1] + [marker] + right[1:]
-        if left_token.kind == "empty":
-            return left[:-1] + right
-        if right_token.kind == "empty":
-            return left + right[1:]
-        text = left_token.text + right_token.text
-        tokens = [token for token in tokenize(text) if token.kind not in {"space", "comment"}]
-        if len(tokens) != 1 or tokens[0].text != text:
-            raise ExpansionError(
-                f"invalid token paste in {definition.name}: {left_token.text!r} ## {right_token.text!r}"
-            )
-        merged = Token(
-            text, tokens[0].kind, start, end, left_token.hidden | right_token.hidden, True
-        )
-        return left[:-1] + [merged] + right[1:]
-
-    def _substitute(
-        self,
-        body: list[Token],
-        definition: MacroDefinition,
-        raw: dict[str, list[Token]],
-        expanded: dict[str, list[Token]],
-        start: int,
-        end: int,
-        va_opts: dict[str, list[Token]] | None = None,
-    ) -> list[Token]:
-        """Apply #/## and parameter substitution before the replacement rescan."""
-        if va_opts:
-            va_args = expanded.get("__VA_ARGS__", ())
-            active = any(token.kind != "empty" for token in va_args)
-            raw = dict(raw)
-            expanded = dict(expanded)
-            for binding, content in va_opts.items():
-                replacement = (
-                    self._substitute(content, definition, raw, expanded, start, end)
-                    if active
-                    else []
-                )
-                raw[binding] = replacement
-                expanded[binding] = replacement
-
-        parameters = set(raw)
-        elements: list[list[Token] | str] = []
-        index = 0
-        while index < len(body):
-            part = body[index]
-            if self._stringify_operator(part) and definition.parameters is not None:
-                if index + 1 >= len(body):
-                    raise ExpansionError(
-                        f"stringification operator in {definition.name} is not followed by a parameter"
-                    )
-                operand = body[index + 1]
-                if (
-                    operand.kind not in {"identifier", _VA_OPT_KIND}
-                    or operand.text not in parameters
-                ):
-                    raise ExpansionError(
-                        f"stringification operator in {definition.name} is not followed by a parameter"
-                    )
-                elements.append([self._stringify(raw[operand.text], start, end)])
-                index += 2
-                continue
-            if self._paste_operator(part):
-                elements.append("##")
-                index += 1
-                continue
-            if part.kind in {"identifier", _VA_OPT_KIND} and part.text in parameters:
-                adjacent_paste = (index > 0 and self._paste_operator(body[index - 1])) or (
-                    index + 1 < len(body) and self._paste_operator(body[index + 1])
-                )
-                value = list(raw[part.text] if adjacent_paste else expanded[part.text])
-                if adjacent_paste and not value:
-                    value = [Token("", "empty", start, end, generated=True)]
-                elements.append(value)
-            else:
-                elements.append([part])
-            index += 1
-
-        if not elements:
-            return []
-        if elements[0] == "##" or elements[-1] == "##":
-            raise ExpansionError(
-                f"token paste operator cannot appear at an edge of {definition.name}"
-            )
-        result = elements[0]
-        if not isinstance(result, list):
-            raise ExpansionError(f"invalid token paste placement in {definition.name}")
-        index = 1
-        while index < len(elements):
-            item = elements[index]
-            if item == "##":
-                if index + 1 >= len(elements) or elements[index + 1] == "##":
-                    raise ExpansionError(f"invalid token paste placement in {definition.name}")
-                right = elements[index + 1]
-                assert isinstance(right, list)
-                result = self._paste(result, right, definition, start, end)
-                index += 2
-            else:
-                assert isinstance(item, list)
-                result.extend(item)
-                index += 1
-        return result
-
-    def _parameter_needs_expansion(self, parameter: str, body: list[Token]) -> bool:
-        for index, part in enumerate(body):
-            if part.kind != "identifier" or part.text != parameter:
-                continue
-            if index > 0 and self._stringify_operator(body[index - 1]):
-                continue
-            if index > 0 and self._paste_operator(body[index - 1]):
-                continue
-            if index + 1 < len(body) and self._paste_operator(body[index + 1]):
-                continue
-            return True
-        return False
-
-    def _rescan(
-        self, tokens: list[Token], environment: MacroLookup
-    ) -> Generator[list[Token], list[Token], list[Token]]:
-        """Yield argument prescans to an explicit trampoline, never Python recursion.
-
-        Parameters used by # or ## retain their raw spelling; ordinary uses are
-        prescanned. Per-token suppression survives both paths and the result is
-        rescanned with following source tokens.
-        """
-        pending = deque(tokens)
-        emitted = []
-        while pending:
-            token = pending.popleft()
-            self.current_offset = token.start
-            self.budget.consume()
-            if token.kind == "identifier" and token.text == "__VA_OPT__":
-                raise ExpansionError(
-                    "__VA_OPT__ is only valid in a variadic macro replacement list"
-                )
-            state = environment.get(token.text) if token.kind == "identifier" else None
-            definition = state.definition if state is not None else None
-            if (
-                state is not None
-                and definition is None
-                and state.defined is not False
-                and (state.defined is True or state.value is not None)
-            ):
-                raise ExpansionError(f"replacement text for assumed macro {token.text} is unknown")
-            invoked = definition is not None and (
-                definition.parameters is None or (pending and pending[0].text == "(")
-            )
-            if not invoked or token.text in token.hidden:
-                if token.generated:
-                    self.budget.work += max(0, len(token.text) - 1)
-                    self.budget.consume()
-                emitted.append(token)
-                continue
-
-            body, va_opts = self._replacement(definition)
-            end = token.end
-            hidden = token.hidden | {token.text}
-            raw_bindings: dict[str, list[Token]] = {}
-            expanded_bindings: dict[str, list[Token]] = {}
-            va_opt_active = False
-            if definition.parameters is not None:
-                arguments, separators, closing = self._arguments(pending, definition.name)
-                end = max(end, closing.end)
-                hidden = (token.hidden & closing.hidden) | {token.text}
-                parameters = definition.parameters
-                if not parameters and not definition.variadic and arguments == [[]]:
-                    arguments = []
-                if definition.variadic:
-                    # Require the separating comma for named + variadic macros.
-                    # Omitted variadic arguments remain a separate language-version
-                    # feature; explicitly empty variadic arguments are supported.
-                    if len(arguments) < len(parameters) + 1:
-                        raise ExpansionError(
-                            f"variadic invocation {definition.name} requires a variadic argument (which may be empty)"
-                        )
-                    extra = []
-                    variadic_arguments = arguments[len(parameters) :]
-                    for argument_index, argument in enumerate(variadic_arguments):
-                        if argument_index:
-                            extra.append(separators[len(parameters) + argument_index - 1])
-                        extra.extend(argument)
-                    arguments = arguments[: len(parameters)] + [extra]
-                    parameters = (*parameters, "__VA_ARGS__")
-                elif len(arguments) != len(parameters):
-                    raise ExpansionError(
-                        f"{definition.name} expects {len(parameters)} arguments, got {len(arguments)}"
-                    )
-                raw_bindings = dict(zip(parameters, arguments))
-
-                # __VA_OPT__ tests the ordinary, fully expanded substitution of
-                # __VA_ARGS__, even when __VA_ARGS__ is otherwise unused or only
-                # appears next to #/##.
-                if va_opts:
-                    argument = raw_bindings["__VA_ARGS__"]
-                    expanded_bindings["__VA_ARGS__"] = yield argument
-                    va_opt_active = any(
-                        part.kind != "empty" for part in expanded_bindings["__VA_ARGS__"]
-                    )
-
-                for parameter, argument in raw_bindings.items():
-                    if parameter in expanded_bindings:
-                        continue
-                    needs_expansion = self._parameter_needs_expansion(parameter, body)
-                    if va_opt_active and not needs_expansion:
-                        needs_expansion = any(
-                            self._parameter_needs_expansion(parameter, content)
-                            for content in va_opts.values()
-                        )
-                    expanded_bindings[parameter] = (yield argument) if needs_expansion else argument
-                self.current_offset = token.start
-
-            replacement = self._substitute(
-                body, definition, raw_bindings, expanded_bindings, token.start, end, va_opts
-            )
-            generated_replacement = []
-            for value in replacement:
-                self.budget.consume()
-                if value.kind != "empty":
-                    generated_replacement.append(
-                        replace(
-                            value,
-                            start=token.start,
-                            end=end,
-                            hidden=value.hidden | hidden,
-                            generated=True,
-                        )
-                    )
-            if generated_replacement:
-                pending.extendleft(reversed(generated_replacement))
-            else:
-                emitted.append(Token("", "empty", token.start, end, hidden, True))
-        return emitted
+        self.replacements.validate(definition)
 
     def _expand(self, tokens: list[Token], environment: MacroLookup) -> list[Token]:
-        stack = [self._rescan(tokens, environment)]
-        result = None
-        while stack:
-            try:
-                arguments = stack[-1].send(result)
-            except StopIteration as finished:
-                stack.pop()
-                result = finished.value
-            else:
-                stack.append(self._rescan(arguments, environment))
-                result = None
-        return result
+        return self.rescanner.expand(tokens, environment)
 
     def line(self, start: int, end: int) -> None:
         # Buffer adjacent ordinary lines so invocations may span physical lines.
@@ -491,100 +83,51 @@ class Expansion:
         last = bisect_right(self.starts, self.pending_end - 1)
         original = [t for t in self.tokens[first:last] if t.kind not in {"space", "comment"}]
         self.pending_start = None
-        reserved = next(
-            (
-                token
-                for token in original
-                if token.kind == "identifier" and token.text == "__VA_OPT__"
-            ),
-            None,
-        )
-        if reserved is not None:
-            self.current_offset = reserved.start
-            raise ExpansionError("__VA_OPT__ is only valid in a variadic macro replacement list")
+        self._reject_reserved(original)
         try:
             expanded = self._expand(original, environment)
         except AnalysisLimitExceeded as error:
             error.line = self.location(self.current_offset).line
             raise
+        self._track_adjacency(original, expanded, environment)
+        self.edits.extend(merged_edits(self.source, expanded))
+
+    def _reject_reserved(self, original: list[Token]) -> None:
+        """``__VA_OPT__`` is only meaningful inside a variadic replacement list."""
+        for token in original:
+            if token.kind == "identifier" and token.text == "__VA_OPT__":
+                self.current_offset = token.start
+                raise ExpansionError(
+                    "__VA_OPT__ is only valid in a variadic macro replacement list"
+                )
+
+    def _track_adjacency(
+        self, original: list[Token], expanded: list[Token], environment: MacroLookup
+    ) -> None:
+        """Remember a function-like macro name ending the buffer, and reject a call that
+        its next buffer would complete across a directive."""
         # Invocation recognition happens before the next token is expanded.
         # An intervening token breaks a pending call even if it expands away or
         # becomes '('. Whitespace/comment-only buffers do not break adjacency.
         if original and original[0].text != "(":
             self.trailing_function = None
         significant = [t for t in expanded if t.kind != "empty"]
-        if significant:
-            if self.trailing_function is not None and significant[0].text == "(":
-                self.current_offset = significant[0].start
-                raise ExpansionError(
-                    "macro invocation crossing a preprocessing directive is unsupported"
-                )
-            final = significant[-1]
-            definition = (
-                environment.get(final.text).definition if final.kind == "identifier" else None
+        if not significant:
+            return
+        if self.trailing_function is not None and significant[0].text == "(":
+            self.current_offset = significant[0].start
+            raise ExpansionError(
+                "macro invocation crossing a preprocessing directive is unsupported"
             )
-            self.trailing_function = (
-                final.text
-                if definition is not None
-                and definition.parameters is not None
-                and final.text not in final.hidden
-                else None
-            )
-
-        # Merge overlapping invocation origins (e.g. A -> value F followed by
-        # source arguments). Untouched source between separate uses stays exact.
-        start = end = None
-        pieces = []
-
-        def finish() -> None:
-            if start is not None:
-                replacement = " " + " ".join(pieces) + " "
-                replacement += "".join(LINE_BREAK.findall(self.source[start:end]))
-                self.edits.append((start, end, replacement))
-
-        for token in expanded:
-            if not token.generated:
-                finish()
-                start = end = None
-                pieces = []
-                continue
-            if start is None or token.start >= end:
-                finish()
-                start, end = token.start, token.end
-                pieces = []
-            else:
-                end = max(end, token.end)
-            if token.kind != "empty":
-                pieces.append(token.text)
-        finish()
+        final = significant[-1]
+        definition = environment.get(final.text).definition if final.kind == "identifier" else None
+        self.trailing_function = (
+            final.text
+            if definition is not None
+            and definition.parameters is not None
+            and final.text not in final.hidden
+            else None
+        )
 
     def render(self, masked: str) -> tuple[str, tuple[SourceMapping, ...]]:
-        pieces = []
-        mappings = []
-        cursor = 0
-        output_offset = 0
-
-        def append(text: str, start: int, end: int, expanded: bool = False) -> None:
-            nonlocal output_offset
-            if not text:
-                return
-            pieces.append(text)
-            mappings.append(
-                SourceMapping(
-                    output_offset,
-                    output_offset + len(text),
-                    start,
-                    end,
-                    self.location(start),
-                    self.location(end),
-                    expanded,
-                )
-            )
-            output_offset += len(text)
-
-        for start, end, text in self.edits:
-            append(masked[cursor:start], cursor, start)
-            append(text, start, end, True)
-            cursor = end
-        append(masked[cursor:], cursor, len(masked))
-        return "".join(pieces), tuple(mappings)
+        return render(masked, self.edits, self.locator)
