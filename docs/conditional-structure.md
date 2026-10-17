@@ -35,7 +35,7 @@ A `ConditionalBlock` contains ordered `ConditionalBranch` values, an optional cl
 A `ConditionalDirective` exposes:
 
 - `kind`: `if`, `ifdef`, `ifndef`, `elif`, `elifdef`, `elifndef`, `else`, or `endif`;
-- `source_range`: the full physical logical-directive range, including continuation lines;
+- `source_range`: the full physical logical-directive range, including continuation lines and the lines that a multi-line comment on the directive spans;
 - `condition_range`: the exact significant condition range when the directive accepts a condition;
 - `condition_text`: the exact original physical substring for `condition_range`;
 - `logical_condition`: the spliced/comment-masked logical condition used for structural symbolic extraction;
@@ -67,7 +67,7 @@ The structural coordinate types are intentionally separate from the existing `So
 
 `condition_text` is for source mapping and editing. It is the exact original physical substring between the first and last significant condition token. Internal comments and continuation sequences remain present; trailing comments outside the significant condition range are excluded.
 
-`logical_condition` is for interpretation. Backslash-newline pairs are spliced and comments are replaced as preprocessing whitespace before symbolic structure is extracted.
+`logical_condition` is for interpretation. Backslash-newline pairs are spliced and comments are replaced as preprocessing whitespace before symbolic structure is extracted. A comment that spans lines does not end the directive: the condition carries on after it, and tokens after the comment keep their own physical lines.
 
 Do not use `logical_condition` offsets against the original source. Use `condition_range` for all physical slicing or edits.
 
