@@ -221,8 +221,8 @@ def _from_dict(data: object) -> Expression:
         operands = data["operands"]
         if not isinstance(operands, list):
             raise ValueError("operands must be an array")
-        cls = Conjunction if kind == "and" else Disjunction
-        return cls(tuple(_from_dict(item) for item in operands))
+        combine = Conjunction if kind == "and" else Disjunction
+        return combine(tuple(_from_dict(item) for item in operands))
 
     raise ValueError(f"unknown expression kind: {kind!r}")
 
