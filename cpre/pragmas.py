@@ -17,7 +17,7 @@ from ._pragma_syntax import (
     _public_location,
     _SourcePragma,
 )
-from .api import AnalysisOptions, MacroAssumptions
+from ._types import AnalysisOptions, MacroAssumptions
 from .configuration import MacroConfiguration
 from .errors import AnalysisError, ErrorCode, SourceLocation
 from .expansion import SourceMapping

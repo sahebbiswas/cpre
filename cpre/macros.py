@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
-from .api import MacroAssumptions, _normalize_assumptions
+from ._types import MacroAssumptions, _normalize_assumptions
 from .errors import SourceLocation
 
 _NAME = r"[A-Za-z_]\w*"

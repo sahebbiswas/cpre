@@ -10,8 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from ._types import AnalysisIncomplete, AnalysisOptions, _translate_parse_error
 from .analysis import _macro_semantics, tree_expressions
-from .api import AnalysisIncomplete, AnalysisOptions, _translate_parse_error
 from .configuration import MacroConfiguration, UnknownNamePolicy
 from .errors import AnalysisError, ErrorCode
 from .expressions import conjunction, expression_atoms_in_order, negate

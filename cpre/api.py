@@ -4,10 +4,26 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import dataclass
-from enum import Enum
+from typing import TYPE_CHECKING
 
-from . import cpre as _engine
+from ._types import (
+    AnalysisIncomplete,
+    AnalysisOptions,
+    AnalysisResult,
+    ContextualSimplification,
+    ExactSimplification,
+    Finding,
+    FindingKind,
+    FixConfidence,
+    IncompleteComponent,
+    IncompleteGroup,
+    MacroAssumptions,
+    SourceRange,
+    SuggestedEdit,
+    _assumption_expression,
+    _normalize_assumptions,
+    _translate_parse_error,
+)
 from .analysis import PartialAnalysis as _PartialAnalysis
 from .analysis import _clear_analysis as _engine_clear_analysis
 from .analysis import analyze_tree_partial as _analyze_tree_partial
@@ -19,307 +35,44 @@ from .errors import (
     ParseError,
     SourceLocation,
 )
-from .expressions import conjunction, negate
+from .expressions import (
+    expression_atoms_in_order,
+    expression_predicates,
+    expressions_differ,
+    format_expression,
+)
 from .lexer import logical_lines
-from .model import TRUE, DefinedVariable, Variable
+from .model import TRUE, ConditionalBranch, ConditionalGroup, ConditionalTree, Expression
+from .model import ConditionError as ModelConditionError
+from .parser import parse_source
+from .robdd import BDD
 from .robdd import AnalysisBudget as _AnalysisBudget
 from .robdd import AnalysisLimitExceeded as _AnalysisLimitExceeded
 from .robdd import ResourceLimits as _ResourceLimits
 
 
-class FindingKind(str, Enum):
-    """Machine-readable categories emitted by :func:`analyze_source`."""
-
-    DEAD_BRANCH = "dead_branch"
-    REDUNDANT_BRANCH = "redundant_branch"
-    SIMPLIFIABLE_CONDITION = "simplifiable_condition"
-    CONTEXTUAL_SIMPLIFICATION = "contextual_simplification"
-
-
-class FixConfidence(str, Enum):
-    """Equivalence guarantee attached to a structured source edit."""
-
-    EXACT = "exact"
-    CONTEXTUAL = "contextual"
-
-
-@dataclass(frozen=True)
-class AnalysisOptions:
-    """Deterministic resource limits for one source analysis.
-
-    ``max_atoms`` and ``max_bdd_nodes`` apply to each independent component of
-    conditional groups (groups that share no Boolean atom are analyzed
-    separately); ``max_work`` is a single cap shared by all components.
-    """
-
-    max_atoms: int = 64
-    max_bdd_nodes: int = 100_000
-    max_work: int = 500_000
-
-    def __post_init__(self) -> None:
-        for name in ("max_atoms", "max_bdd_nodes", "max_work"):
-            value = getattr(self, name)
-            if type(value) is not int or value <= 0:
-                raise AnalysisError(
-                    f"{name} must be a positive integer",
-                    code=ErrorCode.ANALYSIS_FAILURE,
-                )
-
-    def _resource_limits(self) -> _ResourceLimits:
-        return _ResourceLimits(
-            max_atoms=self.max_atoms,
-            max_bdd_nodes=self.max_bdd_nodes,
-            max_work=self.max_work,
-        )
-
-
-@dataclass(frozen=True)
-class AnalysisIncomplete:
-    """Structured diagnostic describing intentionally curtailed exact analysis.
-
-    ``component`` is ``None`` when the limit curtailed the whole analysis. For
-    :func:`analyze_source` it is otherwise the index of the affected entry in
-    :attr:`AnalysisResult.incomplete_components`; the rest of the source was
-    still analyzed. ``source_identity`` names the resolved included source that
-    ``location`` refers to during concrete preprocessing, or ``None`` for the
-    primary source.
-    """
-
-    code: ErrorCode
-    resource: str
-    limit: int
-    observed: int
-    message: str
-    location: SourceLocation | None = None
-    component: int | None = None
-    source_identity: str | None = None
-
-
-@dataclass(frozen=True)
-class IncompleteGroup:
-    """A top-level conditional group (``#if`` ... ``#endif``) that was not analyzed."""
-
-    location: SourceLocation
-    end_line: int | None
-    directive: str
-    condition: str | None
-
-
-@dataclass(frozen=True)
-class IncompleteComponent:
-    """Independent conditional groups whose exact analysis hit a resource limit.
-
-    ``groups`` lists the top-level conditional groups of the component in source
-    order; nested conditionals belong to their top-level group. ``atoms`` lists
-    the component's Boolean atoms in first-occurrence order. ``diagnostics`` holds
-    the component-local limit diagnostics, which also appear in
-    :attr:`AnalysisResult.incomplete`. No finding is reported for any branch of
-    these groups, and their branches in :attr:`AnalysisResult.tree` carry no
-    analysis.
-    """
-
-    index: int
-    groups: tuple[IncompleteGroup, ...]
-    atoms: tuple[str, ...]
-    diagnostics: tuple[AnalysisIncomplete, ...]
-
-    @property
-    def resource(self) -> str:
-        """The first resource limit the component exceeded."""
-        return self.diagnostics[0].resource
-
-    def contains_line(self, line: int) -> bool:
-        """Whether ``line`` lies inside one of the component's groups."""
-        return any(
-            group.location.line <= line <= (group.end_line or group.location.line)
-            for group in self.groups
-        )
-
-
-@dataclass(frozen=True, init=False)
-class MacroAssumptions:
-    """Explicit macro state supplied by a library caller.
-
-    ``defined`` and ``undefined`` constrain macro definedness. ``values``
-    constrains the Boolean truth of bare macro identifiers independently, so a
-    macro may be known-defined while also having the Boolean value ``False``.
-    Unmentioned macros remain symbolic.
-    """
-
-    defined: frozenset[str]
-    undefined: frozenset[str]
-    values: tuple[tuple[str, bool], ...]
-
-    def __init__(
-        self,
-        *,
-        defined: Iterable[str] = (),
-        undefined: Iterable[str] = (),
-        values: Mapping[str, bool] | None = None,
-    ) -> None:
-        normalized_defined = frozenset(defined)
-        normalized_undefined = frozenset(undefined)
-        normalized_values = dict(values or {})
-        all_names = normalized_defined | normalized_undefined | set(normalized_values)
-        invalid = sorted(name for name in all_names if not re.fullmatch(r"[A-Za-z_]\w*", name))
-        if invalid:
-            raise AnalysisError(
-                f"invalid macro name in assumptions: {invalid[0]!r}",
-                code=ErrorCode.INVALID_ASSUMPTIONS,
-            )
-        overlap = sorted(normalized_defined & normalized_undefined)
-        if overlap:
-            raise AnalysisError(
-                f"macro cannot be both defined and undefined: {overlap[0]}",
-                code=ErrorCode.INVALID_ASSUMPTIONS,
-            )
-        for name, value in normalized_values.items():
-            if type(value) is not bool:
-                raise AnalysisError(
-                    f"Boolean macro assumption for {name} must be True or False",
-                    code=ErrorCode.INVALID_ASSUMPTIONS,
-                )
-            if name in normalized_undefined and value:
-                raise AnalysisError(
-                    f"undefined macro cannot have a true Boolean value: {name}",
-                    code=ErrorCode.INVALID_ASSUMPTIONS,
-                )
-        object.__setattr__(self, "defined", normalized_defined)
-        object.__setattr__(self, "undefined", normalized_undefined)
-        object.__setattr__(self, "values", tuple(sorted(normalized_values.items())))
-
-    @property
-    def is_empty(self) -> bool:
-        return not (self.defined or self.undefined or self.values)
-
-
-@dataclass(frozen=True)
-class SourceRange:
-    """Physical one-based source range with an exclusive end location."""
-
-    start: SourceLocation
-    end: SourceLocation
-
-
-@dataclass(frozen=True)
-class SuggestedEdit:
-    """A direct replacement for one preprocessor condition source range."""
-
-    range: SourceRange
-    replacement: str
-    confidence: FixConfidence
-
-
-@dataclass(frozen=True)
-class ExactSimplification:
-    """An exact replacement for a source condition.
-
-    Without macro assumptions, ``replacement`` is Boolean-equivalent to
-    ``original`` for every assignment of the modeled predicates. With explicit
-    assumptions, equivalence is guaranteed for every assignment consistent with
-    those assumptions.
-    """
-
-    original: str
-    replacement: str
-
-
-@dataclass(frozen=True)
-class ContextualSimplification:
-    """A replacement equivalent only in the branch's reachable context."""
-
-    original: str
-    replacement: str
-
-
-@dataclass(frozen=True)
-class Finding:
-    """A structured preprocessor-analysis finding.
-
-    ``depends_on_assumptions`` is true only when supplied macro assumptions
-    materially changed the status or simplification proof that produced this
-    finding. This lets downstream analyzers distinguish universal diagnostics
-    from configuration-specific ones.
-    """
-
-    kind: FindingKind
-    location: SourceLocation
-    directive: str
-    original_condition: str | None
-    exact_simplification: ExactSimplification | None
-    contextual_simplification: ContextualSimplification | None
-    reason: str
-    opaque_predicates: tuple[str, ...] = ()
-    edit: SuggestedEdit | None = None
-    depends_on_assumptions: bool = False
-
-    @property
-    def simplified_condition(self) -> str | None:
-        if self.exact_simplification is None:
-            return None
-        return self.exact_simplification.replacement
-
-    @property
-    def contextual_condition(self) -> str | None:
-        if self.contextual_simplification is None:
-            return None
-        return self.contextual_simplification.replacement
-
-
-@dataclass(frozen=True)
-class AnalysisResult:
-    """Structured result returned by :func:`analyze_source`.
-
-    ``complete`` is true only when every conditional was analyzed. An incomplete
-    result is either *partial* (every diagnostic in ``incomplete`` names an entry
-    of ``incomplete_components``; ``findings`` are proven for all other groups)
-    or curtailed as a whole (``findings`` is empty).
-    """
-
-    findings: tuple[Finding, ...]
-    tree: _engine.ConditionalTree
-    filename: str | None = None
-    incomplete: tuple[AnalysisIncomplete, ...] = ()
-    incomplete_components: tuple[IncompleteComponent, ...] = ()
-
-    @property
-    def complete(self) -> bool:
-        return not self.incomplete
-
-    @property
-    def partial(self) -> bool:
-        """Incomplete, but only in ``incomplete_components``; other groups were analyzed."""
-        return bool(self.incomplete) and all(
-            diagnostic.component is not None for diagnostic in self.incomplete
-        )
-
-
-def _branches(groups: list[_engine.ConditionalGroup]) -> Iterator[_engine.ConditionalBranch]:
+def _branches(groups: list[ConditionalGroup]) -> Iterator[ConditionalBranch]:
     for group in groups:
         for branch in group.branches:
             yield branch
             yield from _branches(branch.children)
 
 
-def _formatted(expression: _engine.Expression | None) -> str | None:
+def _formatted(expression: Expression | None) -> str | None:
     if expression is None:
         return None
-    return _engine.format_expression(expression)
+    return format_expression(expression)
 
 
 def _globally_equivalent(
-    left: _engine.Expression,
-    right: _engine.Expression,
+    left: Expression,
+    right: Expression,
     limits: _ResourceLimits,
     budget: _AnalysisBudget,
 ) -> bool:
-    atoms = [
-        atom
-        for expression in (left, right)
-        for atom in _engine._expression_atoms_in_order(expression)
-    ]
-    bdd = _engine._BDD(atoms, limits=limits, budget=budget)
-    return bdd.equivalent_under(_engine.TRUE, left, right)
+    atoms = [atom for expression in (left, right) for atom in expression_atoms_in_order(expression)]
+    bdd = BDD(atoms, limits=limits, budget=budget)
+    return bdd.equivalent_under(TRUE, left, right)
 
 
 def _condition_ranges(source: str) -> dict[tuple[int, str], SourceRange]:
@@ -347,7 +100,7 @@ def _condition_ranges(source: str) -> dict[tuple[int, str], SourceRange]:
 
 
 def _edit_for(
-    branch: _engine.ConditionalBranch,
+    branch: ConditionalBranch,
     ranges: dict[tuple[int, str], SourceRange],
     replacement: str,
     confidence: FixConfidence,
@@ -361,7 +114,7 @@ def _edit_for(
 
 
 def _simplifications_for_branch(
-    branch: _engine.ConditionalBranch,
+    branch: ConditionalBranch,
     limits: _ResourceLimits,
     budget: _AnalysisBudget,
 ) -> tuple[ExactSimplification | None, ContextualSimplification | None]:
@@ -371,7 +124,7 @@ def _simplifications_for_branch(
         return None, None
     original = branch.expression_text
     exact: ExactSimplification | None = None
-    if analysis.simplified is not None and _engine._expressions_differ(
+    if analysis.simplified is not None and expressions_differ(
         branch.expression, analysis.simplified
     ):
         replacement = _formatted(analysis.simplified)
@@ -381,7 +134,7 @@ def _simplifications_for_branch(
     contextual: ContextualSimplification | None = None
     if (
         analysis.contextual is not None
-        and _engine._expressions_differ(comparison, analysis.contextual)
+        and expressions_differ(comparison, analysis.contextual)
         and not _globally_equivalent(comparison, analysis.contextual, limits, budget)
     ):
         replacement = _formatted(analysis.contextual)
@@ -391,8 +144,8 @@ def _simplifications_for_branch(
 
 
 def _analysis_dependency(
-    branch: _engine.ConditionalBranch,
-    baseline: _engine.ConditionalBranch | None,
+    branch: ConditionalBranch,
+    baseline: ConditionalBranch | None,
     kind: FindingKind,
 ) -> bool:
     if baseline is None or baseline.analysis is None or branch.analysis is None:
@@ -402,16 +155,16 @@ def _analysis_dependency(
     if kind in {FindingKind.DEAD_BRANCH, FindingKind.REDUNDANT_BRANCH}:
         return current.status != prior.status
     if kind is FindingKind.SIMPLIFIABLE_CONDITION:
-        return _engine._expressions_differ(current.simplified, prior.simplified)
-    return _engine._expressions_differ(current.contextual, prior.contextual)
+        return expressions_differ(current.simplified, prior.simplified)
+    return expressions_differ(current.contextual, prior.contextual)
 
 
 def _finding_for_branch(
-    branch: _engine.ConditionalBranch,
+    branch: ConditionalBranch,
     ranges: dict[tuple[int, str], SourceRange],
     limits: _ResourceLimits,
     budget: _AnalysisBudget,
-    baseline: _engine.ConditionalBranch | None = None,
+    baseline: ConditionalBranch | None = None,
 ) -> tuple[Finding, ...]:
     analysis = branch.analysis
     assert analysis is not None
@@ -423,9 +176,7 @@ def _finding_for_branch(
             error.line = branch.line
         raise
     predicates = tuple(
-        sorted(_engine.expression_predicates(branch.expression))
-        if branch.expression is not None
-        else ()
+        sorted(expression_predicates(branch.expression)) if branch.expression is not None else ()
     )
 
     def make_finding(kind: FindingKind, reason: str, edit: SuggestedEdit | None) -> Finding:
@@ -480,50 +231,6 @@ def _finding_for_branch(
     return tuple(findings)
 
 
-def _translate_parse_error(error: _engine.ConditionError, filename: str | None) -> ParseError:
-    location = getattr(error, "location", None)
-    public_location = None
-    if location is not None and location.line is not None:
-        public_location = SourceLocation(location.line, location.column)
-    raw_code = getattr(error, "code", ErrorCode.EXPRESSION_SYNTAX.value)
-    try:
-        code = raw_code if isinstance(raw_code, ErrorCode) else ErrorCode(raw_code)
-    except ValueError:
-        code = ErrorCode.EXPRESSION_SYNTAX
-    return ParseError(
-        getattr(error, "message", str(error)),
-        code=code,
-        location=public_location,
-        filename=filename,
-    )
-
-
-def _normalize_assumptions(
-    assumptions: MacroAssumptions | Mapping[str, bool] | None,
-) -> MacroAssumptions | None:
-    if assumptions is None:
-        return None
-    if isinstance(assumptions, MacroAssumptions):
-        return None if assumptions.is_empty else assumptions
-    if isinstance(assumptions, Mapping):
-        normalized = MacroAssumptions(values=assumptions)
-        return None if normalized.is_empty else normalized
-    raise AnalysisError(
-        "assumptions must be a MacroAssumptions instance or mapping of macro names to bool",
-        code=ErrorCode.INVALID_ASSUMPTIONS,
-    )
-
-
-def _assumption_expression(assumptions: MacroAssumptions) -> _engine.Expression:
-    terms: list[_engine.Expression] = []
-    terms.extend(DefinedVariable(name) for name in sorted(assumptions.defined))
-    terms.extend(negate(DefinedVariable(name)) for name in sorted(assumptions.undefined))
-    for name, value in assumptions.values:
-        variable = Variable(name)
-        terms.append(variable if value else negate(variable))
-    return conjunction(*terms) if terms else TRUE
-
-
 def _incomplete_diagnostic(
     error: _AnalysisLimitExceeded, component: int | None = None
 ) -> AnalysisIncomplete:
@@ -545,7 +252,7 @@ def _incomplete_result(
     distinguish_defined: bool,
     error: _AnalysisLimitExceeded,
 ) -> AnalysisResult:
-    tree = _engine.parse_source(source, distinguish_defined=distinguish_defined)
+    tree = parse_source(source, distinguish_defined=distinguish_defined)
     return AnalysisResult(
         findings=(),
         tree=tree,
@@ -554,7 +261,7 @@ def _incomplete_result(
     )
 
 
-def _incomplete_group(group: _engine.ConditionalGroup) -> IncompleteGroup:
+def _incomplete_group(group: ConditionalGroup) -> IncompleteGroup:
     opening = group.branches[0]
     return IncompleteGroup(
         location=SourceLocation(group.line),
@@ -565,8 +272,8 @@ def _incomplete_group(group: _engine.ConditionalGroup) -> IncompleteGroup:
 
 
 def _group_findings(
-    group: _engine.ConditionalGroup,
-    baseline: _engine.ConditionalGroup | None,
+    group: ConditionalGroup,
+    baseline: ConditionalGroup | None,
     ranges: dict[tuple[int, str], SourceRange],
     limits: _ResourceLimits,
     budget: _AnalysisBudget,
@@ -616,13 +323,13 @@ def analyze_source(
     assumption_expression = _assumption_expression(normalized) if normalized is not None else None
     try:
         main = _analyze_tree_partial(
-            _engine.parse_source(source, distinguish_defined=normalized is not None),
+            parse_source(source, distinguish_defined=normalized is not None),
             assumptions=assumption_expression,
             limits=limits,
             budget=budget,
         )
         baseline: _PartialAnalysis | None = (
-            _analyze_tree_partial(_engine.parse_source(source), limits=limits, budget=budget)
+            _analyze_tree_partial(parse_source(source), limits=limits, budget=budget)
             if normalized is not None
             else None
         )
@@ -661,7 +368,7 @@ def analyze_source(
             distinguish_defined=normalized is not None,
             error=error,
         )
-    except _engine.ConditionError as error:
+    except ModelConditionError as error:
         raise _translate_parse_error(error, filename) from error
 
     findings = tuple(
@@ -670,7 +377,7 @@ def analyze_source(
         if main.group_components[index] not in failures
         for finding in found
     )
-    failed_groups: dict[int, list[_engine.ConditionalGroup]] = {}
+    failed_groups: dict[int, list[ConditionalGroup]] = {}
     for index, group in enumerate(tree.groups):
         component = main.group_components[index]
         if component in failures:
@@ -684,8 +391,7 @@ def analyze_source(
                 index=position,
                 groups=tuple(_incomplete_group(group) for group in groups),
                 atoms=tuple(
-                    _engine.format_expression(atom)
-                    for atom in main.component_atoms.get(component, ())
+                    format_expression(atom) for atom in main.component_atoms.get(component, ())
                 ),
                 diagnostics=(diagnostic,),
             )
@@ -699,8 +405,27 @@ def analyze_source(
     )
 
 
-ConditionalTree = _engine.ConditionalTree
 ConditionError = CpreError
+
+# The public types are defined in ``cpre._types`` (below the core) but belong to this module as
+# far as users, ``repr``, pickles and documentation tools are concerned.
+for _public in (
+    AnalysisIncomplete,
+    AnalysisOptions,
+    AnalysisResult,
+    ContextualSimplification,
+    ExactSimplification,
+    Finding,
+    FindingKind,
+    FixConfidence,
+    IncompleteComponent,
+    IncompleteGroup,
+    MacroAssumptions,
+    SourceRange,
+    SuggestedEdit,
+):
+    _public.__module__ = __name__
+del _public
 
 __all__ = [
     "AnalysisError",

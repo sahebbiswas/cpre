@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from ._has_include import IncludeQuery, IncludeQueryProvider
-from .api import AnalysisOptions, MacroAssumptions
+from ._types import AnalysisOptions, MacroAssumptions
 from .configuration import MacroConfiguration
 from .errors import AnalysisError, ErrorCode
 from .includes import DEFAULT_MAX_INCLUDE_DEPTH, IncludeForm, IncludeResolver
