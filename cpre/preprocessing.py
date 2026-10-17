@@ -40,6 +40,7 @@ from .includes import (
 )
 from .lexer import (
     HORIZONTAL_WHITESPACE,
+    LogicalLine,
     Token,
     directive_head,
     logical_lines,
@@ -47,13 +48,21 @@ from .lexer import (
     splice,
     tokenize,
 )
-from .macros import MacroDefinition, MacroEnvironment, MacroState, _apply_macro_directive
+from .macros import (
+    MacroDefinition,
+    MacroEnvironment,
+    MacroLookup,
+    MacroState,
+    _apply_macro_directive,
+)
 from .model import (
     TRUE,
     ConditionalBranch,
     ConditionalGroup,
+    ConditionalTree,
     ConditionError,
     DefinedVariable,
+    Expression,
     Variable,
 )
 from .numeric_conditions import NumericConditionError, evaluate_numeric_condition
@@ -410,7 +419,7 @@ def _parse_line_directive(
     return line_number, file_literal
 
 
-def _unconfigured_predefined_macro(text: str, environment: MacroEnvironment) -> str | None:
+def _unconfigured_predefined_macro(text: str, environment: MacroLookup) -> str | None:
     """Return the first predefined macro whose replacement value is required."""
     tokens = [token for token in tokenize(text) if token.kind not in {"space", "comment"}]
     defined_operands: set[int] = set()
@@ -778,6 +787,752 @@ def preprocess_request(request: PreprocessRequest) -> PreprocessResult:
     )
 
 
+class _UnitContext:
+    """What the parts of one source's preprocessing share.
+
+    The primary source and every included source each get a context. It holds the
+    per-unit state the old monolithic function kept in local variables: the physical
+    and logical line tables, which lines survive, the diagnostics and include
+    insertions collected so far, and the macro environment and ``__has_include``
+    answers that conditions are evaluated against. The parts that use it are
+    :class:`_QueryAnswerer`, :class:`_BranchSelector`, :class:`_IncludeHandler` and
+    :class:`_UnitProcessor`; each can be built and called on its own.
+    """
+
+    def __init__(
+        self,
+        source: str,
+        run: _Run,
+        *,
+        identity: str | None,
+        filename: str | None,
+        depth: int,
+        queries: tuple[_has_include.Occurrence, ...] = (),
+    ) -> None:
+        self.source = source
+        self.run = run
+        self.identity = identity
+        self.filename = filename
+        self.depth = depth
+        self.queries_by_line: dict[int, list[_has_include.Occurrence]] = {}
+        for occurrence in queries:
+            self.queries_by_line.setdefault(occurrence.directive_line, []).append(occurrence)
+        self.base_environment = run.base_environment
+        self.limits = run.limits
+        self.budget = run.budget
+        self.includes = run.includes
+        self.physical = split_lines(source, keepends=True)
+        self.logical = list(logical_lines(source))
+        self.ends = {line.start_line: line.end_line for line in self.logical}
+        self.retained = [True] * len(self.physical)
+        self.diagnostics: list[PreprocessDiagnostic | AnalysisIncomplete] = []
+        self.insertions: list[tuple[int, int, _UnitOutput]] = []
+        self.expansion = Expansion(source, self.budget)
+        self.logical_states: dict[int, _LogicalPreprocessingState] = {}
+        self.environment = _PredefinedMacroEnvironment(
+            self.base_environment, self.expansion, self.logical_states
+        )
+        self.view = _has_include.ConditionView(
+            self.environment,
+            queries,
+            run.include_query is not None or run.has_include_from_resolver,
+        )
+        self.offsets = [0]
+        for physical_line in self.physical:
+            self.offsets.append(self.offsets[-1] + len(physical_line))
+        self.current_line: int | None = None
+        self.logical_delta = 0
+        self.logical_file_literal = _file_literal(filename)
+
+    def blank(self, start: int, end: int) -> None:
+        """Drop physical lines ``start`` through ``end`` (1-based, inclusive) from the output."""
+        self.retained[start - 1 : end] = [False] * (end - start + 1)
+
+    def located(self, code: ErrorCode, message: str, line: int) -> PreprocessDiagnostic:
+        return PreprocessDiagnostic(code, message, SourceLocation(line), self.identity)
+
+    def limit_diagnostic(
+        self, error: AnalysisLimitExceeded, location: SourceLocation | None
+    ) -> AnalysisIncomplete:
+        return AnalysisIncomplete(
+            ErrorCode.ANALYSIS_LIMIT_EXCEEDED,
+            error.resource,
+            error.limit,
+            error.observed,
+            str(error),
+            location,
+            source_identity=self.identity,
+        )
+
+
+class _QueryAnswerer:
+    """Answers one reachable ``__has_include`` from the caller's query and resolver."""
+
+    def __init__(self, context: _UnitContext) -> None:
+        self.context = context
+
+    def _diagnose(self, code: ErrorCode, message: str, occurrence: _has_include.Occurrence) -> None:
+        context = self.context
+        context.diagnostics.append(
+            PreprocessDiagnostic(code, message, occurrence.location, context.identity)
+        )
+
+    def answer(self, occurrence: _has_include.Occurrence) -> bool:
+        """Answer one reachable __has_include; False means diagnostics were added."""
+        context = self.context
+        run = context.run
+        if occurrence.operator == _has_include.HAS_INCLUDE_NEXT:
+            self._diagnose(
+                ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION,
+                "__has_include_next is not supported during concrete preprocessing",
+                occurrence,
+            )
+            return False
+        if occurrence.operand is None:
+            self._diagnose(
+                ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION,
+                "__has_include expects one parenthesized header-name operand",
+                occurrence,
+            )
+            return False
+        if run.include_query is None and not run.has_include_from_resolver:
+            self._diagnose(
+                ErrorCode.UNRESOLVED_CONDITION,
+                "__has_include requires caller-provided include availability",
+                occurrence,
+            )
+            return False
+        try:
+            query = _has_include.header_query(
+                occurrence, context.environment, context.budget, context.filename
+            )
+        except _has_include.HeaderOperandError as error:
+            self._diagnose(ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION, str(error), occurrence)
+            return False
+        except ExpansionError as error:
+            self._diagnose(ErrorCode.UNSUPPORTED_MACRO_EXPANSION, str(error), occurrence)
+            return False
+        except AnalysisLimitExceeded as error:
+            context.diagnostics.append(context.limit_diagnostic(error, occurrence.location))
+            return False
+        available = self._provider_answer(query, occurrence)
+        if available is None and run.has_include_from_resolver:
+            available = self._resolver_answer(query, occurrence)
+        if available is None:
+            delimiter = (
+                f'"{query.header}"' if query.form is IncludeForm.QUOTED else f"<{query.header}>"
+            )
+            self._diagnose(
+                ErrorCode.UNRESOLVED_CONDITION,
+                f"include availability is unknown for {delimiter}",
+                occurrence,
+            )
+            return False
+        context.view.answers[occurrence.placeholder] = available
+        return True
+
+    def _provider_answer(
+        self, query: _has_include.IncludeQuery, occurrence: _has_include.Occurrence
+    ) -> bool | None:
+        context = self.context
+        provider = context.run.include_query
+        available = provider(query) if provider is not None else None
+        if available is not None and type(available) is not bool:
+            raise AnalysisError(
+                "include_query must return True, False, or None",
+                code=ErrorCode.INVALID_CONFIGURATION,
+                location=occurrence.location,
+                filename=context.filename,
+            )
+        return available
+
+    def _resolver_answer(
+        self, query: _has_include.IncludeQuery, occurrence: _has_include.Occurrence
+    ) -> bool:
+        """Available exactly when the equivalent #include would resolve; quoted forms
+        search relative to the source containing the query."""
+        context = self.context
+        includes = context.includes
+        assert includes is not None
+        includer = context.identity if context.identity is not None else context.filename
+        request = IncludeRequest(
+            query.header, query.form, "include", occurrence.location, includer, context.depth
+        )
+        resolved = includes.resolver(request)
+        if resolved is not None and not isinstance(resolved, ResolvedInclude):
+            raise AnalysisError(
+                "include_resolver must return a ResolvedInclude or None",
+                code=ErrorCode.INVALID_CONFIGURATION,
+                location=occurrence.location,
+                filename=includer,
+            )
+        return resolved is not None
+
+
+class _BranchSelector:
+    """Decides which reachable branch of a conditional group is taken.
+
+    A condition is decided in this order: the Boolean check against the macro state
+    (ROBDD), then concrete numeric evaluation, then - for a condition left
+    undetermined by an unanswered ``__has_include`` - the first such query on the
+    line is asked and the condition is decided again, so queries in irrelevant
+    Boolean terms are never sent. A condition that stays undetermined gets the
+    unresolved-condition diagnostic.
+    """
+
+    def __init__(self, context: _UnitContext, answerer: _QueryAnswerer) -> None:
+        self.context = context
+        self.answerer = answerer
+
+    def select(self, branch: ConditionalBranch) -> bool | None:
+        """Decide one reachable branch; None means diagnostics were added."""
+        context = self.context
+        builtin = (
+            _unconfigured_predefined_macro(branch.expression_text, context.view)
+            if branch.expression_text is not None
+            and branch.directive not in _DEFINEDNESS_DIRECTIVES
+            else None
+        )
+        if builtin is not None:
+            context.diagnostics.append(
+                context.located(
+                    ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
+                    f"predefined macro {builtin} is not supported during concrete preprocessing",
+                    branch.line,
+                )
+            )
+            return None
+        condition = branch.expression if branch.expression is not None else TRUE
+        # The macro context constrains each name independently (C semantics couple
+        # only a name's value and definedness), so whether it decides the condition
+        # depends on the condition's own names alone. A manager per condition keeps
+        # max_atoms and max_bdd_nodes from scaling with the number of conditionals
+        # in the file; max_work stays shared by the whole run.
+        atoms = list(expression_atoms_in_order(condition))
+        names = sorted({atom.name for atom in atoms if isinstance(atom, Variable)})
+        semantics = conjunction(
+            *(disjunction(negate(Variable(name)), DefinedVariable(name)) for name in names)
+        )
+        bdd = BDD(
+            [*atoms, *expression_atoms_in_order(semantics)],
+            limits=context.limits,
+            budget=context.budget,
+        )
+        line_queries = context.queries_by_line.get(branch.line, [])
+        while True:
+            boolean = self._boolean(bdd, condition, semantics, names)
+            if boolean is not None:
+                return boolean
+            pending = next(
+                (item for item in line_queries if item.placeholder not in context.view.answers),
+                None,
+            )
+            if branch.expression_text is not None and branch.directive not in (
+                _DEFINEDNESS_DIRECTIVES
+            ):
+                try:
+                    selected = self._numeric(branch, pending is not None)
+                except _Undecidable:
+                    return None
+                if selected is not None:
+                    return selected
+            if pending is not None:
+                if not self.answerer.answer(pending):
+                    return None
+                continue
+            context.diagnostics.append(self._unresolved(branch, line_queries))
+            return None
+
+    def _boolean(
+        self,
+        bdd: BDD,
+        condition: Expression,
+        semantics: Expression,
+        names: list[str],
+    ) -> bool | None:
+        """True or False when the macro state decides ``condition``; None when it does not."""
+        terms = [semantics]
+        for name in names:
+            macro = self.context.view.get(name)
+            for atom, value in (
+                (DefinedVariable(name), macro.defined),
+                (Variable(name), macro.value),
+            ):
+                if value is not None:
+                    terms.append(atom if value else negate(atom))
+        context_expression = conjunction(*terms)
+        if not bdd.satisfiable(conjunction(context_expression, condition)):
+            return False
+        if not bdd.satisfiable(conjunction(context_expression, negate(condition))):
+            return True
+        return None
+
+    def _numeric(self, branch: ConditionalBranch, query_pending: bool) -> bool | None:
+        """Evaluate the condition concretely; None when a pending query may still decide it.
+
+        Raises :class:`_Undecidable` after recording the diagnostic otherwise.
+        """
+        context = self.context
+        assert branch.expression_text is not None
+        try:
+            return evaluate_numeric_condition(
+                branch.expression_text,
+                _condition_environment(context.view),
+                context.expansion,
+                context.budget,
+                unsupported_identifiers=_PREDEFINED_MACROS,
+            )
+        except NumericConditionError as error:
+            if query_pending:
+                return None
+            context.diagnostics.append(
+                context.located(ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION, str(error), branch.line)
+            )
+        except ExpansionError as error:
+            context.diagnostics.append(
+                context.located(ErrorCode.UNSUPPORTED_MACRO_EXPANSION, str(error), branch.line)
+            )
+        raise _Undecidable
+
+    def _unresolved(
+        self, branch: ConditionalBranch, line_queries: list[_has_include.Occurrence]
+    ) -> PreprocessDiagnostic:
+        context = self.context
+        condition_text = (
+            _has_include.restore(branch.expression_text, line_queries)
+            if branch.expression_text is not None
+            else None
+        )
+        return _unresolved_condition(
+            branch.directive,
+            condition_text,
+            context.view,
+            branch.line,
+            context.identity,
+            context.limits.max_work,
+        )
+
+
+class _Undecidable(Exception):
+    """A branch condition could not be decided; the diagnostic is already recorded."""
+
+
+class _IncludeHandler:
+    """Resolves, tracks and splices one reachable ``#include``, ``#include_next`` or ``#import``."""
+
+    def __init__(self, context: _UnitContext) -> None:
+        self.context = context
+
+    def skip(self, kind: str, operand: str, location: SourceLocation) -> None:
+        context = self.context
+        context.run.skipped.append(SkippedInclude(kind, operand, location, context.identity))
+        if isinstance(context.base_environment, _ConfiguredMacroEnvironment):
+            # Names the caller configured or the source already settled keep their
+            # state; any other name may come from the unread header.
+            context.base_environment._skip_include()
+
+    def handle(self, kind: str, operand: str, line: int, state: _LogicalPreprocessingState) -> bool:
+        """Handle one reachable include directive; False means diagnostics were added."""
+        context = self.context
+        location = SourceLocation(line)
+        if not operand:
+            context.diagnostics.append(
+                context.located(
+                    ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
+                    f"#{kind} expects a header name",
+                    line,
+                )
+            )
+            return False
+        if context.includes is None:
+            self.skip(kind, operand, location)
+            context.blank(line, context.ends[line])
+            return True
+        return self._resolve(kind, operand, line, state, location)
+
+    def _resolve(
+        self,
+        kind: str,
+        operand: str,
+        line: int,
+        state: _LogicalPreprocessingState,
+        location: SourceLocation,
+    ) -> bool:
+        context = self.context
+        includes = context.includes
+        assert includes is not None
+        ends = context.ends
+        offsets = context.offsets
+        context.expansion.current_offset = offsets[line - 1]
+        try:
+            header, form = _include_header(
+                context.source[offsets[line - 1] : offsets[ends[line]]],
+                operand,
+                context.environment,
+                state,
+                context.budget,
+            )
+        except ValueError as error:
+            context.diagnostics.append(
+                context.located(ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE, str(error), line)
+            )
+            return False
+        spelling = f'"{header}"' if form is IncludeForm.QUOTED else f"<{header}>"
+        includer = context.identity if context.identity is not None else context.filename
+        request = IncludeRequest(header, form, kind, location, includer, context.depth)
+        resolved = includes.resolver(request)
+        if resolved is None:
+            if context.run.skip_includes:
+                self.skip(kind, operand, location)
+                context.blank(line, ends[line])
+                return True
+            context.diagnostics.append(
+                context.located(
+                    ErrorCode.UNRESOLVED_INCLUDE, f"cannot resolve #{kind} {spelling}", line
+                )
+            )
+            return False
+        if not isinstance(resolved, ResolvedInclude):
+            raise AnalysisError(
+                "include_resolver must return a ResolvedInclude or None",
+                code=ErrorCode.INVALID_CONFIGURATION,
+                location=location,
+                filename=includer,
+            )
+        target = resolved.identity
+        outcome = self._skip_outcome(kind, resolved)
+        if kind == "import":
+            includes.imported.add(target)
+        if outcome is not None:
+            includes.records.append(IncludeRecord(request, target, outcome))
+            context.blank(line, ends[line])
+            return True
+        return self._enter(kind, spelling, line, request, resolved)
+
+    def _skip_outcome(self, kind: str, resolved: ResolvedInclude) -> IncludeOutcome | None:
+        """Why this include is not entered again (``#pragma once``, ``#import``, guard)."""
+        context = self.context
+        includes = context.includes
+        assert includes is not None
+        target = resolved.identity
+        if target in includes.once:
+            return IncludeOutcome.PRAGMA_ONCE
+        if target in includes.entered and (kind == "import" or target in includes.imported):
+            # #import makes a source include-once, as in GCC and Clang.
+            return IncludeOutcome.IMPORTED
+        if target not in includes.guards:
+            includes.guards[target] = _detect_include_guard(resolved.source)
+        guard = includes.guards[target]
+        if guard is not None and context.environment.get(guard).defined is True:
+            return IncludeOutcome.GUARDED
+        return None
+
+    def _enter(
+        self,
+        kind: str,
+        spelling: str,
+        line: int,
+        request: IncludeRequest,
+        resolved: ResolvedInclude,
+    ) -> bool:
+        """Preprocess the included source and splice its output after the directive."""
+        context = self.context
+        includes = context.includes
+        assert includes is not None
+        ends = context.ends
+        target = resolved.identity
+        if target in includes.stack:
+            context.diagnostics.append(
+                context.located(
+                    ErrorCode.INCLUDE_CYCLE,
+                    f"#{kind} {spelling} re-enters {target}, which is already being preprocessed",
+                    line,
+                )
+            )
+            return False
+        if context.depth + 1 > includes.max_depth:
+            context.diagnostics.append(
+                context.located(
+                    ErrorCode.INCLUDE_DEPTH_EXCEEDED,
+                    f"#{kind} {spelling} exceeds the maximum include depth of {includes.max_depth}",
+                    line,
+                )
+            )
+            return False
+
+        guard = includes.guards[target]
+        if guard is not None and context.environment.get(guard).defined is None:
+            # A detected include guard is file-private, as in
+            # MacroConfiguration.from_source(): unless the caller configured it,
+            # it starts undefined so the guarded body is entered.
+            context.environment.undef(guard)
+        includes.records.append(IncludeRecord(request, target, IncludeOutcome.ENTERED))
+        includes.entered.add(target)
+        includes.stack.append(target)
+        try:
+            child = _preprocess_unit(
+                resolved.source,
+                context.run,
+                identity=target,
+                filename=target,
+                depth=context.depth + 1,
+            )
+        finally:
+            includes.stack.pop()
+        # Names defined or undefined by the included source are explicit state now.
+        context.environment._explicit_names.update(context.base_environment.snapshot())
+        if child.diagnostics:
+            context.diagnostics.extend(child.diagnostics)
+            return False
+        context.blank(line, ends[line])
+        context.insertions.append((context.offsets[ends[line]], ends[line], child))
+        return True
+
+
+class _UnitProcessor:
+    """Walks the logical lines of one source: conditionals, directives and text."""
+
+    def __init__(self, context: _UnitContext, tree: ConditionalTree) -> None:
+        self.context = context
+        self.answerer = _QueryAnswerer(context)
+        self.selector = _BranchSelector(context, self.answerer)
+        self.includes = _IncludeHandler(context)
+        self.starts = {group.line: group for group in tree.groups}
+        self._index_groups(tree.groups)
+        self.branches = {
+            branch.line: branch for group in self.starts.values() for branch in group.branches
+        }
+        self.selections = _SELECTED_BRANCHES.get() if context.identity is None else None
+        # One frame per open conditional group: [entered active, a branch was taken,
+        # the current branch is active].
+        self.stack: list[list[bool]] = []
+        self.group_lines: list[int] = []
+        self.active = True
+
+    def _index_groups(self, groups: list[ConditionalGroup]) -> None:
+        for group in groups:
+            self.starts[group.line] = group
+            for branch in group.branches:
+                self._index_groups(branch.children)
+
+    def run(self) -> None:
+        """Process every logical line, leaving results in the context.
+
+        Stops at the first line that adds a diagnostic.
+        """
+        context = self.context
+        try:
+            for line in context.logical:
+                if not self._line(line):
+                    break
+            if not context.diagnostics:
+                context.environment.logical_override = None
+                context.expansion.flush(context.environment)
+        except ExpansionError as error:
+            context.diagnostics.append(
+                PreprocessDiagnostic(
+                    ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
+                    str(error),
+                    context.expansion.location(context.expansion.current_offset),
+                    context.identity,
+                )
+            )
+        except AnalysisLimitExceeded as error:
+            limit_line = error.line if error.line is not None else context.current_line
+            context.diagnostics.append(
+                context.limit_diagnostic(
+                    error, SourceLocation(limit_line) if limit_line is not None else None
+                )
+            )
+
+    def _line(self, line: LogicalLine) -> bool:
+        """Process one logical line; False means a diagnostic ended the walk."""
+        context = self.context
+        current_line = line.start_line
+        context.current_line = current_line
+        for physical_line_number in range(current_line, context.ends[current_line] + 1):
+            context.logical_states[physical_line_number] = _LogicalPreprocessingState(
+                physical_line_number + context.logical_delta,
+                context.logical_file_literal,
+            )
+        line_state = context.logical_states[current_line]
+        head = line.directive
+        if head is not None:
+            context.environment.logical_override = None
+            context.expansion.flush(context.environment)
+        branch = self.branches.get(current_line)
+        if branch is not None:
+            return self._conditional_line(branch, current_line, line_state)
+        core = head.name if head is not None and head.name in _CORE_DIRECTIVES else None
+        if core == "endif":
+            self.stack.pop()
+            self.group_lines.pop()
+            self.active = self.stack[-1][2] if self.stack else True
+            context.blank(current_line, context.ends[current_line])
+            return True
+        if not self.active:
+            context.blank(current_line, context.ends[current_line])
+            return True
+        if core is not None:
+            return self._core_directive(core, current_line, line_state)
+        if head is not None:
+            return self._other_directive(current_line, line_state)
+        context.environment.logical_override = None
+        context.expansion.line(
+            context.offsets[current_line - 1], context.offsets[context.ends[current_line]]
+        )
+        return True
+
+    def _conditional_line(
+        self, branch: ConditionalBranch, current_line: int, line_state: _LogicalPreprocessingState
+    ) -> bool:
+        context = self.context
+        if current_line in self.starts:
+            self.stack.append([self.active, False, False])
+            self.group_lines.append(current_line)
+            if self.selections is not None and self.active:
+                self.selections[current_line] = None
+        frame = self.stack[-1]
+        self.active = False
+        context.blank(current_line, context.ends[current_line])
+        context.environment.logical_override = line_state
+        try:
+            if frame[0] and not frame[1]:
+                selected = self.selector.select(branch)
+                if selected is None:
+                    return False
+                if selected:
+                    self.active = True
+                    frame[1] = True
+                    if self.selections is not None:
+                        self.selections[self.group_lines[-1]] = current_line
+        finally:
+            context.environment.logical_override = None
+        frame[2] = self.active
+        return True
+
+    def _core_directive(
+        self, kind: str, current_line: int, line_state: _LogicalPreprocessingState
+    ) -> bool:
+        """``#define``, ``#undef``, ``#line`` and the include family on an active line."""
+        context = self.context
+        run = context.run
+        definition = None
+        include: tuple[str, str] | None = None
+        try:
+            concrete = context.expansion.directive_text(
+                context.offsets[current_line - 1], context.offsets[context.ends[current_line]]
+            )
+            if kind == "line":
+                self._line_directive(concrete, current_line, line_state)
+                return True
+            if kind not in {"define", "undef"}:
+                if not run.skip_includes and context.includes is None:
+                    raise ValueError("include processing is not supported")
+                include = _include_directive(concrete)
+                if include is None or include[0] != kind:
+                    raise ValueError("ambiguous directive after physical line splicing")
+            else:
+                head = directive_head(concrete)
+                if head is None or head.name != kind:
+                    raise ValueError("ambiguous directive after physical line splicing")
+                remainder = concrete[head.name_end :]
+                if self._protected(kind, remainder, current_line):
+                    return False
+                _apply_macro_directive(
+                    context.environment, kind, remainder, SourceLocation(current_line)
+                )
+                if kind == "define":
+                    defined_name = macro_name(remainder)
+                    assert defined_name is not None
+                    definition = context.environment.get(defined_name).definition
+        except ValueError as error:
+            context.diagnostics.append(
+                context.located(
+                    ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE, str(error), current_line
+                )
+            )
+            return False
+        if include is not None:
+            return self.includes.handle(kind, include[1], current_line, line_state)
+        if definition is not None:
+            context.expansion.current_offset = context.offsets[current_line - 1]
+            context.expansion.validate_definition(definition)
+        context.blank(current_line, context.ends[current_line])
+        return True
+
+    def _line_directive(
+        self, concrete: str, current_line: int, line_state: _LogicalPreprocessingState
+    ) -> None:
+        """Apply a standard ``#line``: it only changes logical line and file state."""
+        context = self.context
+        context.expansion.current_offset = context.offsets[current_line - 1]
+        next_line, next_file_literal = _parse_line_directive(
+            concrete, context.environment, line_state, context.budget
+        )
+        context.logical_delta = next_line - (context.ends[current_line] + 1)
+        if next_file_literal is not None:
+            context.logical_file_literal = next_file_literal
+        context.blank(current_line, context.ends[current_line])
+
+    def _protected(self, kind: str, remainder: str, current_line: int) -> bool:
+        """Diagnose a seed ``#define``/``#undef`` of a name the context supplies."""
+        context = self.context
+        protected = context.run.protected_names
+        if not protected:
+            return False
+        target = macro_name(remainder)
+        if target is None or target not in protected:
+            return False
+        verb = "redefines" if kind == "define" else "undefines"
+        context.diagnostics.append(
+            context.located(
+                ErrorCode.INVALID_CONFIGURATION,
+                f"seed {verb} {target}, which the preprocessing context supplies",
+                current_line,
+            )
+        )
+        return True
+
+    def _other_directive(self, current_line: int, line_state: _LogicalPreprocessingState) -> bool:
+        """The null directive, ``#pragma once``, skipped includes; anything else is unsupported."""
+        context = self.context
+        includes = context.includes
+        concrete = context.expansion.directive_text(
+            context.offsets[current_line - 1], context.offsets[context.ends[current_line]]
+        )
+        head = directive_head(concrete)
+        assert head is not None  # the logical line is a directive line
+        operand = concrete[head.name_end :]
+        if head.name is None and not operand:
+            context.blank(current_line, context.ends[current_line])
+            return True
+        if context.identity is not None and includes is not None:
+            if (
+                head.name == "pragma"
+                and operand[:1] in tuple(HORIZONTAL_WHITESPACE)
+                and operand.strip(HORIZONTAL_WHITESPACE) == "once"
+            ):
+                includes.once.add(context.identity)
+                context.blank(current_line, context.ends[current_line])
+                return True
+        if context.run.skip_includes or includes is not None:
+            include = _include_directive(concrete)
+            if include is not None:
+                return self.includes.handle(include[0], include[1], current_line, line_state)
+        if head.name is not None:
+            message = (
+                f"#{head.name} preprocessing directive is not supported "
+                "during concrete preprocessing"
+            )
+        else:
+            message = "nonconditional preprocessing directive is not supported"
+        context.diagnostics.append(
+            context.located(ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE, message, current_line)
+        )
+        return False
+
+
 def _preprocess_unit(
     source: str,
     run: _Run,
@@ -799,570 +1554,27 @@ def _preprocess_unit(
     queries = _has_include.scan(source) if "__has_include" in source else ()
     if queries:
         source = _has_include.render(source, queries)
-    queries_by_line: dict[int, list[_has_include.Occurrence]] = {}
-    for occurrence in queries:
-        queries_by_line.setdefault(occurrence.directive_line, []).append(occurrence)
     try:
         tree = parse_source(source, distinguish_defined=True)
     except ConditionError as error:
         raise _translate_parse_error(error, filename) from error
 
-    base_environment = run.base_environment
-    limits = run.limits
-    budget = run.budget
-    includes = run.includes
-    physical = split_lines(source, keepends=True)
-    logical = list(logical_lines(source))
-    ends = {line.start_line: line.end_line for line in logical}
-    retained = [True] * len(physical)
-    diagnostics: list[PreprocessDiagnostic | AnalysisIncomplete] = []
-    insertions: list[tuple[int, int, _UnitOutput]] = []
-
-    def blank(start: int, end: int) -> None:
-        retained[start - 1 : end] = [False] * (end - start + 1)
-
-    def located(code: ErrorCode, message: str, line: int) -> PreprocessDiagnostic:
-        return PreprocessDiagnostic(code, message, SourceLocation(line), identity)
-
-    expansion = Expansion(source, budget)
-    logical_states: dict[int, _LogicalPreprocessingState] = {}
-    environment = _PredefinedMacroEnvironment(base_environment, expansion, logical_states)
-    view = _has_include.ConditionView(
-        environment, queries, run.include_query is not None or run.has_include_from_resolver
+    context = _UnitContext(
+        source, run, identity=identity, filename=filename, depth=depth, queries=queries
     )
-    offsets = [0]
-    for physical_line in physical:
-        offsets.append(offsets[-1] + len(physical_line))
-    current_line = None
-    logical_delta = 0
-    logical_file_literal = _file_literal(filename)
+    _UnitProcessor(context, tree).run()
+    if context.diagnostics:
+        return _UnitOutput(tuple(context.diagnostics))
+    return _finish_unit(context, pragma_markers)
 
-    def skip(kind: str, operand: str, location: SourceLocation) -> None:
-        run.skipped.append(SkippedInclude(kind, operand, location, identity))
-        if isinstance(base_environment, _ConfiguredMacroEnvironment):
-            # Names the caller configured or the source already settled keep their
-            # state; any other name may come from the unread header.
-            base_environment._skip_include()
 
-    def has_include_diagnostic(
-        code: ErrorCode, message: str, occurrence: _has_include.Occurrence
-    ) -> None:
-        diagnostics.append(PreprocessDiagnostic(code, message, occurrence.location, identity))
-
-    def answer_query(occurrence: _has_include.Occurrence) -> bool:
-        """Answer one reachable __has_include; False means diagnostics were added."""
-        if occurrence.operator == _has_include.HAS_INCLUDE_NEXT:
-            has_include_diagnostic(
-                ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION,
-                "__has_include_next is not supported during concrete preprocessing",
-                occurrence,
-            )
-            return False
-        if occurrence.operand is None:
-            has_include_diagnostic(
-                ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION,
-                "__has_include expects one parenthesized header-name operand",
-                occurrence,
-            )
-            return False
-        if run.include_query is None and not run.has_include_from_resolver:
-            has_include_diagnostic(
-                ErrorCode.UNRESOLVED_CONDITION,
-                "__has_include requires caller-provided include availability",
-                occurrence,
-            )
-            return False
-        try:
-            query = _has_include.header_query(occurrence, environment, budget, filename)
-        except _has_include.HeaderOperandError as error:
-            has_include_diagnostic(
-                ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION, str(error), occurrence
-            )
-            return False
-        except ExpansionError as error:
-            has_include_diagnostic(ErrorCode.UNSUPPORTED_MACRO_EXPANSION, str(error), occurrence)
-            return False
-        except AnalysisLimitExceeded as error:
-            diagnostics.append(
-                AnalysisIncomplete(
-                    ErrorCode.ANALYSIS_LIMIT_EXCEEDED,
-                    error.resource,
-                    error.limit,
-                    error.observed,
-                    str(error),
-                    occurrence.location,
-                    source_identity=identity,
-                )
-            )
-            return False
-        available = run.include_query(query) if run.include_query is not None else None
-        if available is not None and type(available) is not bool:
-            raise AnalysisError(
-                "include_query must return True, False, or None",
-                code=ErrorCode.INVALID_CONFIGURATION,
-                location=occurrence.location,
-                filename=filename,
-            )
-        if available is None and run.has_include_from_resolver:
-            assert includes is not None
-            # Available exactly when the equivalent #include would resolve; quoted
-            # forms search relative to the source containing the query.
-            includer = identity if identity is not None else filename
-            request = IncludeRequest(
-                query.header, query.form, "include", occurrence.location, includer, depth
-            )
-            resolved = includes.resolver(request)
-            if resolved is not None and not isinstance(resolved, ResolvedInclude):
-                raise AnalysisError(
-                    "include_resolver must return a ResolvedInclude or None",
-                    code=ErrorCode.INVALID_CONFIGURATION,
-                    location=occurrence.location,
-                    filename=includer,
-                )
-            available = resolved is not None
-        if available is None:
-            delimiter = (
-                f'"{query.header}"' if query.form is IncludeForm.QUOTED else f"<{query.header}>"
-            )
-            has_include_diagnostic(
-                ErrorCode.UNRESOLVED_CONDITION,
-                f"include availability is unknown for {delimiter}",
-                occurrence,
-            )
-            return False
-        view.answers[occurrence.placeholder] = available
-        return True
-
-    def select_branch(branch: ConditionalBranch) -> bool | None:
-        """Decide one reachable branch; None means diagnostics were added.
-
-        A condition left undetermined by an unanswered ``__has_include`` asks for
-        the first such query on the line and is re-evaluated, so queries in
-        irrelevant Boolean terms are never sent.
-        """
-        line_queries = queries_by_line.get(branch.line, [])
-        builtin = (
-            _unconfigured_predefined_macro(branch.expression_text, view)
-            if branch.expression_text is not None
-            and branch.directive not in _DEFINEDNESS_DIRECTIVES
-            else None
-        )
-        if builtin is not None:
-            diagnostics.append(
-                located(
-                    ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
-                    f"predefined macro {builtin} is not supported during concrete preprocessing",
-                    branch.line,
-                )
-            )
-            return None
-        condition = branch.expression if branch.expression is not None else TRUE
-        # The macro context constrains each name independently (C semantics couple
-        # only a name's value and definedness), so whether it decides the condition
-        # depends on the condition's own names alone. A manager per condition keeps
-        # max_atoms and max_bdd_nodes from scaling with the number of conditionals
-        # in the file; max_work stays shared by the whole run.
-        atoms = list(expression_atoms_in_order(condition))
-        names = sorted({atom.name for atom in atoms if isinstance(atom, Variable)})
-        semantics = conjunction(
-            *(disjunction(negate(Variable(name)), DefinedVariable(name)) for name in names)
-        )
-        bdd = BDD([*atoms, *expression_atoms_in_order(semantics)], limits=limits, budget=budget)
-        while True:
-            terms = [semantics]
-            for name in names:
-                macro = view.get(name)
-                for atom, value in (
-                    (DefinedVariable(name), macro.defined),
-                    (Variable(name), macro.value),
-                ):
-                    if value is not None:
-                        terms.append(atom if value else negate(atom))
-            context_expression = conjunction(*terms)
-            if not bdd.satisfiable(conjunction(context_expression, condition)):
-                return False
-            if not bdd.satisfiable(conjunction(context_expression, negate(condition))):
-                return True
-            pending = next(
-                (item for item in line_queries if item.placeholder not in view.answers), None
-            )
-            if branch.expression_text is not None and branch.directive not in (
-                _DEFINEDNESS_DIRECTIVES
-            ):
-                try:
-                    selected = evaluate_numeric_condition(
-                        branch.expression_text,
-                        _condition_environment(view),  # type: ignore[arg-type]
-                        expansion,
-                        budget,
-                        unsupported_identifiers=_PREDEFINED_MACROS,
-                    )
-                except NumericConditionError as error:
-                    if pending is not None:
-                        selected = None
-                    else:
-                        diagnostics.append(
-                            located(
-                                ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION,
-                                str(error),
-                                branch.line,
-                            )
-                        )
-                        return None
-                except ExpansionError as error:
-                    diagnostics.append(
-                        located(ErrorCode.UNSUPPORTED_MACRO_EXPANSION, str(error), branch.line)
-                    )
-                    return None
-                if selected is not None:
-                    return selected
-            if pending is not None:
-                if not answer_query(pending):
-                    return None
-                continue
-            condition_text = (
-                _has_include.restore(branch.expression_text, line_queries)
-                if branch.expression_text is not None
-                else None
-            )
-            diagnostics.append(
-                _unresolved_condition(
-                    branch.directive,
-                    condition_text,
-                    view,  # type: ignore[arg-type]
-                    branch.line,
-                    identity,
-                    limits.max_work,
-                )
-            )
-            return None
-
-    def include_line(kind: str, operand: str, line: int, state: _LogicalPreprocessingState) -> bool:
-        """Handle one reachable include directive; False means diagnostics were added."""
-        location = SourceLocation(line)
-        if not operand:
-            diagnostics.append(
-                located(
-                    ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
-                    f"#{kind} expects a header name",
-                    line,
-                )
-            )
-            return False
-        if includes is None:
-            skip(kind, operand, location)
-            blank(line, ends[line])
-            return True
-
-        expansion.current_offset = offsets[line - 1]
-        try:
-            header, form = _include_header(
-                source[offsets[line - 1] : offsets[ends[line]]],
-                operand,
-                environment,
-                state,
-                budget,
-            )
-        except ValueError as error:
-            diagnostics.append(
-                located(ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE, str(error), line)
-            )
-            return False
-        spelling = f'"{header}"' if form is IncludeForm.QUOTED else f"<{header}>"
-        includer = identity if identity is not None else filename
-        request = IncludeRequest(header, form, kind, location, includer, depth)
-        resolved = includes.resolver(request)
-        if resolved is None:
-            if run.skip_includes:
-                skip(kind, operand, location)
-                blank(line, ends[line])
-                return True
-            diagnostics.append(
-                located(
-                    ErrorCode.UNRESOLVED_INCLUDE,
-                    f"cannot resolve #{kind} {spelling}",
-                    line,
-                )
-            )
-            return False
-        if not isinstance(resolved, ResolvedInclude):
-            raise AnalysisError(
-                "include_resolver must return a ResolvedInclude or None",
-                code=ErrorCode.INVALID_CONFIGURATION,
-                location=location,
-                filename=includer,
-            )
-
-        target = resolved.identity
-        outcome: IncludeOutcome | None = None
-        if target in includes.once:
-            outcome = IncludeOutcome.PRAGMA_ONCE
-        elif target in includes.entered and (kind == "import" or target in includes.imported):
-            # #import makes a source include-once, as in GCC and Clang.
-            outcome = IncludeOutcome.IMPORTED
-        else:
-            if target not in includes.guards:
-                includes.guards[target] = _detect_include_guard(resolved.source)
-            guard = includes.guards[target]
-            if guard is not None and environment.get(guard).defined is True:
-                outcome = IncludeOutcome.GUARDED
-        if kind == "import":
-            includes.imported.add(target)
-        if outcome is not None:
-            includes.records.append(IncludeRecord(request, target, outcome))
-            blank(line, ends[line])
-            return True
-
-        if target in includes.stack:
-            diagnostics.append(
-                located(
-                    ErrorCode.INCLUDE_CYCLE,
-                    f"#{kind} {spelling} re-enters {target}, which is already being preprocessed",
-                    line,
-                )
-            )
-            return False
-        if depth + 1 > includes.max_depth:
-            diagnostics.append(
-                located(
-                    ErrorCode.INCLUDE_DEPTH_EXCEEDED,
-                    f"#{kind} {spelling} exceeds the maximum include depth of {includes.max_depth}",
-                    line,
-                )
-            )
-            return False
-
-        guard = includes.guards[target]
-        if guard is not None and environment.get(guard).defined is None:
-            # A detected include guard is file-private, as in
-            # MacroConfiguration.from_source(): unless the caller configured it,
-            # it starts undefined so the guarded body is entered.
-            environment.undef(guard)
-        includes.records.append(IncludeRecord(request, target, IncludeOutcome.ENTERED))
-        includes.entered.add(target)
-        includes.stack.append(target)
-        try:
-            child = _preprocess_unit(
-                resolved.source,
-                run,
-                identity=target,
-                filename=target,
-                depth=depth + 1,
-            )
-        finally:
-            includes.stack.pop()
-        # Names defined or undefined by the included source are explicit state now.
-        environment._explicit_names.update(base_environment.snapshot())
-        if child.diagnostics:
-            diagnostics.extend(child.diagnostics)
-            return False
-        blank(line, ends[line])
-        insertions.append((offsets[ends[line]], ends[line], child))
-        return True
-
-    try:
-        starts = {group.line: group for group in tree.groups}
-
-        def index_groups(groups: list[ConditionalGroup]) -> None:
-            for group in groups:
-                starts[group.line] = group
-                for branch in group.branches:
-                    index_groups(branch.children)
-
-        index_groups(tree.groups)
-        branches = {branch.line: branch for group in starts.values() for branch in group.branches}
-        selections = _SELECTED_BRANCHES.get() if identity is None else None
-        stack: list[list[bool]] = []
-        group_lines: list[int] = []
-        active = True
-        for line in logical:
-            current_line = line.start_line
-            for physical_line_number in range(current_line, ends[current_line] + 1):
-                logical_states[physical_line_number] = _LogicalPreprocessingState(
-                    physical_line_number + logical_delta,
-                    logical_file_literal,
-                )
-            line_state = logical_states[current_line]
-            head = line.directive
-            is_directive = head is not None
-            if is_directive:
-                environment.logical_override = None
-                expansion.flush(environment)
-            branch = branches.get(current_line)
-            if branch is not None:
-                if current_line in starts:
-                    stack.append([active, False, False])
-                    group_lines.append(current_line)
-                    if selections is not None and active:
-                        selections[current_line] = None
-                frame = stack[-1]
-                active = False
-                blank(current_line, ends[current_line])
-                environment.logical_override = line_state
-                try:
-                    if frame[0] and not frame[1]:
-                        selected = select_branch(branch)
-                        if selected is None:
-                            break
-                        if selected:
-                            active = True
-                            frame[1] = True
-                            if selections is not None:
-                                selections[group_lines[-1]] = current_line
-                finally:
-                    environment.logical_override = None
-                frame[2] = active
-                continue
-            core = head.name if head is not None and head.name in _CORE_DIRECTIVES else None
-            if core == "endif":
-                stack.pop()
-                group_lines.pop()
-                active = stack[-1][2] if stack else True
-                blank(current_line, ends[current_line])
-                continue
-            if not active:
-                blank(current_line, ends[current_line])
-                continue
-            if core is not None:
-                kind = core
-                definition = None
-                try:
-                    concrete = expansion.directive_text(
-                        offsets[current_line - 1], offsets[ends[current_line]]
-                    )
-                    if kind == "line":
-                        expansion.current_offset = offsets[current_line - 1]
-                        next_line, next_file_literal = _parse_line_directive(
-                            concrete,
-                            environment,
-                            line_state,
-                            budget,
-                        )
-                        logical_delta = next_line - (ends[current_line] + 1)
-                        if next_file_literal is not None:
-                            logical_file_literal = next_file_literal
-                        blank(current_line, ends[current_line])
-                        continue
-                    if kind not in {"define", "undef"}:
-                        if not run.skip_includes and includes is None:
-                            raise ValueError("include processing is not supported")
-                        directive = _include_directive(concrete)
-                        if directive is None or directive[0] != kind:
-                            raise ValueError("ambiguous directive after physical line splicing")
-                    else:
-                        definition_head = directive_head(concrete)
-                        if definition_head is None or definition_head.name != kind:
-                            raise ValueError("ambiguous directive after physical line splicing")
-                        remainder = concrete[definition_head.name_end :]
-                        protected = run.protected_names
-                        if protected:
-                            target = macro_name(remainder)
-                            if target is not None and target in protected:
-                                verb = "redefines" if kind == "define" else "undefines"
-                                diagnostics.append(
-                                    located(
-                                        ErrorCode.INVALID_CONFIGURATION,
-                                        f"seed {verb} {target}, which the preprocessing "
-                                        "context supplies",
-                                        current_line,
-                                    )
-                                )
-                                break
-                        _apply_macro_directive(
-                            environment, kind, remainder, SourceLocation(current_line)
-                        )
-                        if kind == "define":
-                            defined_name = macro_name(remainder)
-                            assert defined_name is not None
-                            definition = environment.get(defined_name).definition
-                except ValueError as error:
-                    diagnostics.append(
-                        located(
-                            ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
-                            str(error),
-                            current_line,
-                        )
-                    )
-                    break
-                if kind not in {"define", "undef"}:
-                    if include_line(kind, directive[1], current_line, line_state):
-                        continue
-                    break
-                if definition is not None:
-                    expansion.current_offset = offsets[current_line - 1]
-                    expansion.validate_definition(definition)
-                blank(current_line, ends[current_line])
-            elif is_directive:
-                concrete = expansion.directive_text(
-                    offsets[current_line - 1], offsets[ends[current_line]]
-                )
-                concrete_head = directive_head(concrete)
-                assert concrete_head is not None  # the logical line is a directive line
-                operand = concrete[concrete_head.name_end :]
-                if concrete_head.name is None and not operand:
-                    blank(current_line, ends[current_line])
-                    continue
-                if identity is not None and includes is not None:
-                    if (
-                        concrete_head.name == "pragma"
-                        and operand[:1] in tuple(HORIZONTAL_WHITESPACE)
-                        and operand.strip(HORIZONTAL_WHITESPACE) == "once"
-                    ):
-                        includes.once.add(identity)
-                        blank(current_line, ends[current_line])
-                        continue
-                if run.skip_includes or includes is not None:
-                    directive = _include_directive(concrete)
-                    if directive is not None:
-                        if include_line(directive[0], directive[1], current_line, line_state):
-                            continue
-                        break
-                if concrete_head.name is not None:
-                    message = (
-                        f"#{concrete_head.name} preprocessing directive is not supported "
-                        "during concrete preprocessing"
-                    )
-                else:
-                    message = "nonconditional preprocessing directive is not supported"
-                diagnostics.append(
-                    located(
-                        ErrorCode.UNSUPPORTED_PREPROCESSING_DIRECTIVE,
-                        message,
-                        current_line,
-                    )
-                )
-                break
-            else:
-                environment.logical_override = None
-                expansion.line(offsets[current_line - 1], offsets[ends[current_line]])
-        if not diagnostics:
-            environment.logical_override = None
-            expansion.flush(environment)
-    except ExpansionError as error:
-        diagnostics.append(
-            PreprocessDiagnostic(
-                ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
-                str(error),
-                expansion.location(expansion.current_offset),
-                identity,
-            )
-        )
-    except AnalysisLimitExceeded as error:
-        limit_line = error.line if error.line is not None else current_line
-        diagnostics.append(
-            AnalysisIncomplete(
-                ErrorCode.ANALYSIS_LIMIT_EXCEEDED,
-                error.resource,
-                error.limit,
-                error.observed,
-                str(error),
-                SourceLocation(limit_line) if limit_line is not None else None,
-                source_identity=identity,
-            )
-        )
-
-    if diagnostics:
-        return _UnitOutput(tuple(diagnostics))
+def _finish_unit(context: _UnitContext, pragma_markers: tuple[_SourcePragma, ...]) -> _UnitOutput:
+    """Render the output of a unit whose lines were all processed without diagnostics."""
+    source = context.source
+    identity = context.identity
+    expansion = context.expansion
+    retained = context.retained
+    physical = context.physical
     output = "".join(
         line if keep else "".join(char if char in "\r\n" else " " for char in line)
         for line, keep in zip(physical, retained)
@@ -1422,15 +1634,15 @@ def _preprocess_unit(
             source_map += (_synthetic_newline(len(output), len(source), expansion, identity),)
             output += "\n"
     unit = _UnitOutput((), output, source_map, removed_lines, tuple(pragmas))
-    if insertions:
-        unit = _splice(unit, insertions, len(source), expansion, identity)
+    if context.insertions:
+        unit = _splice(unit, context.insertions, len(source), expansion, identity)
     return unit
 
 
 def _unresolved_condition(
     directive: str,
     condition: str | None,
-    environment: MacroEnvironment,
+    environment: MacroLookup,
     line: int,
     identity: str | None,
     max_work: int,

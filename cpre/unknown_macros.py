@@ -19,7 +19,7 @@ from .configuration import MacroConfiguration, _condition_environment, _configur
 from .errors import AnalysisError, ErrorCode, SourceLocation
 from .expansion import Expansion, ExpansionError
 from .lexer import CONDITIONAL_DIRECTIVES, Token, logical_lines, macro_name, tokenize
-from .macros import MacroDefinition, MacroEnvironment, _apply_macro_directive
+from .macros import MacroDefinition, MacroEnvironment, MacroLookup, _apply_macro_directive
 from .model import ConditionalBranch, ConditionError
 from .parser import parse_source
 from .robdd import AnalysisBudget, AnalysisLimitExceeded
@@ -159,7 +159,7 @@ def _static_uses(
 
 def _unresolved_uses(
     text: str,
-    environment: MacroEnvironment,
+    environment: MacroLookup,
     *,
     definedness_directive: bool,
     max_work: int,
@@ -238,7 +238,7 @@ def _unresolved_uses(
 
 def _unresolved_macros(
     text: str,
-    environment: MacroEnvironment,
+    environment: MacroLookup,
     *,
     directive: str,
     line: int,

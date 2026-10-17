@@ -11,7 +11,7 @@ from dataclasses import dataclass, replace
 from ._lines import LINE_BREAK, line_starts
 from .errors import SourceLocation
 from .lexer import SPLICE, Token, tokenize
-from .macros import MacroDefinition, MacroEnvironment
+from .macros import MacroDefinition, MacroLookup
 from .robdd import AnalysisBudget, AnalysisLimitExceeded
 
 _VA_OPT_KIND = "va_opt"
@@ -347,7 +347,7 @@ class Expansion:
         return False
 
     def _rescan(
-        self, tokens: list[Token], environment: MacroEnvironment
+        self, tokens: list[Token], environment: MacroLookup
     ) -> Generator[list[Token], list[Token], list[Token]]:
         """Yield argument prescans to an explicit trampoline, never Python recursion.
 
@@ -463,7 +463,7 @@ class Expansion:
                 emitted.append(Token("", "empty", token.start, end, hidden, True))
         return emitted
 
-    def _expand(self, tokens: list[Token], environment: MacroEnvironment) -> list[Token]:
+    def _expand(self, tokens: list[Token], environment: MacroLookup) -> list[Token]:
         stack = [self._rescan(tokens, environment)]
         result = None
         while stack:
@@ -484,7 +484,7 @@ class Expansion:
             self.pending_start = start
         self.pending_end = end
 
-    def flush(self, environment: MacroEnvironment) -> None:
+    def flush(self, environment: MacroLookup) -> None:
         if self.pending_start is None:
             return
         first = bisect_right(self.starts, self.pending_start - 1)

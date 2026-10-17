@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from .expansion import Expansion, ExpansionError
 from .lexer import Token, tokenize
-from .macros import MacroEnvironment
+from .macros import MacroLookup
 from .robdd import AnalysisBudget
 
 
@@ -108,7 +108,7 @@ def _unknown_reason(*values: _Value) -> str:
     return "expression depends on an implementation-defined character constant value"
 
 
-def _resolve_defined(tokens: list[Token], environment: MacroEnvironment) -> list[Token] | None:
+def _resolve_defined(tokens: list[Token], environment: MacroLookup) -> list[Token] | None:
     result: list[Token] = []
     index = 0
     while index < len(tokens):
@@ -525,7 +525,7 @@ class _Parser:
 
 def evaluate_numeric_condition(
     text: str,
-    environment: MacroEnvironment,
+    environment: MacroLookup,
     expansion: Expansion,
     budget: AnalysisBudget,
     *,

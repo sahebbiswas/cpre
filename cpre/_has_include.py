@@ -12,7 +12,7 @@ from .expansion import Expansion
 from .includes import IncludeForm
 from .lexer import SPLICE, logical_lines
 from .lexer import scan as scan_tokens
-from .macros import MacroDefinition, MacroEnvironment, MacroState
+from .macros import MacroDefinition, MacroLookup, MacroState
 from .robdd import AnalysisBudget
 
 
@@ -215,7 +215,7 @@ def restore(text: str, occurrences: list[Occurrence]) -> str:
 
 def header_query(
     occurrence: Occurrence,
-    environment: MacroEnvironment,
+    environment: MacroLookup,
     budget: AnalysisBudget,
     filename: str | None,
 ) -> IncludeQuery:
@@ -262,7 +262,7 @@ class ConditionView:
 
     def __init__(
         self,
-        environment: MacroEnvironment,
+        environment: MacroLookup,
         occurrences: tuple[Occurrence, ...],
         answerable: bool,
     ) -> None:

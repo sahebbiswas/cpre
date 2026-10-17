@@ -79,7 +79,6 @@ module = [
     "cpre.expansion",
     "cpre.numeric_conditions",
     "cpre.pragmas",
-    "cpre.preprocessing",
     "cpre.reporting",
     "cpre.symbolic",
 ]
