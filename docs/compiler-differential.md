@@ -69,4 +69,3 @@ A recorded case is still run, and it fails if the difference changes in any way,
 |---|---|---|---|
 | `comment_across_line_directive.c` | intentional | #156 | Clang only: for a `#line` directive that a comment spreads over two physical lines, Clang gives the new number to the directive's second line, so `__LINE__` on the line after it is one higher. GCC and cpre apply the number to the line after the whole directive, as cpre does for a backslash-continued `#line`. |
 | `if_character_constants.c` | intentional | #50 | cpre does not evaluate ordinary character constants such as `'A'` in `#if`, because their values depend on the execution character set. The result is incomplete instead. |
-| `macro_va_opt_omitted.c` | gap | #151 | A C23 call that omits the variadic argument entirely is incomplete. |

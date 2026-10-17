@@ -134,8 +134,15 @@ def test_bind_arguments_treats_an_empty_list_as_no_arguments():
 def test_bind_arguments_checks_the_argument_count():
     with pytest.raises(ExpansionError, match="expects 2 arguments, got 1"):
         bind_arguments(macro("F", "", ("x", "y")), [significant("1")], [])
-    with pytest.raises(ExpansionError, match="requires a variadic argument"):
-        bind_arguments(macro("F", "", ("x",), True), [significant("1")], [])
+    with pytest.raises(ExpansionError, match="expects at least 2 arguments, got 1"):
+        bind_arguments(macro("F", "", ("x", "y"), True), [significant("1")], [])
+
+
+def test_bind_arguments_accepts_an_omitted_variadic_argument():
+    bound = bind_arguments(macro("F", "", ("x",), True), [significant("1")], [])
+    assert texts(bound["x"]) == ["1"]
+    assert bound["__VA_ARGS__"] == []
+    assert bind_arguments(macro("F", "", ("x",), True), [[]], [])["__VA_ARGS__"] == []
 
 
 # Stage 3: substitution
