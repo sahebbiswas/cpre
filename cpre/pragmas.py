@@ -9,22 +9,22 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Protocol
 
-from ._lines import split_lines
+from ._lines import line_starts, split_lines
 from ._pragma_syntax import (
     _mask_source_pragmas,
     _normalize_pragma_payload,
     _output_offset_for_source,
-    _physical_line_starts,
     _public_location,
     _SourcePragma,
 )
 from .api import AnalysisOptions, MacroAssumptions
 from .configuration import MacroConfiguration
 from .errors import AnalysisError, ErrorCode, SourceLocation
-from .expansion import SourceMapping, tokenize
+from .expansion import SourceMapping
 from .include_queries import IncludeQueryProvider
 from .include_queries import preprocess_source as _include_preprocess_source
 from .includes import DEFAULT_MAX_INCLUDE_DEPTH, IncludeResolver
+from .lexer import tokenize
 from .preprocessing import PreprocessDiagnostic, PreprocessingContext, PreprocessResult
 
 
@@ -88,9 +88,11 @@ class _MalformedPragma(ValueError):
 
 
 def _source_location(source: str, offset: int) -> SourceLocation:
-    starts = _physical_line_starts(source)
-    index = bisect_right(starts, offset) - 1
-    index = min(index, max(0, len(starts) - 2))
+    starts = line_starts(source)
+    # An offset at the very end belongs to the last physical line, not to the empty
+    # line a final break would start.
+    last = max(0, len(split_lines(source)) - 1)
+    index = min(bisect_right(starts, offset) - 1, last)
     return SourceLocation(index + 1, offset - starts[index] + 1)
 
 

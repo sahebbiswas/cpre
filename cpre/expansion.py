@@ -8,23 +8,12 @@ from collections import deque
 from collections.abc import Generator
 from dataclasses import dataclass, replace
 
+from ._lines import LINE_BREAK, line_starts
 from .errors import SourceLocation
+from .lexer import SPLICE, Token, tokenize
 from .macros import MacroDefinition, MacroEnvironment
 from .robdd import AnalysisBudget, AnalysisLimitExceeded
 
-# Preprocessing numbers must stay whole (including exponent signs and C++ digit
-# separators). Encoding prefixes and raw strings belong to their literal token.
-_TOKEN = re.compile(
-    r'(?P<raw>(?:u8|u|U|L)?R"(?P<delimiter>[^ ()\\\t\r\n]{0,16})\(.*?\)(?P=delimiter)")'
-    r'|(?P<literal>(?:u8|u|U|L)?(?:"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'))'
-    r"|(?P<comment>/\*.*?\*/|//[^\r\n]*)"
-    r"|(?P<number>(?:[0-9]|\.[0-9])(?:[eEpP][+-]|[\w.\'])*)"
-    r"|(?P<identifier>[A-Za-z_]\w*)|(?P<space>\s+)"
-    r"|(?P<other>%:%:|>>=|<<=|->\*|\.\.\.|##|::|\.\*|->|\+\+|--|<<|>>|<=|>=|==|!=|&&|\|\||"
-    r"\+=|-=|\*=|/=|%=|&=|\^=|\|=|<:|:>|<%|%>|%:|.)",
-    re.DOTALL,
-)
-_SPLICE = re.compile(r"\\(?:\r\n|\n|\r)")
 _VA_OPT_KIND = "va_opt"
 
 
@@ -48,34 +37,6 @@ class SourceMapping:
     source_identity: str | None = None
 
 
-@dataclass(frozen=True)
-class Token:
-    text: str
-    kind: str
-    start: int
-    end: int
-    hidden: frozenset[str] = frozenset()
-    generated: bool = False
-
-
-def tokenize(source: str) -> list[Token]:
-    """Apply line splicing before lexing, retaining physical offset provenance."""
-    offsets = []
-    parts = []
-    cursor = 0
-    for splice in _SPLICE.finditer(source):
-        parts.append(source[cursor : splice.start()])
-        offsets.extend(range(cursor, splice.start()))
-        cursor = splice.end()
-    parts.append(source[cursor:])
-    offsets.extend(range(cursor, len(source)))
-    text = "".join(parts)
-    return [
-        Token(m.group(), m.lastgroup, offsets[m.start()], offsets[m.end() - 1] + 1)
-        for m in _TOKEN.finditer(text)
-    ]
-
-
 class ExpansionError(ValueError):
     """An unsupported or malformed invocation encountered during expansion."""
 
@@ -90,8 +51,7 @@ class Expansion:
         self.pending_start: int | None = None
         self.pending_end = 0
         self.current_offset = 0
-        self.line_starts = [0]
-        self.line_starts.extend(m.end() for m in re.finditer(r"\r\n|\r|\n", source))
+        self.line_starts = line_starts(source)
         self.edits: list[tuple[int, int, str]] = []
         self.cache: dict[
             tuple[str, tuple[str, ...] | None, bool],
@@ -244,7 +204,7 @@ class Expansion:
             if previous is not None:
                 gap = ""
                 if not previous.generated and not token.generated and previous.end <= token.start:
-                    gap = _SPLICE.sub("", self.source[previous.end : token.start])
+                    gap = SPLICE.sub("", self.source[previous.end : token.start])
                 if gap and (re.search(r"\s", gap) or "/*" in gap or "//" in gap):
                     pieces.append(" ")
             pieces.append(token.text)
@@ -579,7 +539,7 @@ class Expansion:
         def finish() -> None:
             if start is not None:
                 replacement = " " + " ".join(pieces) + " "
-                replacement += "".join(re.findall(r"\r\n|\r|\n", self.source[start:end]))
+                replacement += "".join(LINE_BREAK.findall(self.source[start:end]))
                 self.edits.append((start, end, replacement))
 
         for token in expanded:

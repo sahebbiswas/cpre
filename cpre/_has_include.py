@@ -6,12 +6,13 @@ import re
 from dataclasses import dataclass
 from typing import Protocol
 
-from ._lines import split_lines
+from ._lines import line_starts
 from .errors import AnalysisError, ErrorCode, SourceLocation
-from .expansion import Expansion, tokenize
+from .expansion import Expansion
 from .includes import IncludeForm
+from .lexer import logical_lines
+from .lexer import scan as scan_tokens
 from .macros import MacroDefinition, MacroEnvironment, MacroState
-from .parser import DIRECTIVE_RE, logical_lines
 from .robdd import AnalysisBudget
 
 
@@ -62,15 +63,6 @@ class HeaderOperandError(ValueError):
     pass
 
 
-def _physical_line_starts(source: str) -> list[int]:
-    starts = [0]
-    offset = 0
-    for line in split_lines(source, keepends=True):
-        offset += len(line)
-        starts.append(offset)
-    return starts
-
-
 def _offset(starts: list[int], location: SourceLocation) -> int:
     assert location.column is not None
     return starts[location.line - 1] + location.column - 1
@@ -111,20 +103,17 @@ def scan(source: str) -> tuple[Occurrence, ...]:
     Operands of ``defined`` are feature tests of the operator itself and are left
     for ordinary definedness evaluation.
     """
-    starts = _physical_line_starts(source)
+    starts = line_starts(source)
     found: list[Occurrence] = []
     used: set[str] = set()
 
     for logical in logical_lines(source):
-        match = DIRECTIVE_RE.match(logical.text)
-        if match is None or match.group(1) not in {"if", "elif"}:
+        directive = logical.directive
+        if directive is None or directive.name not in {"if", "elif"}:
             continue
-        expression = match.group(2)
-        expression_start = match.start(2)
-        expression_locations = logical.locations[
-            expression_start : expression_start + len(expression)
-        ]
-        parts = tokenize(expression)
+        expression = logical.text[directive.name_end :]
+        expression_locations = logical.locations[directive.name_end :]
+        parts = list(scan_tokens(expression))
         index = 0
         while index < len(parts):
             token = parts[index]

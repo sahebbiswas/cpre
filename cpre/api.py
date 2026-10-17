@@ -20,6 +20,7 @@ from .errors import (
     SourceLocation,
 )
 from .expressions import conjunction, negate
+from .lexer import logical_lines
 from .model import TRUE, DefinedVariable, Variable
 from .robdd import AnalysisBudget as _AnalysisBudget
 from .robdd import AnalysisLimitExceeded as _AnalysisLimitExceeded
@@ -323,18 +324,17 @@ def _globally_equivalent(
 
 def _condition_ranges(source: str) -> dict[tuple[int, str], SourceRange]:
     result: dict[tuple[int, str], SourceRange] = {}
-    for logical_line in _engine._logical_lines(source):
-        match = _engine._DIRECTIVE_RE.match(logical_line.text)
-        if match is None:
+    for logical_line in logical_lines(source):
+        directive = logical_line.directive
+        if directive is None or directive.name not in {"if", "elif"}:
             continue
-        kind, remainder = match.group(1), match.group(2)
-        if kind not in {"if", "elif"}:
-            continue
+        kind = directive.name
+        remainder = logical_line.text[directive.name_end :]
         start_offset = len(remainder) - len(remainder.lstrip())
         end_offset = len(remainder.rstrip())
         if end_offset <= start_offset:
             continue
-        locations = logical_line.locations[match.start(2) :]
+        locations = logical_line.locations[directive.name_end :]
         start = locations[start_offset]
         last = locations[end_offset - 1]
         if start.line is None or last.line is None:

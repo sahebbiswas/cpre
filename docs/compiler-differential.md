@@ -18,6 +18,8 @@ In CI the comparison runs on every runner: the Linux runners have GCC (and Clang
 
 Every reference run uses `-E -P -undef -nostdinc -x c -std=c11` (or the case's own `-std=`). That means preprocessing only, with no line markers, no target or vendor predefined macros and no system headers. The values of `__STDC__`, `__STDC_VERSION__` and `__STDC_HOSTED__` are read from the reference compiler for the same `-std=` and passed to cpre through `PreprocessingContext`. cpre runs with `unknown_names="undefined"`, the compiler's closed-world model. If a reference leaves one of those macros undefined (Clang targeting MSVC has no `__STDC__`), a case that uses it is skipped for that reference with the reason, because cpre never invents a standard macro's value.
 
+Text that cpre passes through keeps its line splices, so both outputs have splices (a backslash, optional blanks, a newline) removed before they are split into tokens.
+
 Compiler output is read with its line endings normalized (Windows compilers write CRLF) before `#pragma` lines are found.
 
 Both outputs are normalized the same way, and only in ways that cannot change meaning:

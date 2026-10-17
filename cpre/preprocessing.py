@@ -27,7 +27,7 @@ from .configuration import (
     _detect_include_guard,
 )
 from .errors import AnalysisError, ErrorCode, SourceLocation
-from .expansion import Expansion, ExpansionError, SourceMapping, Token, tokenize
+from .expansion import Expansion, ExpansionError, SourceMapping
 from .expressions import conjunction, disjunction, expression_atoms_in_order, negate
 from .includes import (
     DEFAULT_MAX_INCLUDE_DEPTH,
@@ -37,6 +37,15 @@ from .includes import (
     IncludeRequest,
     IncludeResolver,
     ResolvedInclude,
+)
+from .lexer import (
+    HORIZONTAL_WHITESPACE,
+    Token,
+    directive_head,
+    logical_lines,
+    macro_name,
+    splice,
+    tokenize,
 )
 from .macros import MacroDefinition, MacroEnvironment, MacroState, _apply_macro_directive
 from .model import (
@@ -48,12 +57,7 @@ from .model import (
     Variable,
 )
 from .numeric_conditions import NumericConditionError, evaluate_numeric_condition
-from .parser import (
-    DIRECTIVE_LEADING_WHITESPACE,
-    DIRECTIVE_PREFIX,
-    logical_lines,
-    parse_source,
-)
+from .parser import parse_source
 from .robdd import BDD, AnalysisBudget, AnalysisLimitExceeded, ResourceLimits
 from .unknown_macros import UnknownMacro, _unresolved_macros
 
@@ -106,6 +110,10 @@ _STANDARD_CONFIGURABLE_PREDEFINED = frozenset(
     }
 )
 _DEFINEDNESS_DIRECTIVES = frozenset({"ifdef", "ifndef", "elifdef", "elifndef"})
+# Non-conditional directives the core preprocessor acts on itself.
+_CORE_DIRECTIVES = frozenset(
+    ("endif", "define", "undef", "line", "include", "include_next", "import")
+)
 
 
 @dataclass(frozen=True, init=False)
@@ -382,10 +390,10 @@ def _parse_line_directive(
     state: _LogicalPreprocessingState,
     budget: AnalysisBudget,
 ) -> tuple[int, str | None]:
-    match = re.fullmatch(rf"#{DIRECTIVE_LEADING_WHITESPACE}*line\b(.*)", concrete, re.DOTALL)
-    if match is None:
+    head = directive_head(concrete)
+    if head is None or head.name != "line":
         raise ValueError("malformed #line directive")
-    tokens = _line_directive_operands(match[1], environment, state, budget)
+    tokens = _line_directive_operands(concrete[head.name_end :], environment, state, budget)
     if not 1 <= len(tokens) <= 2:
         raise ValueError('#line expects a decimal line number and optional "filename"')
     number = tokens[0]
@@ -449,17 +457,15 @@ def _unexpanded_predefined_macro(
     return None
 
 
-_INCLUDE_DIRECTIVE_RE = re.compile(
-    rf"#{DIRECTIVE_LEADING_WHITESPACE}*(include_next|include|import)\b(.*)", re.DOTALL
-)
+_INCLUDE_DIRECTIVES = frozenset(("include_next", "include", "import"))
 
 
 def _include_directive(concrete: str) -> tuple[str, str] | None:
     """Return ``(kind, operand)`` for a spliced include-family directive."""
-    match = _INCLUDE_DIRECTIVE_RE.fullmatch(concrete)
-    if match is None:
+    head = directive_head(concrete)
+    if head is None or head.name not in _INCLUDE_DIRECTIVES:
         return None
-    return match[1], match[2].strip()
+    return head.name, concrete[head.name_end :].strip()
 
 
 def _include_header(
@@ -475,13 +481,10 @@ def _include_header(
     so header-name characters such as ``//`` are not lexed as comments. Any other
     operand is macro expanded and must produce one of those forms.
     """
-    spliced = re.sub(r"\\(?:\r\n|\r|\n)", "", raw).rstrip("\r\n")
-    prefix = re.match(
-        rf"[ \t\f\v]*#{DIRECTIVE_LEADING_WHITESPACE}*(?:include_next|include|import)\b[ \t\f\v]*",
-        spliced,
-    )
-    if prefix is not None:
-        rest = spliced[prefix.end() :]
+    spliced = splice(raw).rstrip("\r\n")
+    head = directive_head(spliced)
+    if head is not None and head.name in _INCLUDE_DIRECTIVES:
+        rest = spliced[head.name_end :].lstrip(HORIZONTAL_WHITESPACE)
         direct = re.match(r'"([^"\r\n]*)"|<([^>\r\n]*)>', rest)
         if direct is not None:
             trailing = tokenize(rest[direct.end() :])
@@ -735,12 +738,7 @@ def _preprocess_unit(
     includes = run.includes
     physical = split_lines(source, keepends=True)
     logical = list(logical_lines(source))
-    ends = {
-        line.start_line: (
-            logical[index + 1].start_line - 1 if index + 1 < len(logical) else len(physical)
-        )
-        for index, line in enumerate(logical)
-    }
+    ends = {line.start_line: line.end_line for line in logical}
     retained = [True] * len(physical)
     diagnostics: list[PreprocessDiagnostic | AnalysisIncomplete] = []
     insertions: list[tuple[int, int, _UnitOutput]] = []
@@ -1110,7 +1108,8 @@ def _preprocess_unit(
                     logical_file_literal,
                 )
             line_state = logical_states[current_line]
-            is_directive = re.match(rf"{DIRECTIVE_PREFIX}", line.text) is not None
+            head = line.directive
+            is_directive = head is not None
             if is_directive:
                 environment.logical_override = None
                 expansion.flush(environment)
@@ -1139,12 +1138,8 @@ def _preprocess_unit(
                     environment.logical_override = None
                 frame[2] = active
                 continue
-            match = re.match(
-                rf"{DIRECTIVE_PREFIX}{DIRECTIVE_LEADING_WHITESPACE}*"
-                r"(endif|define|undef|line|include|include_next|import)\b(.*)$",
-                line.text,
-            )
-            if match and match[1] == "endif":
+            core = head.name if head is not None and head.name in _CORE_DIRECTIVES else None
+            if core == "endif":
                 stack.pop()
                 group_lines.pop()
                 active = stack[-1][2] if stack else True
@@ -1153,8 +1148,8 @@ def _preprocess_unit(
             if not active:
                 blank(current_line, ends[current_line])
                 continue
-            if match:
-                kind = match[1]
+            if core is not None:
+                kind = core
                 definition = None
                 try:
                     concrete = expansion.directive_text(
@@ -1180,23 +1175,19 @@ def _preprocess_unit(
                         if directive is None or directive[0] != kind:
                             raise ValueError("ambiguous directive after physical line splicing")
                     else:
-                        definition_match = re.fullmatch(
-                            rf"#{DIRECTIVE_LEADING_WHITESPACE}*(define|undef)\b(.*)",
-                            concrete,
-                            re.DOTALL,
-                        )
-                        if definition_match is None or definition_match[1] != kind:
+                        definition_head = directive_head(concrete)
+                        if definition_head is None or definition_head.name != kind:
                             raise ValueError("ambiguous directive after physical line splicing")
-                        remainder = definition_match[2]
+                        remainder = concrete[definition_head.name_end :]
                         protected = _seed_context_names.get()
                         if protected:
-                            target = re.match(r"\s*([A-Za-z_]\w*)", remainder)
-                            if target is not None and target[1] in protected:
+                            target = macro_name(remainder)
+                            if target is not None and target in protected:
                                 verb = "redefines" if kind == "define" else "undefines"
                                 diagnostics.append(
                                     located(
                                         ErrorCode.INVALID_CONFIGURATION,
-                                        f"seed {verb} {target[1]}, which the preprocessing "
+                                        f"seed {verb} {target}, which the preprocessing "
                                         "context supplies",
                                         current_line,
                                     )
@@ -1206,9 +1197,9 @@ def _preprocess_unit(
                             environment, kind, remainder, SourceLocation(current_line)
                         )
                         if kind == "define":
-                            name_match = re.match(r"\s*([A-Za-z_]\w*)", remainder)
-                            assert name_match is not None
-                            definition = environment.get(name_match[1]).definition
+                            defined_name = macro_name(remainder)
+                            assert defined_name is not None
+                            definition = environment.get(defined_name).definition
                 except ValueError as error:
                     diagnostics.append(
                         located(
@@ -1230,12 +1221,17 @@ def _preprocess_unit(
                 concrete = expansion.directive_text(
                     offsets[current_line - 1], offsets[ends[current_line]]
                 )
-                if re.fullmatch(rf"#{DIRECTIVE_LEADING_WHITESPACE}*", concrete, re.DOTALL):
+                concrete_head = directive_head(concrete)
+                assert concrete_head is not None  # the logical line is a directive line
+                operand = concrete[concrete_head.name_end :]
+                if concrete_head.name is None and not operand:
                     blank(current_line, ends[current_line])
                     continue
                 if identity is not None and includes is not None:
-                    if re.fullmatch(
-                        rf"#{DIRECTIVE_LEADING_WHITESPACE}*pragma[ \t\f\v]+once", concrete
+                    if (
+                        concrete_head.name == "pragma"
+                        and operand[:1] in tuple(HORIZONTAL_WHITESPACE)
+                        and operand.strip(HORIZONTAL_WHITESPACE) == "once"
                     ):
                         includes.once.add(identity)
                         blank(current_line, ends[current_line])
@@ -1246,12 +1242,9 @@ def _preprocess_unit(
                         if include_line(directive[0], directive[1], current_line, line_state):
                             continue
                         break
-                directive_match = re.match(
-                    rf"#{DIRECTIVE_LEADING_WHITESPACE}*([A-Za-z_]\w*)\b", concrete
-                )
-                if directive_match is not None:
+                if concrete_head.name is not None:
                     message = (
-                        f"#{directive_match[1]} preprocessing directive is not supported "
+                        f"#{concrete_head.name} preprocessing directive is not supported "
                         "during concrete preprocessing"
                     )
                 else:

@@ -17,16 +17,11 @@ from typing import TYPE_CHECKING
 from .api import AnalysisOptions, _translate_parse_error
 from .configuration import MacroConfiguration, _condition_environment, _configured_environment
 from .errors import AnalysisError, ErrorCode, SourceLocation
-from .expansion import Expansion, ExpansionError, Token, tokenize
+from .expansion import Expansion, ExpansionError
+from .lexer import CONDITIONAL_DIRECTIVES, Token, logical_lines, macro_name, tokenize
 from .macros import MacroDefinition, MacroEnvironment, _apply_macro_directive
 from .model import ConditionalBranch, ConditionError
-from .parser import (
-    DIRECTIVE_LEADING_WHITESPACE,
-    DIRECTIVE_PREFIX,
-    DIRECTIVE_RE,
-    logical_lines,
-    parse_source,
-)
+from .parser import parse_source
 from .robdd import AnalysisBudget, AnalysisLimitExceeded
 
 if TYPE_CHECKING:
@@ -38,9 +33,6 @@ _NOT_CONFIGURABLE = frozenset(
     {"defined", "__has_include", "__has_include_next", "__LINE__", "__FILE__", "__VA_ARGS__"}
 )
 _DEFINEDNESS_DIRECTIVES = frozenset({"ifdef", "ifndef", "elifdef", "elifndef"})
-_MACRO_DIRECTIVE_RE = re.compile(
-    rf"{DIRECTIVE_PREFIX}{DIRECTIVE_LEADING_WHITESPACE}*(define|undef)\b(.*)$"
-)
 
 
 class MacroUse(str, Enum):
@@ -388,9 +380,8 @@ class _SourceDependencies:
         except ValueError:
             # Malformed directives are reported by preprocessing itself.
             return
-        name_match = re.match(r"\s*([A-Za-z_]\w*)", remainder)
-        assert name_match is not None
-        name = name_match[1]
+        name = macro_name(remainder)
+        assert name is not None
         definition = scratch.get(name).definition
         self._assign(name)
         if definition is not None:
@@ -435,23 +426,23 @@ def unknown_macros_in_source(
 
     sweep = _SourceDependencies(configuration, context)
     for line in logical_lines(source):
-        conditional = DIRECTIVE_RE.match(line.text)
-        if conditional is not None:
+        directive = line.directive
+        if directive is None or directive.name is None:
+            continue
+        if directive.name in CONDITIONAL_DIRECTIVES:
             # A condition is evaluated in the enclosing context, before its branch.
             found = branches.get(line.start_line)
             if found is not None and found.expression_text is not None:
-                if conditional[1] in {"if", "ifdef", "ifndef"}:
+                if directive.name in {"if", "ifdef", "ifndef"}:
                     sweep.condition(found.expression_text, found.directive, line.start_line)
                 else:
                     # An #elif is reached only from the group's enclosing context.
                     sweep.path.pop()
                     sweep.condition(found.expression_text, found.directive, line.start_line)
                     sweep.path.append(line.start_line)
-            sweep.conditional(conditional[1], line.start_line)
-            continue
-        macro = _MACRO_DIRECTIVE_RE.match(line.text)
-        if macro is not None:
-            sweep.directive(macro[1], macro[2], line.start_line)
+            sweep.conditional(directive.name, line.start_line)
+        elif directive.name in {"define", "undef"}:
+            sweep.directive(directive.name, line.text[directive.name_end :], line.start_line)
     return _collect(sweep.uses, sweep.lines)
 
 
