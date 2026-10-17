@@ -6,6 +6,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import Protocol
 
 from ._types import MacroAssumptions, _normalize_assumptions
 from .errors import SourceLocation
@@ -49,6 +50,20 @@ class MacroState:
     definition: MacroDefinition | None = None
 
 
+class MacroLookup(Protocol):
+    """Read access to macro state: what condition evaluation and expansion need."""
+
+    def get(self, name: str) -> MacroState: ...
+
+
+class MacroDefiner(MacroLookup, Protocol):
+    """Macro state that ``#define`` and ``#undef`` can also change."""
+
+    def define(self, definition: MacroDefinition) -> None: ...
+
+    def undef(self, name: str) -> None: ...
+
+
 class MacroEnvironment:
     """Mutable per-run state. Snapshots are detached, read-only mappings."""
 
@@ -90,7 +105,7 @@ class MacroEnvironment:
 
 
 def _apply_macro_directive(
-    environment: MacroEnvironment, kind: str, remainder: str, location: SourceLocation
+    environment: MacroDefiner, kind: str, remainder: str, location: SourceLocation
 ) -> None:
     """Parse a comment-stripped logical directive, or raise ValueError."""
     text = remainder.lstrip()
@@ -125,4 +140,4 @@ def _apply_macro_directive(
     environment.define(MacroDefinition(name, tail.strip(), parameters, variadic, location))
 
 
-__all__ = ["MacroDefinition", "MacroState", "MacroEnvironment"]
+__all__ = ["MacroDefinition", "MacroState", "MacroEnvironment", "MacroLookup", "MacroDefiner"]

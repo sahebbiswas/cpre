@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 from .errors import AnalysisError, ErrorCode, IncompleteConfigurationError
 from .lexer import logical_lines, macro_name, tokenize
-from .macros import MacroDefinition, MacroEnvironment, MacroState
+from .macros import MacroDefinition, MacroEnvironment, MacroLookup, MacroState
 from .model import DefinedVariable, Negation
 from .parser import parse_source
 
@@ -360,7 +360,7 @@ class _ConfiguredMacroEnvironment(MacroEnvironment):
 class _ConditionMacroEnvironment:
     """Condition-only view that turns known-undefined identifiers into literal 0."""
 
-    def __init__(self, environment: MacroEnvironment) -> None:
+    def __init__(self, environment: MacroLookup) -> None:
         self._environment = environment
 
     def get(self, name: str) -> MacroState:
@@ -379,10 +379,9 @@ def _configured_environment(configuration: MacroConfiguration) -> MacroEnvironme
     return _ConfiguredMacroEnvironment(configuration)
 
 
-def _condition_environment(environment: MacroEnvironment) -> MacroEnvironment:
-    # The wrapper intentionally implements the MacroEnvironment read contract
-    # without mutating the caller-visible final snapshot.
-    return _ConditionMacroEnvironment(environment)  # type: ignore[return-value]
+def _condition_environment(environment: MacroLookup) -> MacroLookup:
+    # A read-only view: it never mutates the caller-visible final snapshot.
+    return _ConditionMacroEnvironment(environment)
 
 
 def _detect_include_guard(text: str) -> str | None:
