@@ -11,7 +11,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import Enum
 
-from .api import AnalysisIncomplete, AnalysisOptions
+from ._types import AnalysisIncomplete, AnalysisOptions
 from .errors import AnalysisError, ErrorCode
 from .model import TRUE, BooleanAtom, DefinedVariable, Expression, Predicate, Variable
 from .robdd import BDD as _BDD

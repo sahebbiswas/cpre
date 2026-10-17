@@ -82,6 +82,17 @@ We use `tox` to run checks consistently across all supported Python versions.
 
 When opening a Pull Request, our CI will automatically verify these checks.
 
+## Module layering
+
+The package has one direction of dependency:
+
+- `cpre/__init__.py` and `cpre/api.py` are the public entry points. `cpre/cpre.py` is an internal compatibility facade for script mode and historical callers. `cpre/cli.py` is the command line front end. These sit above everything else.
+- Every other module is the core. It must not import `cpre.api` or `cpre.cpre` (`tests/test_import_layering.py` fails if it does), and `cpre.api` does not import `cpre.cpre`.
+- The option, result and diagnostic types (`AnalysisOptions`, `MacroAssumptions`, `AnalysisIncomplete`, `Finding`, `AnalysisResult` and the parse-error translation) are defined in `cpre/_types.py`, below the core, and re-exported unchanged by `cpre.api` and `cpre`. Import them from `._types` inside the package. They report `cpre.api` as their `__module__`.
+- `cpre/lexer.py` is the single lexical front end (see [the shared line model](docs/api.md#suggested-edits-and-source-ranges)).
+
+Two function-level imports remain on purpose, each marked in the code: `configuration.MacroConfiguration.from_source` runs the preprocessor, and the preprocessor imports `configuration`; `unknown_macros` is imported by `preprocessing` and needs one of its helpers back.
+
 ## Every pull request
 
 - **Bump the version.** Each pull request merged to `main` changes

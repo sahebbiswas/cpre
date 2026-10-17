@@ -9,12 +9,14 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .api import AnalysisOptions
+    from ._types import AnalysisOptions
     from .preprocessing import PreprocessingContext
 
-from .errors import AnalysisError, ErrorCode
+from .errors import AnalysisError, ErrorCode, IncompleteConfigurationError
 from .lexer import logical_lines, macro_name, tokenize
 from .macros import MacroDefinition, MacroEnvironment, MacroState
+from .model import DefinedVariable, Negation
+from .parser import parse_source
 
 _NAME = re.compile(r"[A-Za-z_]\w*\Z")
 
@@ -169,7 +171,8 @@ class MacroConfiguration:
         for name in excluded_names:
             cls._validate_name(name)
 
-        from .errors import IncompleteConfigurationError
+        # Deferred: the preprocessor imports this module for ``MacroConfiguration``, and
+        # building a configuration from source text runs the preprocessor.
         from .pragmas import preprocess_source
 
         if base is None:
@@ -183,7 +186,7 @@ class MacroConfiguration:
                 undefined=base.undefined,
                 unknown_names=unknown_names,
             )
-        from .preprocessing import PreprocessingContext, _seed_context_names
+        from .preprocessing import PreprocessingContext, _seed_context_names  # deferred, see above
 
         guard = _seed_context_names.set(
             frozenset(context.standard_macros)
@@ -392,8 +395,6 @@ def _detect_include_guard(text: str) -> str | None:
     4. The name is not used again as a condition or as a replacement.
     Otherwise returns None.
     """
-    from .model import DefinedVariable, Negation
-    from .parser import parse_source
 
     try:
         tree = parse_source(text, distinguish_defined=True)

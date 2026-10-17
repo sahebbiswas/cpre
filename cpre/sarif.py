@@ -7,15 +7,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
 
-from .api import (
+from ._types import (
     AnalysisIncomplete,
     AnalysisResult,
-    ErrorCode,
     Finding,
     FindingKind,
-    SourceLocation,
     SourceRange,
 )
+from .errors import ErrorCode, SourceLocation
 
 SARIF_SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
 SARIF_VERSION = "2.1.0"

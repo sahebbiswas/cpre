@@ -7,7 +7,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from ._lines import line_starts as _line_starts
-from .api import (
+from ._types import (
     AnalysisIncomplete,
     AnalysisOptions,
     FixConfidence,

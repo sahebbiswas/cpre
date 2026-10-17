@@ -12,7 +12,7 @@ from types import MappingProxyType
 from . import _has_include
 from ._lines import split_lines
 from ._pragma_syntax import _mask_source_pragmas, _output_offset_for_source, _SourcePragma
-from .api import (
+from ._types import (
     AnalysisIncomplete,
     AnalysisOptions,
     MacroAssumptions,

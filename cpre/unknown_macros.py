@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from .api import AnalysisOptions, _translate_parse_error
+from ._types import AnalysisOptions, _translate_parse_error
 from .configuration import MacroConfiguration, _condition_environment, _configured_environment
 from .errors import AnalysisError, ErrorCode, SourceLocation
 from .expansion import Expansion, ExpansionError
@@ -258,6 +258,7 @@ def _base_environment(
     configuration: MacroConfiguration | None,
     context: PreprocessingContext | None = None,
 ) -> MacroEnvironment:
+    # Deferred: ``preprocessing`` imports this module.
     from .preprocessing import _configured_preprocessing_context
 
     environment = (
