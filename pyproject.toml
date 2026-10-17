@@ -76,7 +76,6 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 module = [
     "cpre.cli",
-    "cpre.expansion",
     "cpre.numeric_conditions",
     "cpre.pragmas",
     "cpre.reporting",
