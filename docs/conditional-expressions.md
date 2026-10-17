@@ -14,6 +14,8 @@ For concrete preprocessing, cpre applies the condition pipeline in this order:
 
 Open-world configurations keep unresolved macro names unknown. Closed-world `UnknownNamePolicy.UNDEFINED` continues to provide the standard concrete behavior where otherwise-unmentioned identifiers are treated as undefined/zero.
 
+A name that macro expansion leaves alone because it is already being replaced (a self-referential macro such as `#define A A + 1`, directly or through another macro) is a plain identifier from then on, so it evaluates as 0 in every configuration, as in GCC and Clang (C11 6.10.1). `#if A > 0` is therefore true. It is not an unknown name, so it never makes the condition unresolved. `defined(A)` still tests the macro itself, because its operand is not expanded.
+
 ## Supported integer-expression surface
 
 The concrete evaluator uses a deterministic 64-bit `intmax_t`/`uintmax_t` model and supports:
