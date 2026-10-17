@@ -42,10 +42,10 @@ def test_builders_import_without_any_command_module(module):
         "print(loaded)\n"
     )
     result = subprocess.run(
-        [sys.executable, "-I", "-c", probe],
+        [sys.executable, "-c", probe],
         capture_output=True,
         text=True,
-        env={"PYTHONPATH": str(ROOT)},
+        cwd=ROOT,  # puts the source tree first on the path, with the environment untouched
         check=True,
     )
     assert result.stdout.strip() == "[]"
