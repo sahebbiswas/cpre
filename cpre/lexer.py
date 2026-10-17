@@ -276,7 +276,7 @@ class LogicalLine:
         directive = self.directive
         if directive is None or not self.text:
             return self.first_line
-        return self.locations[directive.hash_index].line or self.first_line
+        return self.lexed.location(self.index + directive.hash_index).line or self.first_line
 
     @cached_property
     def locations(self) -> tuple[SourceLocation, ...]:
