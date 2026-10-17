@@ -198,7 +198,7 @@ def test_base_rejects_non_configuration(bad_base, monkeypatch):
     def fail(*args, **kwargs):  # pragma: no cover - must not be reached
         raise AssertionError("preprocessing ran before base validation")
 
-    monkeypatch.setattr(cpre.pragmas, "preprocess_source", fail)
+    monkeypatch.setattr(cpre.pragmas, "_preprocess_with_pragmas", fail)
     with pytest.raises(AnalysisError) as exc_info:
         MacroConfiguration.from_source("#define X 1\n", base=bad_base)
     assert exc_info.value.code == ErrorCode.INVALID_CONFIGURATION
@@ -716,7 +716,7 @@ def test_exclude_rejects_invalid_names_before_preprocessing(bad_name, monkeypatc
     def fail(*args, **kwargs):  # pragma: no cover - must not be reached
         raise AssertionError("preprocessing ran before exclude validation")
 
-    monkeypatch.setattr(cpre.pragmas, "preprocess_source", fail)
+    monkeypatch.setattr(cpre.pragmas, "_preprocess_with_pragmas", fail)
     with pytest.raises(AnalysisError) as exc_info:
         MacroConfiguration.from_source("#define X 1\n", exclude=[bad_name])
     assert exc_info.value.code == ErrorCode.INVALID_CONFIGURATION
@@ -728,7 +728,7 @@ def test_exclude_rejects_non_iterable(monkeypatch):
     def fail(*args, **kwargs):  # pragma: no cover - must not be reached
         raise AssertionError("preprocessing ran before exclude validation")
 
-    monkeypatch.setattr(cpre.pragmas, "preprocess_source", fail)
+    monkeypatch.setattr(cpre.pragmas, "_preprocess_with_pragmas", fail)
     with pytest.raises(AnalysisError) as exc_info:
         MacroConfiguration.from_source("#define X 1\n", exclude=123)
     assert exc_info.value.code == ErrorCode.INVALID_CONFIGURATION
