@@ -567,6 +567,10 @@ class PreprocessRequest:
     adapters that build a request. ``dispatch_included_pragmas`` is set by the pragma layer
     so included ``#pragma`` directives become markers it can deliver in output order;
     ``protected_names`` is set by ``MacroConfiguration.from_source`` for seed evaluation.
+
+    This is internal, not part of the public API (hence absent from ``__all__``):
+    ``dispatch_included_pragmas`` is only sound when the pragma layer consumes the markers it
+    produces, so use :func:`preprocess_source` or ``cpre.pragmas.preprocess_source`` instead.
     """
 
     source: str
@@ -1589,12 +1593,10 @@ def _splice(
 
 
 __all__ = [
-    "PreprocessRequest",
     "PreprocessingContext",
     "PreprocessDiagnostic",
     "PreprocessResult",
     "SkippedInclude",
     "compact",
-    "preprocess_request",
     "preprocess_source",
 ]

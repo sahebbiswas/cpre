@@ -17,6 +17,7 @@ PACKAGE = Path(__file__).resolve().parent.parent / "cpre"
 
 PROBE = r"""
 import importlib, inspect, sys
+sys.path.insert(0, sys.argv[2])
 first = importlib.import_module(sys.argv[1])
 fn = first.preprocess_source
 source = "#if __has_include(<a.h>) && !__has_include(<b.h>)\nyes\n#else\nno\n#endif\n"
@@ -30,12 +31,11 @@ print(result.complete, repr(result.source))
 
 def _probe(first: str) -> list[str]:
     done = subprocess.run(
-        [sys.executable, "-I", "-c", PROBE, first],
+        [sys.executable, "-I", "-c", PROBE, first, str(PACKAGE.parent)],
         capture_output=True,
         text=True,
         check=True,
         cwd=PACKAGE.parent,
-        env={"PYTHONPATH": str(PACKAGE.parent), "PATH": ""},
     )
     return done.stdout.splitlines()
 
