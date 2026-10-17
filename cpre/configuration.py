@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from .preprocessing import PreprocessingContext
 
 from .errors import AnalysisError, ErrorCode
+from .lexer import logical_lines, macro_name, tokenize
 from .macros import MacroDefinition, MacroEnvironment, MacroState
 
 _NAME = re.compile(r"[A-Za-z_]\w*\Z")
@@ -391,9 +392,8 @@ def _detect_include_guard(text: str) -> str | None:
     4. The name is not used again as a condition or as a replacement.
     Otherwise returns None.
     """
-    from .expansion import tokenize
     from .model import DefinedVariable, Negation
-    from .parser import logical_lines, parse_source
+    from .parser import parse_source
 
     try:
         tree = parse_source(text, distinguish_defined=True)
@@ -438,9 +438,9 @@ def _detect_include_guard(text: str) -> str | None:
     first_directive = None
     for line in lines:
         if branch.line < line.start_line < group.end_line:
-            match = re.match(r"\s*#\s*([A-Za-z_]\w*)\b", line.text)
-            if match:
-                first_directive = (match.group(1), line.text[match.end() :])
+            directive = line.directive
+            if directive is not None and directive.name is not None:
+                first_directive = (directive.name, line.text[directive.name_end :])
                 break
 
     if first_directive is None:
@@ -450,8 +450,7 @@ def _detect_include_guard(text: str) -> str | None:
     if kind != "define":
         return None
 
-    name_match = re.match(r"\s*([A-Za-z_]\w*)", remainder)
-    if not name_match or name_match.group(1) != guard_name:
+    if macro_name(remainder) != guard_name:
         return None
 
     tail = remainder.lstrip()[len(guard_name) :]

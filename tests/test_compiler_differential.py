@@ -53,9 +53,18 @@ _DEFINE = re.compile(r"-D(?P<name>[A-Za-z_]\w*)(?:\((?P<params>[^)]*)\))?(?:=(?P
 _PRAGMA_LINE = re.compile(r"^[ \t]*#[ \t]*pragma\b(?P<payload>[^\r\n]*)$", re.MULTILINE)
 
 
+# GCC and Clang remove a backslash, optional blanks and a newline (translation phase 2).
+# cpre leaves such a splice in text it passes through, so it is removed before tokenizing.
+_SPLICE = re.compile(r"\\[ \t\f\v]*(?:\r\n|\r|\n)")
+
+
 def tokens(text: str) -> tuple[str, ...]:
     """Preprocessing tokens of ``text`` with whitespace and comments removed."""
-    return tuple(token for token in _TOKEN.findall(text) if not token.startswith(("/*", "//")))
+    return tuple(
+        token
+        for token in _TOKEN.findall(_SPLICE.sub("", text))
+        if not token.startswith(("/*", "//"))
+    )
 
 
 def first_error_line(stderr: str, filename: str) -> int | None:

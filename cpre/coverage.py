@@ -7,7 +7,6 @@ outcome is reported as covered only when preprocessing actually selected it.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from enum import Enum
 
@@ -18,6 +17,7 @@ from .errors import AnalysisError, ErrorCode
 from .expressions import conjunction, expression_atoms_in_order, negate
 from .include_queries import IncludeQueryProvider
 from .includes import DEFAULT_MAX_INCLUDE_DEPTH, IncludeResolver
+from .lexer import logical_lines, macro_name
 from .model import (
     TRUE,
     BooleanAtom,
@@ -28,13 +28,11 @@ from .model import (
     Expression,
     Variable,
 )
-from .parser import logical_lines, parse_source
+from .parser import parse_source
 from .pragmas import PragmaHandler, preprocess_source
 from .preprocessing import _SELECTED_BRANCHES, PreprocessingContext
 from .proofs import WitnessAssignment, _atom_key, _public_assignment
 from .robdd import BDD, AnalysisBudget, AnalysisLimitExceeded
-
-_ASSIGNMENT_RE = re.compile(r"\s*#\s*(?:define|undef)\s+([A-Za-z_]\w*)")
 
 
 class BranchOutcomeStatus(str, Enum):
@@ -254,9 +252,11 @@ def cover_branches(
     index = {target.key: position for position, target in enumerate(targets)}
     fixed = set(context.standard_macros) if context is not None else set()
     assigned = {
-        match[1]
+        name
         for line in logical_lines(source)
-        if (match := _ASSIGNMENT_RE.match(line.text)) is not None
+        if (directive := line.directive) is not None
+        and directive.name in {"define", "undef"}
+        and (name := macro_name(line.text[directive.name_end :])) is not None
     }
 
     # Top-level groups that share no macro or predicate are independent, so each

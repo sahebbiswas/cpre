@@ -22,6 +22,7 @@ from .expressions import (
     format_expression,
     tokens,
 )
+from .lexer import logical_lines
 from .macros import MacroDefinition
 from .model import (
     TRUE,
@@ -34,7 +35,6 @@ from .model import (
     SymbolicLiteral,
     Variable,
 )
-from .parser import DIRECTIVE_LEADING_WHITESPACE, DIRECTIVE_PREFIX, logical_lines
 from .robdd import (
     BDD,
     AnalysisBudget,
@@ -414,13 +414,11 @@ def analyze_macros(
     results: list[MacroAnalysisResult] = []
 
     for line in logical_lines(source):
-        match = re.match(
-            rf"{DIRECTIVE_PREFIX}{DIRECTIVE_LEADING_WHITESPACE}*define\b(.*)$", line.text
-        )
-        if match is None:
+        directive = line.directive
+        if directive is None or directive.name != "define":
             continue
-        remainder = match.group(1)
-        rem_offset = match.start(1)
+        remainder = line.text[directive.name_end :]
+        rem_offset = directive.name_end
         leading_ws = len(remainder) - len(remainder.lstrip())
         text = remainder.lstrip()
         name_match = re.match(r"([A-Za-z_]\w*)", text)

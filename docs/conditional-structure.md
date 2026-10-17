@@ -59,7 +59,7 @@ span = branch.body_range
 assert span.text(source_text) == source_text[span.start.offset:span.end.offset]
 ```
 
-Backslash-newline splicing does not destroy physical provenance. A logical token or condition that crosses a splice may therefore have a physical range whose text includes the original backslash and newline. LF, CRLF and lone-CR input use the same one-based coordinate rules; see [the shared line model](api.md#suggested-edits-and-source-ranges).
+Backslash-newline splicing (including a backslash followed by blanks before the newline, which GCC and Clang also splice) does not destroy physical provenance. A logical token or condition that crosses a splice may therefore have a physical range whose text includes the original backslash and newline. LF, CRLF and lone-CR input use the same one-based coordinate rules; see [the shared line model](api.md#suggested-edits-and-source-ranges).
 
 The structural coordinate types are intentionally separate from the existing `SourceLocation` / `SourceRange` used by analysis findings and suggested edits. This keeps the established analysis API backward compatible while making offset presence mandatory for the lossless structural API.
 

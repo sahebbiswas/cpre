@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
-from ._lines import split_lines
 from .errors import AnalysisError, ErrorCode, SourceLocation
-from .expansion import SourceMapping, tokenize
-from .parser import DIRECTIVE_LEADING_WHITESPACE, DIRECTIVE_PREFIX, logical_lines
+from .expansion import SourceMapping
+from .lexer import logical_lines, tokenize
 
 
 @dataclass(frozen=True)
@@ -18,13 +16,6 @@ class _SourcePragma:
     marker_offset: int
     start_line: int
     end_line: int
-
-
-def _physical_line_starts(source: str) -> list[int]:
-    starts = [0]
-    for line in split_lines(source, keepends=True):
-        starts.append(starts[-1] + len(line))
-    return starts
 
 
 def _public_location(location: object) -> SourceLocation:
@@ -69,36 +60,19 @@ def _mask_source_pragmas(
     decide reachability. Active markers survive; markers in discarded branches
     are blanked by the existing conditional-selection machinery.
     """
-    physical = split_lines(source, keepends=True)
-    logical = list(logical_lines(source))
-    starts = _physical_line_starts(source)
     characters = list(source)
     pragmas: list[_SourcePragma] = []
 
-    for index, line in enumerate(logical):
-        match = re.match(
-            rf"{DIRECTIVE_PREFIX}{DIRECTIVE_LEADING_WHITESPACE}*pragma\b(.*)$",
-            line.text,
-            re.DOTALL,
-        )
-        if match is None:
+    for line in logical_lines(source):
+        directive = line.directive
+        if directive is None or directive.name != "pragma":
             continue
-        end_line = logical[index + 1].start_line - 1 if index + 1 < len(logical) else len(physical)
-        hash_index = line.text.find("#")
-        if hash_index < 0 or hash_index >= len(line.locations):
-            raise AnalysisError(
-                "cannot locate #pragma directive",
-                code=ErrorCode.ANALYSIS_FAILURE,
-            )
-        payload = _normalize_pragma_payload(match.group(1))
+        payload = _normalize_pragma_payload(line.text[directive.name_end :])
         if payload in preserve:
             continue
-        location = _public_location(line.locations[hash_index])
-        assert location.column is not None  # _public_location rejects a missing column
-        marker_offset = starts[location.line - 1] + location.column - 1
-        span_start = starts[line.start_line - 1]
-        span_end = starts[end_line]
-        for position in range(span_start, span_end):
+        location = _public_location(line.locations[directive.hash_index])
+        marker_offset = line.physical_offset(directive.hash_index)
+        for position in range(line.start_offset, line.end_offset):
             if source[position] not in "\r\n":
                 characters[position] = " "
         # '#pragma' guarantees at least two writable characters beginning at '#'.
@@ -110,7 +84,7 @@ def _mask_source_pragmas(
                 location,
                 marker_offset,
                 line.start_line,
-                end_line,
+                line.end_line,
             )
         )
 

@@ -5,7 +5,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .expansion import Expansion, ExpansionError, Token, tokenize
+from .expansion import Expansion, ExpansionError
+from .lexer import Token, tokenize
 from .macros import MacroEnvironment
 from .robdd import AnalysisBudget
 

@@ -3,7 +3,10 @@ repos:
     rev: v4.5.0
     hooks:
       - id: trailing-whitespace
+        # Differential cases keep blanks after a backslash on purpose (issue #157).
+        exclude: ^tests/compiler_differential/cases/
       - id: end-of-file-fixer
+        exclude: ^tests/compiler_differential/cases/
       - id: check-yaml
       - id: check-toml
       - id: check-added-large-files

@@ -73,9 +73,6 @@ if __package__ in {None, ""}:
         SourceLocation as _SourceLocation,
     )
     from cpre.parser import (
-        DIRECTIVE_RE as _DIRECTIVE_RE,
-    )
-    from cpre.parser import (
         LogicalLine as _LogicalLine,
     )
     from cpre.parser import (
@@ -147,9 +144,6 @@ else:
     )
     from .model import (
         SourceLocation as _SourceLocation,
-    )
-    from .parser import (
-        DIRECTIVE_RE as _DIRECTIVE_RE,
     )
     from .parser import (
         LogicalLine as _LogicalLine,

@@ -11,9 +11,8 @@ import re
 from bisect import bisect_right
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TypeVar
 
-from ._lines import LINE_BREAK, line_starts, split_lines
+from .lexer import CONDITIONAL_DIRECTIVES, Token, lex, scan
 from .model import (
     Conjunction,
     Constant,
@@ -24,7 +23,6 @@ from .model import (
     Predicate,
     Variable,
 )
-from .parser import DIRECTIVE_LEADING_WHITESPACE
 
 
 @dataclass(frozen=True)
@@ -121,121 +119,13 @@ class ConditionalStructureTree:
 
 
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
-_PP_NUMBER = r"(?:[0-9]|\.[0-9])(?:[eEpP][+-]|[A-Za-z0-9_.]|'[A-Za-z0-9_])*"
-_NUMBER = re.compile(_PP_NUMBER)
-_TOKEN = re.compile(
-    r"""[A-Za-z_][A-Za-z0-9_]*|"""
-    + _PP_NUMBER
-    + r"""|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|&&|\|\||==|!=|<=|>=|<<|>>|[^\s]"""
-)
-_FORMS = frozenset(("if", "ifdef", "ifndef", "elif", "elifdef", "elifndef", "else", "endif"))
+_FORMS = CONDITIONAL_DIRECTIVES
+_ASSIGNMENTS = frozenset(("=", "+=", "-=", "*=", "/=", "%=", "&=", "^=", "|=", "<<=", ">>="))
 
 
-T = TypeVar("T")
-
-
-def _without(items: list[T], positions: set[int]) -> list[T]:
-    """``items`` without the entries at ``positions``, copied slice by slice."""
-    kept: list[T] = []
-    start = 0
-    for position in sorted(positions):
-        kept.extend(items[start:position])
-        start = position + 1
-    kept.extend(items[start:])
-    return kept
-
-
-def _logical_source(source: str) -> tuple[str, str, list[int]]:
-    """Return spliced source, directive-recognition mask, and physical offsets.
-
-    A comment is one space in translation phase 3, so the line breaks inside a
-    multi-line comment are dropped like a splice: the directive that contains the
-    comment carries on past it.
-    """
-
-    chars: list[str] = []
-    offsets: list[int] = []
-    index = 0
-    while index < len(source):
-        if source.startswith("\\\r\n", index):
-            index += 3
-        elif source.startswith(("\\\n", "\\\r"), index):
-            index += 2
-        else:
-            chars.append(source[index])
-            offsets.append(index)
-            index += 1
-
-    text = "".join(chars)
-    hidden_literals: list[tuple[int, int]] = []
-    comment_breaks: set[int] = set()
-    index = 0
-    while index < len(text):
-        # A preprocessing number owns apostrophe digit separators. Checking it
-        # before character literals prevents 1'024 from hiding later source.
-        if index == 0 or not (text[index - 1].isalnum() or text[index - 1] == "_"):
-            number = _NUMBER.match(text, index)
-            if number:
-                index = number.end()
-                continue
-
-        raw = (
-            re.match(
-                r'(?:u8R|uR|UR|LR|R)"([^ ()\\\t\r\n]{0,16})\(',
-                text[index : index + 22],
-            )
-            if text.startswith(('u8R"', 'uR"', 'UR"', 'LR"', 'R"'), index)
-            else None
-        )
-        if raw:
-            end_marker = ")" + raw[1] + '"'
-            end = text.find(end_marker, index + raw.end())
-            end = len(text) if end < 0 else end + len(end_marker)
-            hidden_literals.append((index, end))
-            index = end
-            continue
-
-        if text.startswith("//", index):
-            line_break = LINE_BREAK.search(text, index)
-            end = len(text) if line_break is None else line_break.start()
-        elif text.startswith("/*", index):
-            end = text.find("*/", index + 2)
-            end = len(text) if end < 0 else end + 2
-        elif text[index] in "\"'":
-            literal_start = index
-            quote = text[index]
-            index += 1
-            while index < len(text):
-                if text[index] == "\\":
-                    index += 2
-                elif text[index] == quote:
-                    index += 1
-                    break
-                else:
-                    index += 1
-            hidden_literals.append((literal_start, min(index, len(text))))
-            continue
-        else:
-            index += 1
-            continue
-
-        for masked_index in range(index, end):
-            if chars[masked_index] not in "\r\n":
-                chars[masked_index] = " "
-            else:
-                comment_breaks.add(masked_index)
-        index = end
-
-    masked = chars.copy()
-    for start, end in hidden_literals:
-        for masked_index in range(start, end):
-            if masked[masked_index] not in "\r\n":
-                masked[masked_index] = "@"
-    if comment_breaks:
-        chars = _without(chars, comment_breaks)
-        masked = _without(masked, comment_breaks)
-        offsets = _without(offsets, comment_breaks)
-    return "".join(chars), "".join(masked), offsets
+def _tokens(text: str) -> list[Token]:
+    """The preprocessing tokens of ``text`` without whitespace, from the shared scanner."""
+    return [token for token in scan(text) if token.kind not in ("space", "comment")]
 
 
 def _atom(text: str) -> Expression:
@@ -277,13 +167,13 @@ def _atom(text: str) -> Expression:
 def _condition(text: str) -> Expression:
     """Extract safe Boolean structure; retain other syntax as an opaque predicate."""
 
-    tokens = list(_TOKEN.finditer(text))
+    tokens = _tokens(text)
     depth = 0
-    top: list[re.Match[str]] = []
+    top: list[Token] = []
     for token in tokens:
-        if token[0] == "(":
+        if token.text == "(":
             depth += 1
-        elif token[0] == ")":
+        elif token.text == ")":
             depth -= 1
             if depth < 0:
                 return Predicate(text)
@@ -294,26 +184,26 @@ def _condition(text: str) -> Expression:
 
     # These operators bind less tightly than ||. Treating a condition that
     # contains one as Boolean structure would change C semantics.
-    if any(token[0] in ("?", ":", ",", "=") for token in top):
+    if any(token.text in ("?", ":", ",") or token.text in _ASSIGNMENTS for token in top):
         return Predicate(text)
 
     for operator, node in (("||", Disjunction), ("&&", Conjunction)):
-        splits = [token for token in top if token[0] == operator]
+        splits = [token for token in top if token.text == operator]
         if splits:
             parts: list[str] = []
             start = 0
             for token in splits:
-                parts.append(text[start : token.start()].strip())
-                start = token.end()
+                parts.append(text[start : token.start].strip())
+                start = token.end
             parts.append(text[start:].strip())
             if all(parts):
                 return node(tuple(_condition(part) for part in parts))
             return Predicate(text)
 
-    if tokens and tokens[0][0] == "(" and not top:
+    if tokens and tokens[0].text == "(" and not top:
         depth = 0
         for token_index, token in enumerate(tokens):
-            depth += (token[0] == "(") - (token[0] == ")")
+            depth += (token.text == "(") - (token.text == ")")
             if depth == 0:
                 if token_index == len(tokens) - 1 and text[1:-1].strip():
                     return _condition(text[1:-1].strip())
@@ -321,9 +211,9 @@ def _condition(text: str) -> Expression:
 
     if (
         top
-        and top[0][0] == "!"
+        and top[0].text == "!"
         and not any(
-            token[0]
+            token.text
             in (
                 "+",
                 "-",
@@ -370,7 +260,8 @@ def parse_conditionals(
     if filename is not None and not isinstance(filename, str):
         raise TypeError("filename must be a string or None")
 
-    starts = line_starts(source)
+    lexed = lex(source)
+    starts = lexed.starts
 
     def location(offset: int) -> StructuralSourceLocation:
         line = bisect_right(starts, offset)
@@ -383,7 +274,6 @@ def parse_conditionals(
     def span(start: int, end: int) -> StructuralSourceRange:
         return StructuralSourceRange(location(start), location(end))
 
-    logical, recognition_mask, offsets = _logical_source(source)
     roots: list[ConditionalBlock] = []
     stack: list[ConditionalBlock] = []
     directives: list[ConditionalDirective] = []
@@ -397,32 +287,22 @@ def parse_conditionals(
     ) -> None:
         diagnostics.append(StructureDiagnostic(code, message, where))
 
-    cursor = 0
-    for line_text in split_lines(logical, keepends=True):
-        line_start = cursor
-        cursor += len(line_text)
-        masked_line = recognition_mask[line_start:cursor]
-        match = re.match(
-            rf"^{DIRECTIVE_LEADING_WHITESPACE}*#{DIRECTIVE_LEADING_WHITESPACE}*([A-Za-z_][A-Za-z0-9_]*)",
-            masked_line,
-        )
-        if match is None or match[1] not in _FORMS:
+    for line in lexed.lines:
+        head = line.directive
+        if head is None or head.name not in _FORMS:
             continue
 
-        kind = match[1]
-        begin = offsets[line_start - 1] + 1 if line_start else 0
-        end = offsets[cursor - 1] + 1 if line_text.endswith(("\n", "\r")) else len(source)
+        kind = head.name
+        begin = line.start_offset
+        end = line.end_offset
         directive_range = span(begin, end)
-        token_matches = tuple(_TOKEN.finditer(line_text, match.end()))
         tokens = tuple(
             DirectiveToken(
-                token[0],
-                span(
-                    offsets[line_start + token.start()],
-                    offsets[line_start + token.end() - 1] + 1,
-                ),
+                token.text,
+                span(line.physical_offset(token.start), line.physical_end(token.end)),
             )
-            for token in token_matches
+            for token in scan(line.text, head.name_end)
+            if token.kind not in ("space", "comment")
         )
 
         condition_range: StructuralSourceRange | None = None
@@ -444,10 +324,10 @@ def parse_conditionals(
                     tokens[-1].source_range.end.offset,
                 )
                 condition_text = condition_range.text(source)
-                logical_condition = line_text[match.end() :].strip()
+                logical_condition = line.text[head.name_end :].strip()
             else:
-                keyword_start = offsets[line_start + match.start(1)]
-                keyword_end = offsets[line_start + match.end(1) - 1] + 1
+                keyword_start = line.physical_offset(head.name_end - len(kind))
+                keyword_end = line.physical_end(head.name_end)
                 diagnostic(
                     StructureDiagnosticCode.MISSING_CONDITION,
                     f"#{kind} requires a condition",
