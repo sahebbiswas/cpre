@@ -48,13 +48,16 @@ def bind_arguments(
     if not parameters and not definition.variadic and arguments == [[]]:
         arguments = []
     if definition.variadic:
-        # Require the separating comma for named + variadic macros.
-        # Omitted variadic arguments remain a separate language-version
-        # feature; explicitly empty variadic arguments are supported.
-        if len(arguments) < len(parameters) + 1:
+        # The variadic argument may be empty (`F(x, )`) or left out with its comma
+        # (`F(x)`, C23 and C++20; GCC and Clang accept it in every mode). Either way it
+        # binds as an empty `__VA_ARGS__`.
+        if len(arguments) < len(parameters):
             raise ExpansionError(
-                f"variadic invocation {definition.name} requires a variadic argument (which may be empty)"
+                f"{definition.name} expects at least {len(parameters)} arguments, "
+                f"got {len(arguments)}"
             )
+        if len(arguments) == len(parameters):
+            arguments = [*arguments, []]
         extra: list[Token] = []
         for argument_index, argument in enumerate(arguments[len(parameters) :]):
             if argument_index:

@@ -140,7 +140,7 @@ def test_va_opt_matches_standard_compilers(compiler_name, definitions, invocatio
         ("#define F(x) x", "F(1,2)"),
         ("#define F(x) x", "F("),
         ("#define F(x) x", "F((1)"),
-        ("#define F(x,...) x", "F(1)"),
+        ("#define F(x,y,...) x", "F(1)"),
         ("#define F(x) x\n#define PAIR 1,2\n#define G(x) F(x)", "G(PAIR)"),
         ("#define F(x) x", "F(\n#define A 1\n1)"),
         ("#define F(x) x", "F\n#if 1\n(1)\n#endif"),

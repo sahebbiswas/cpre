@@ -13,12 +13,5 @@
     "reference": "accepted",
     "cpre": "incomplete at line 1: unsupported_condition_expression",
     "reason": "The value of an ordinary character constant depends on the implementation's execution character set, so cpre declines to evaluate it instead of assuming ASCII."
-  },
-  "macro_va_opt_omitted.c": {
-    "issue": "#151",
-    "kind": "gap",
-    "reference": "accepted",
-    "cpre": "incomplete at line 3: unsupported_macro_expansion",
-    "reason": "C23 lets a variadic macro call omit the variadic argument entirely; cpre requires it, even if empty."
   }
 }
