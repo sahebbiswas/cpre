@@ -22,10 +22,15 @@ from .configuration import MacroConfiguration
 from .errors import AnalysisError, ErrorCode, SourceLocation
 from .expansion import SourceMapping
 from .include_queries import IncludeQueryProvider
-from .include_queries import preprocess_source as _include_preprocess_source
 from .includes import DEFAULT_MAX_INCLUDE_DEPTH, IncludeResolver
 from .lexer import tokenize
-from .preprocessing import PreprocessDiagnostic, PreprocessingContext, PreprocessResult
+from .preprocessing import (
+    PreprocessDiagnostic,
+    PreprocessingContext,
+    PreprocessRequest,
+    PreprocessResult,
+    preprocess_request,
+)
 
 
 class PragmaOrigin(str, Enum):
@@ -311,6 +316,30 @@ def preprocess_source(
     conservative atomic-incomplete contract. cpre does not implement vendor or
     compiler pragma meaning.
     """
+    return _preprocess_with_pragmas(
+        PreprocessRequest(
+            source,
+            filename=filename,
+            assumptions=assumptions,
+            configuration=configuration,
+            context=context,
+            options=options,
+            skip_includes=skip_includes,
+            include_resolver=include_resolver,
+            max_include_depth=max_include_depth,
+            include_query=include_query,
+            has_include_from_resolver=has_include_from_resolver,
+        ),
+        pragma_handler,
+    )
+
+
+def _preprocess_with_pragmas(
+    request: PreprocessRequest, pragma_handler: PragmaHandler | None
+) -> PreprocessResult:
+    """Run ``request`` through the core and deliver its pragmas to ``pragma_handler``."""
+    source = request.source
+    filename = request.filename
     if pragma_handler is not None and not callable(pragma_handler):
         raise AnalysisError(
             "pragma_handler must be callable",
@@ -318,19 +347,8 @@ def preprocess_source(
         )
 
     transformed, source_pragmas = _mask_source_pragmas(source)
-    result = _include_preprocess_source(
-        transformed,
-        filename=filename,
-        assumptions=assumptions,
-        configuration=configuration,
-        context=context,
-        include_query=include_query,
-        options=options,
-        skip_includes=skip_includes,
-        include_resolver=include_resolver,
-        max_include_depth=max_include_depth,
-        has_include_from_resolver=has_include_from_resolver,
-        _dispatch_included_pragmas=True,
+    result = preprocess_request(
+        replace(request, source=transformed, dispatch_included_pragmas=True)
     )
     if not result.complete or result.source is None or result.source_map is None:
         return result

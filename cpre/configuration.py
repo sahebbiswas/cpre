@@ -173,7 +173,7 @@ class MacroConfiguration:
 
         # Deferred: the preprocessor imports this module for ``MacroConfiguration``, and
         # building a configuration from source text runs the preprocessor.
-        from .pragmas import preprocess_source
+        from .pragmas import _preprocess_with_pragmas
 
         if base is None:
             seed_config = cls(unknown_names=unknown_names)
@@ -186,23 +186,23 @@ class MacroConfiguration:
                 undefined=base.undefined,
                 unknown_names=unknown_names,
             )
-        from .preprocessing import PreprocessingContext, _seed_context_names  # deferred, see above
+        from .preprocessing import PreprocessingContext, PreprocessRequest  # deferred, see above
 
-        guard = _seed_context_names.set(
-            frozenset(context.standard_macros)
-            if isinstance(context, PreprocessingContext)
-            else None
-        )
-        try:
-            result = preprocess_source(
+        result = _preprocess_with_pragmas(
+            PreprocessRequest(
                 text,
                 filename=filename,
                 configuration=seed_config,
                 context=context,
                 options=options,
-            )
-        finally:
-            _seed_context_names.reset(guard)
+                protected_names=(
+                    frozenset(context.standard_macros)
+                    if isinstance(context, PreprocessingContext)
+                    else None
+                ),
+            ),
+            None,
+        )
 
         if not result.complete:
             first = result.incomplete[0]

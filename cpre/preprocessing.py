@@ -258,15 +258,11 @@ class _Run:
     include_query: _has_include.IncludeQueryProvider | None = None
     # Answer __has_include queries the callback leaves open from the include resolver.
     has_include_from_resolver: bool = False
-
-
-# Names a seed source being evaluated by ``MacroConfiguration.from_source()`` may
-# not #define or #undef because the preprocessing context supplies them; None
-# outside seed evaluation. A configuration naming them could never be used with
-# that context, so the seed is rejected at the directive instead.
-_seed_context_names: ContextVar[frozenset[str] | None] = ContextVar(
-    "_seed_context_names", default=None
-)
+    # Macro names a seed source may not #define or #undef because the preprocessing context
+    # supplies them (``MacroConfiguration.from_source``); None outside seed evaluation. A
+    # configuration naming them could never be used with that context, so the seed is
+    # rejected at the directive instead.
+    protected_names: frozenset[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -563,6 +559,31 @@ def compact(
     return "".join(output)
 
 
+@dataclass(frozen=True)
+class PreprocessRequest:
+    """Everything one concrete preprocessing run needs; the core consumes only this.
+
+    The public functions (:func:`preprocess_source`, ``cpre.pragmas.preprocess_source``) are
+    adapters that build a request. ``dispatch_included_pragmas`` is set by the pragma layer
+    so included ``#pragma`` directives become markers it can deliver in output order;
+    ``protected_names`` is set by ``MacroConfiguration.from_source`` for seed evaluation.
+    """
+
+    source: str
+    filename: str | None = None
+    assumptions: MacroAssumptions | Mapping[str, bool] | None = None
+    configuration: MacroConfiguration | None = None
+    context: PreprocessingContext | None = None
+    options: AnalysisOptions | None = None
+    skip_includes: bool = False
+    include_resolver: IncludeResolver | None = None
+    max_include_depth: int = DEFAULT_MAX_INCLUDE_DEPTH
+    include_query: _has_include.IncludeQueryProvider | None = None
+    has_include_from_resolver: bool = False
+    dispatch_included_pragmas: bool = False
+    protected_names: frozenset[str] | None = None
+
+
 def preprocess_source(
     source: str,
     *,
@@ -570,13 +591,12 @@ def preprocess_source(
     assumptions: MacroAssumptions | Mapping[str, bool] | None = None,
     configuration: MacroConfiguration | None = None,
     context: PreprocessingContext | None = None,
+    include_query: _has_include.IncludeQueryProvider | None = None,
     options: AnalysisOptions | None = None,
     skip_includes: bool = False,
     include_resolver: IncludeResolver | None = None,
     max_include_depth: int = DEFAULT_MAX_INCLUDE_DEPTH,
-    _dispatch_included_pragmas: bool = False,
-    _include_query: _has_include.IncludeQueryProvider | None = None,
-    _has_include_from_resolver: bool = False,
+    has_include_from_resolver: bool = False,
 ) -> PreprocessResult:
     """Select conditional branches under an explicit concrete macro state.
 
@@ -621,7 +641,57 @@ def preprocess_source(
     results expose a detached, read-only final macro-state snapshot and immutable
     provenance for output lines wholly removed by preprocessing. Malformed
     conditionals raise the same structured ParseError as analyze_source.
+
+    cpre never searches the filesystem or emulates compiler include paths. When a
+    reachable condition requires ``__has_include``, ``include_query`` receives the
+    macro-expanded header spelling, delimiter form, physical source location, and
+    the identity of the source containing the query: ``filename`` for the primary
+    source, or the resolved identity of an included source. A Boolean answer is
+    substituted deterministically; ``None`` yields an atomic incomplete result.
+    Queries in branches or Boolean terms proven unreachable are never sent to the
+    provider. With ``has_include_from_resolver=True``, a query that
+    ``include_query`` does not answer (no callback, or ``None``) is answered by
+    ``include_resolver``: the header is available exactly when the resolver returns
+    a :class:`ResolvedInclude` for the equivalent ``#include`` request. The resolver
+    must have no side effects for this to be sound, so it is opt-in.
+    ``defined(__has_include)`` is true when either source of answers is enabled;
+    ``__has_include_next`` is unsupported.
     """
+    return preprocess_request(
+        PreprocessRequest(
+            source,
+            filename=filename,
+            assumptions=assumptions,
+            configuration=configuration,
+            context=context,
+            options=options,
+            skip_includes=skip_includes,
+            include_resolver=include_resolver,
+            max_include_depth=max_include_depth,
+            include_query=include_query,
+            has_include_from_resolver=has_include_from_resolver,
+        )
+    )
+
+
+def preprocess_request(request: PreprocessRequest) -> PreprocessResult:
+    """Run the concrete preprocessor for one request (the only core entry point)."""
+    source = request.source
+    filename = request.filename
+    assumptions = request.assumptions
+    configuration = request.configuration
+    context = request.context
+    options = request.options
+    skip_includes = request.skip_includes
+    include_resolver = request.include_resolver
+    max_include_depth = request.max_include_depth
+    include_query = request.include_query
+    has_include_from_resolver = request.has_include_from_resolver
+    if include_query is not None and not callable(include_query):
+        raise AnalysisError(
+            "include_query must be callable",
+            code=ErrorCode.INVALID_CONFIGURATION,
+        )
     if type(skip_includes) is not bool:
         raise AnalysisError(
             "skip_includes must be True or False",
@@ -632,12 +702,12 @@ def preprocess_source(
             "include_resolver must be callable",
             code=ErrorCode.INVALID_CONFIGURATION,
         )
-    if type(_has_include_from_resolver) is not bool:
+    if type(has_include_from_resolver) is not bool:
         raise AnalysisError(
             "has_include_from_resolver must be True or False",
             code=ErrorCode.INVALID_CONFIGURATION,
         )
-    if _has_include_from_resolver and include_resolver is None:
+    if has_include_from_resolver and include_resolver is None:
         raise AnalysisError(
             "has_include_from_resolver requires an include_resolver",
             code=ErrorCode.INVALID_CONFIGURATION,
@@ -682,9 +752,10 @@ def preprocess_source(
         skip_includes,
         includes,
         [],
-        _dispatch_included_pragmas,
-        _include_query,
-        _has_include_from_resolver,
+        request.dispatch_included_pragmas,
+        include_query,
+        has_include_from_resolver,
+        request.protected_names,
     )
     unit = _preprocess_unit(source, run, identity=None, filename=filename, depth=0)
     if unit.diagnostics:
@@ -1179,7 +1250,7 @@ def _preprocess_unit(
                         if definition_head is None or definition_head.name != kind:
                             raise ValueError("ambiguous directive after physical line splicing")
                         remainder = concrete[definition_head.name_end :]
-                        protected = _seed_context_names.get()
+                        protected = run.protected_names
                         if protected:
                             target = macro_name(remainder)
                             if target is not None and target in protected:
@@ -1518,10 +1589,12 @@ def _splice(
 
 
 __all__ = [
+    "PreprocessRequest",
     "PreprocessingContext",
     "PreprocessDiagnostic",
     "PreprocessResult",
     "SkippedInclude",
     "compact",
+    "preprocess_request",
     "preprocess_source",
 ]
