@@ -166,7 +166,7 @@ def scan(source: str) -> tuple[Occurrence, ...]:
                     _offset(starts, start_location),
                     _offset(starts, end_location) + 1,
                     start_location,
-                    logical.start_line,
+                    logical.directive_line,
                 )
             )
             index = next_index

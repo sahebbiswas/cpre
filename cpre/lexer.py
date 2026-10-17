@@ -260,6 +260,25 @@ class LogicalLine:
         return directive_head(self.masked)
 
     @cached_property
+    def first_line(self) -> int:
+        """Physical line of the first retained character.
+
+        ``start_line`` also covers splice-only lines before it, which masking must blank
+        but diagnostics must not report.
+        """
+        if not self.text:
+            return self.start_line
+        return self.lexed.location(self.index).line or self.start_line
+
+    @cached_property
+    def directive_line(self) -> int:
+        """Physical line of the directive's ``#`` (``first_line`` for ordinary lines)."""
+        directive = self.directive
+        if directive is None or not self.text:
+            return self.first_line
+        return self.locations[directive.hash_index].line or self.first_line
+
+    @cached_property
     def locations(self) -> tuple[SourceLocation, ...]:
         """Physical location of every character of ``text``."""
         return tuple(self.lexed.location(self.index + offset) for offset in range(len(self.text)))
