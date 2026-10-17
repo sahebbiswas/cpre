@@ -92,7 +92,7 @@ def _condition_ranges(source: str) -> dict[tuple[int, str], SourceRange]:
         last = locations[end_offset - 1]
         if start.line is None or last.line is None:
             continue
-        result[(logical_line.start_line, kind)] = SourceRange(
+        result[(logical_line.directive_line, kind)] = SourceRange(
             start=SourceLocation(start.line, start.column),
             end=SourceLocation(last.line, last.column + 1),
         )

@@ -824,6 +824,9 @@ class _UnitContext:
         self.physical = split_lines(source, keepends=True)
         self.logical = list(logical_lines(source))
         self.ends = {line.start_line: line.end_line for line in self.logical}
+        # Masking starts at a logical line's first physical line; diagnostics report the
+        # line of the directive's '#', as compilers do.
+        self.reported = {line.start_line: line.directive_line for line in self.logical}
         self.retained = [True] * len(self.physical)
         self.diagnostics: list[PreprocessDiagnostic | AnalysisIncomplete] = []
         self.insertions: list[tuple[int, int, _UnitOutput]] = []
@@ -848,8 +851,14 @@ class _UnitContext:
         """Drop physical lines ``start`` through ``end`` (1-based, inclusive) from the output."""
         self.retained[start - 1 : end] = [False] * (end - start + 1)
 
+    def reported_line(self, line: int) -> int:
+        """Line to report for the logical line whose masking starts at ``line``."""
+        return self.reported.get(line, line)
+
     def located(self, code: ErrorCode, message: str, line: int) -> PreprocessDiagnostic:
-        return PreprocessDiagnostic(code, message, SourceLocation(line), self.identity)
+        return PreprocessDiagnostic(
+            code, message, SourceLocation(self.reported_line(line)), self.identity
+        )
 
     def limit_diagnostic(
         self, error: AnalysisLimitExceeded, location: SourceLocation | None
@@ -1134,7 +1143,7 @@ class _IncludeHandler:
     def handle(self, kind: str, operand: str, line: int, state: _LogicalPreprocessingState) -> bool:
         """Handle one reachable include directive; False means diagnostics were added."""
         context = self.context
-        location = SourceLocation(line)
+        location = SourceLocation(context.reported_line(line))
         if not operand:
             context.diagnostics.append(
                 context.located(
@@ -1338,7 +1347,15 @@ class _UnitProcessor:
                 )
             )
         except AnalysisLimitExceeded as error:
-            limit_line = error.line if error.line is not None else context.current_line
+            limit_line = (
+                error.line
+                if error.line is not None
+                else (
+                    None
+                    if context.current_line is None
+                    else context.reported_line(context.current_line)
+                )
+            )
             context.diagnostics.append(
                 context.limit_diagnostic(
                     error, SourceLocation(limit_line) if limit_line is not None else None
@@ -1360,7 +1377,7 @@ class _UnitProcessor:
         if head is not None:
             context.environment.logical_override = None
             context.expansion.flush(context.environment)
-        branch = self.branches.get(current_line)
+        branch = self.branches.get(line.directive_line)
         if branch is not None:
             return self._conditional_line(branch, current_line, line_state)
         core = head.name if head is not None and head.name in _CORE_DIRECTIVES else None
@@ -1387,11 +1404,11 @@ class _UnitProcessor:
         self, branch: ConditionalBranch, current_line: int, line_state: _LogicalPreprocessingState
     ) -> bool:
         context = self.context
-        if current_line in self.starts:
+        if branch.line in self.starts:
             self.stack.append([self.active, False, False])
-            self.group_lines.append(current_line)
+            self.group_lines.append(branch.line)
             if self.selections is not None and self.active:
-                self.selections[current_line] = None
+                self.selections[branch.line] = None
         frame = self.stack[-1]
         self.active = False
         context.blank(current_line, context.ends[current_line])
@@ -1405,7 +1422,7 @@ class _UnitProcessor:
                     self.active = True
                     frame[1] = True
                     if self.selections is not None:
-                        self.selections[self.group_lines[-1]] = current_line
+                        self.selections[self.group_lines[-1]] = branch.line
         finally:
             context.environment.logical_override = None
         frame[2] = self.active
@@ -1440,7 +1457,10 @@ class _UnitProcessor:
                 if self._protected(kind, remainder, current_line):
                     return False
                 _apply_macro_directive(
-                    context.environment, kind, remainder, SourceLocation(current_line)
+                    context.environment,
+                    kind,
+                    remainder,
+                    SourceLocation(context.reported_line(current_line)),
                 )
                 if kind == "define":
                     defined_name = macro_name(remainder)

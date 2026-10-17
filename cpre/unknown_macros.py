@@ -432,18 +432,18 @@ def unknown_macros_in_source(
             continue
         if directive.name in CONDITIONAL_DIRECTIVES:
             # A condition is evaluated in the enclosing context, before its branch.
-            found = branches.get(line.start_line)
+            found = branches.get(line.directive_line)
             if found is not None and found.expression_text is not None:
                 if directive.name in {"if", "ifdef", "ifndef"}:
-                    sweep.condition(found.expression_text, found.directive, line.start_line)
+                    sweep.condition(found.expression_text, found.directive, line.directive_line)
                 else:
                     # An #elif is reached only from the group's enclosing context.
                     sweep.path.pop()
-                    sweep.condition(found.expression_text, found.directive, line.start_line)
-                    sweep.path.append(line.start_line)
-            sweep.conditional(directive.name, line.start_line)
+                    sweep.condition(found.expression_text, found.directive, line.directive_line)
+                    sweep.path.append(line.directive_line)
+            sweep.conditional(directive.name, line.directive_line)
         elif directive.name in {"define", "undef"}:
-            sweep.directive(directive.name, line.text[directive.name_end :], line.start_line)
+            sweep.directive(directive.name, line.text[directive.name_end :], line.directive_line)
     return _collect(sweep.uses, sweep.lines)
 
 

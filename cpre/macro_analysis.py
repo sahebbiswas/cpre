@@ -429,7 +429,7 @@ def analyze_macros(
         name_location = (
             _to_source_location(line.locations[name_offset])
             if name_offset < len(line.locations)
-            else SourceLocation(line.start_line, 1)
+            else SourceLocation(line.first_line, 1)
         )
         tail = text[name_match.end() :]
         parameters: tuple[str, ...] | None = None
