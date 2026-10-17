@@ -32,7 +32,7 @@ from __future__ import annotations
 import re
 from bisect import bisect_right
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property, lru_cache
 
 from ._lines import LINE_BREAK, line_starts, split_lines
@@ -117,7 +117,12 @@ class OffsetMap:
 @dataclass(frozen=True)
 class Token:
     """One preprocessing token with physical offsets; ``hidden`` and ``generated`` are
-    annotations added during macro expansion."""
+    annotations added during macro expansion.
+
+    ``space_before`` records that whitespace or a comment preceded the token where it was
+    written. It travels with the token through macro expansion, which is how ``#``
+    knows where to put a space (C11 6.10.3.2p2). It is not part of a token's identity.
+    """
 
     text: str
     kind: str
@@ -125,6 +130,7 @@ class Token:
     end: int
     hidden: frozenset[str] = frozenset()
     generated: bool = False
+    space_before: bool = field(default=False, compare=False)
 
 
 def _splice(source: str) -> tuple[str, list[tuple[int, int]]]:
@@ -148,8 +154,15 @@ def splice(source: str) -> str:
 
 def scan(text: str, start: int = 0) -> Iterator[Token]:
     """Preprocessing tokens of already spliced ``text``, with offsets into ``text``."""
+    space = False
     for match in _TOKEN.finditer(text, start):
-        yield Token(match.group(), match.lastgroup or "other", match.start(), match.end())
+        kind = match.lastgroup or "other"
+        if kind in {"space", "comment"}:
+            space = True
+            yield Token(match.group(), kind, match.start(), match.end())
+            continue
+        yield Token(match.group(), kind, match.start(), match.end(), space_before=space)
+        space = False
 
 
 def tokenize(source: str) -> list[Token]:
@@ -164,6 +177,7 @@ def tokenize(source: str) -> list[Token]:
             token.kind,
             offsets.physical(token.start),
             offsets.physical_end(token.end),
+            space_before=token.space_before,
         )
         for token in scan(text)
     ]

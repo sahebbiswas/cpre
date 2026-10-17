@@ -7,7 +7,7 @@ and prescanned arguments as inputs and never looks at the macro environment.
 
 from __future__ import annotations
 
-import re
+from dataclasses import replace
 from typing import Literal, Union
 
 from ._replacement import (
@@ -16,7 +16,7 @@ from ._replacement import (
     is_paste_operator,
     is_stringify_operator,
 )
-from .lexer import SPLICE, Token, tokenize
+from .lexer import Token, tokenize
 from .macros import MacroDefinition
 
 _PASTE: Literal["##"] = "##"
@@ -25,29 +25,29 @@ Bindings = dict[str, list[Token]]
 
 
 class Substituter:
-    """Substitutes arguments into replacement lists of one source text."""
+    """Substitutes arguments into replacement lists."""
 
-    def __init__(self, source: str):
-        self.source = source
+    @staticmethod
+    def stringify(tokens: list[Token], start: int, end: int, space_before: bool = False) -> Token:
+        """Stringify an unexpanded argument: one space wherever whitespace separated tokens.
 
-    def stringify(self, tokens: list[Token], start: int, end: int) -> Token:
-        """Stringify an unexpanded argument using its invocation spelling."""
+        Each token carries whether whitespace preceded it where it was written, including
+        tokens that reached the argument through another macro's replacement list.
+        """
         pieces: list[str] = []
-        previous: Token | None = None
+        space = False  # whitespace before a placemarker that vanishes moves to the next token
         for token in tokens:
             if token.kind == "empty":
+                space = space or token.space_before
                 continue
-            if previous is not None:
-                gap = ""
-                if not previous.generated and not token.generated and previous.end <= token.start:
-                    gap = SPLICE.sub("", self.source[previous.end : token.start])
-                if gap and (re.search(r"\s", gap) or "/*" in gap or "//" in gap):
-                    pieces.append(" ")
+            if pieces and (token.space_before or space):
+                pieces.append(" ")
             pieces.append(token.text)
-            previous = token
-        spelling = "".join(pieces).strip()
-        spelling = spelling.replace("\\", "\\\\").replace('"', '\\"')
-        return Token(f'"{spelling}"', "literal", start, end, generated=True)
+            space = False
+        spelling = "".join(pieces).replace("\\", "\\\\").replace('"', '\\"')
+        return Token(
+            f'"{spelling}"', "literal", start, end, generated=True, space_before=space_before
+        )
 
     def substitute(
         self,
@@ -112,7 +112,7 @@ class Substituter:
                     raise ExpansionError(
                         f"stringification operator in {definition.name} is not followed by a parameter"
                     )
-                elements.append([self.stringify(raw[operand.text], start, end)])
+                elements.append([self.stringify(raw[operand.text], start, end, part.space_before)])
                 index += 2
                 continue
             if is_paste_operator(part):
@@ -124,6 +124,9 @@ class Substituter:
                 value = list(raw[part.text] if adjacent_paste else expanded[part.text])
                 if adjacent_paste and not value:
                     value = [Token("", "empty", start, end, generated=True)]
+                elif value and value[0].space_before != part.space_before:
+                    # The argument's first token is spaced like the parameter it replaces.
+                    value[0] = replace(value[0], space_before=part.space_before)
                 elements.append(value)
             else:
                 elements.append([part])
@@ -154,7 +157,15 @@ def paste_tokens(
         raise ExpansionError(
             f"invalid token paste in {definition.name}: {left_token.text!r} ## {right_token.text!r}"
         )
-    merged = Token(text, tokens[0].kind, start, end, left_token.hidden | right_token.hidden, True)
+    merged = Token(
+        text,
+        tokens[0].kind,
+        start,
+        end,
+        left_token.hidden | right_token.hidden,
+        True,
+        left_token.space_before,
+    )
     return left[:-1] + [merged] + right[1:]
 
 

@@ -116,7 +116,15 @@ class Rescanner:
                 pending.extendleft(reversed(generated))
             else:
                 emitted.append(
-                    Token("", "empty", token.start, invocation.end, invocation.hidden, True)
+                    Token(
+                        "",
+                        "empty",
+                        token.start,
+                        invocation.end,
+                        invocation.hidden,
+                        True,
+                        token.space_before,
+                    )
                 )
         return emitted
 
@@ -199,17 +207,24 @@ class Rescanner:
             invocation.end,
             replacement.va_opts,
         )
-        generated = []
+        generated: list[Token] = []
+        # The expansion is spaced like the invocation it replaces, and whitespace before a
+        # placemarker that vanishes moves to the next token (so `a EMPTY b` keeps its gap).
+        space = token.space_before
         for value in substituted:
             self.budget.consume()
-            if value.kind != "empty":
-                generated.append(
-                    replace(
-                        value,
-                        start=token.start,
-                        end=invocation.end,
-                        hidden=value.hidden | invocation.hidden,
-                        generated=True,
-                    )
+            if value.kind == "empty":
+                space = space or value.space_before
+                continue
+            generated.append(
+                replace(
+                    value,
+                    start=token.start,
+                    end=invocation.end,
+                    hidden=value.hidden | invocation.hidden,
+                    generated=True,
+                    space_before=space if not generated else value.space_before or space,
                 )
+            )
+            space = False
         return generated
