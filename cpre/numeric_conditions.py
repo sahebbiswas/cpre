@@ -341,6 +341,11 @@ class _Parser:
         if token.kind == "literal" and "'" in token.text:
             return _character(token.text)
         if token.kind == "identifier":
+            if token.text in token.hidden:
+                # Expansion left this name alone because it was already being replaced
+                # (a self-referential macro). It is a plain identifier from now on, and
+                # every identifier left in a controlling expression is 0 (C11 6.10.1).
+                return _Value(0)
             raise NumericConditionError(f"unresolved identifier {token.text!r}")
         raise NumericConditionError(f"unsupported token {token.text!r} in concrete condition")
 
