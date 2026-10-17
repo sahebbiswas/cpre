@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from .expansion import Expansion, ExpansionError
@@ -317,9 +318,10 @@ class _Parser:
 
     def parse(self) -> _Value:
         value = self.conditional(True)
-        if self.peek() is not None:
+        leftover = self.peek()
+        if leftover is not None:
             raise NumericConditionError(
-                f"unsupported token {self.peek().text!r} in concrete condition"
+                f"unsupported token {leftover.text!r} in concrete condition"
             )
         return value
 
@@ -350,8 +352,10 @@ class _Parser:
         raise NumericConditionError(f"unsupported token {token.text!r} in concrete condition")
 
     def unary(self, evaluate: bool) -> _Value:
-        if self.peek() is not None and self.peek().text in {"+", "-", "!", "~"}:
-            op = self.take().text
+        head = self.peek()
+        if head is not None and head.text in {"+", "-", "!", "~"}:
+            self.take()
+            op = head.text
             self._enter()
             try:
                 value = self.unary(evaluate)
@@ -375,10 +379,17 @@ class _Parser:
             return _unsigned(~value.value) if value.unsigned else _signed(~value.value)
         return self.primary(evaluate)
 
-    def binary(self, operand, operators: set[str], evaluate: bool, apply) -> _Value:
+    def binary(
+        self,
+        operand: Callable[[bool], _Value],
+        operators: set[str],
+        evaluate: bool,
+        apply: Callable[[str, _Value, _Value, bool], _Value],
+    ) -> _Value:
         value = operand(evaluate)
-        while self.peek() is not None and self.peek().text in operators:
-            op = self.take().text
+        while (head := self.peek()) is not None and head.text in operators:
+            self.take()
+            op = head.text
             right = operand(evaluate)
             value = apply(op, value, right, evaluate)
         return value

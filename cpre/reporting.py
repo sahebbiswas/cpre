@@ -192,7 +192,11 @@ def text_lines(
                 if contextual != simplified:
                     contextual_line = f"{'  ' * (depth + 1)}in context: {contextual}"
                     yield colored(contextual_line, "green", color)
-                predicates = sorted(expression_predicates(branch.expression))
+                predicates = (
+                    sorted(expression_predicates(branch.expression))
+                    if branch.expression is not None
+                    else []
+                )
                 if predicates:
                     opaque = f"{'  ' * (depth + 1)}opaque: {', '.join(predicates)}"
                     yield colored(opaque, "cyan", color)
