@@ -11,6 +11,7 @@ import re
 from bisect import bisect_right
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import TypeVar
 
 from ._lines import LINE_BREAK, line_starts, split_lines
 from .model import (
@@ -130,8 +131,27 @@ _TOKEN = re.compile(
 _FORMS = frozenset(("if", "ifdef", "ifndef", "elif", "elifdef", "elifndef", "else", "endif"))
 
 
+T = TypeVar("T")
+
+
+def _without(items: list[T], positions: set[int]) -> list[T]:
+    """``items`` without the entries at ``positions``, copied slice by slice."""
+    kept: list[T] = []
+    start = 0
+    for position in sorted(positions):
+        kept.extend(items[start:position])
+        start = position + 1
+    kept.extend(items[start:])
+    return kept
+
+
 def _logical_source(source: str) -> tuple[str, str, list[int]]:
-    """Return spliced source, directive-recognition mask, and physical offsets."""
+    """Return spliced source, directive-recognition mask, and physical offsets.
+
+    A comment is one space in translation phase 3, so the line breaks inside a
+    multi-line comment are dropped like a splice: the directive that contains the
+    comment carries on past it.
+    """
 
     chars: list[str] = []
     offsets: list[int] = []
@@ -148,6 +168,7 @@ def _logical_source(source: str) -> tuple[str, str, list[int]]:
 
     text = "".join(chars)
     hidden_literals: list[tuple[int, int]] = []
+    comment_breaks: set[int] = set()
     index = 0
     while index < len(text):
         # A preprocessing number owns apostrophe digit separators. Checking it
@@ -201,6 +222,8 @@ def _logical_source(source: str) -> tuple[str, str, list[int]]:
         for masked_index in range(index, end):
             if chars[masked_index] not in "\r\n":
                 chars[masked_index] = " "
+            else:
+                comment_breaks.add(masked_index)
         index = end
 
     masked = chars.copy()
@@ -208,6 +231,10 @@ def _logical_source(source: str) -> tuple[str, str, list[int]]:
         for masked_index in range(start, end):
             if masked[masked_index] not in "\r\n":
                 masked[masked_index] = "@"
+    if comment_breaks:
+        chars = _without(chars, comment_breaks)
+        masked = _without(masked, comment_breaks)
+        offsets = _without(offsets, comment_breaks)
     return "".join(chars), "".join(masked), offsets
 
 

@@ -211,14 +211,19 @@ def test_invalid_options_and_assumptions():
 
 
 def test_comments_crossing_selection_boundaries_remain_balanced():
-    source = "#if 1 /* explanation\ncontinued */ int kept;\n#endif\n"
+    # A comment is part of the directive line it is on, however many physical lines it
+    # spans, so it is masked with that directive and never straddles a selection boundary.
+    source = "#if 1 /* explanation\ncontinued */\nint kept;\n#endif\n"
     output = selected(source)
-    assert "/* explanation\ncontinued */ int kept;" in output
+    assert "explanation" not in output
+    assert "int kept;" in output
+    assert output.count("/*") == output.count("*/") == 0
     source = "/* explanation\n*/ #if 0\nint removed;\n#endif\nint kept;"
     output = selected(source)
-    assert "/* explanation\n*/" in output
+    assert "explanation" not in output
     assert "int removed;" not in output
     assert "int kept;" in output
+    assert output.count("/*") == output.count("*/") == 0
 
 
 @pytest.mark.parametrize("ending", ["\n", "\r\n", "\r"])
@@ -299,14 +304,12 @@ def test_compact_rejects_negative_limit_and_incomplete_result():
         compact(incomplete)
 
 
-def test_restored_block_comment_lines_are_not_reported_as_removed():
-    source = "#if 1 /* explanation\ncontinued */ int kept;\n#endif\n"
+def test_block_comment_lines_of_a_removed_directive_are_reported_as_removed():
+    source = "#if 1 /* explanation\ncontinued */\nint kept;\n#endif\n"
     result = preprocess_source(source)
     assert result.complete
-    assert 1 not in result.removed_lines
-    assert 2 not in result.removed_lines
-    assert 3 in result.removed_lines
-    assert compact(result) == "".join(result.source.splitlines(keepends=True)[:2])
+    assert result.removed_lines == frozenset({1, 2, 4})
+    assert compact(result) == "int kept;\n"
 
 
 def test_compact_leaves_expanded_retained_output_unchanged():

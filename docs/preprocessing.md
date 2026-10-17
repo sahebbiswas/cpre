@@ -79,7 +79,7 @@ An incomplete result is not equivalent to a successful result with empty output.
 
 Macro expansion can change text length and output columns, so `result.source_map` is the authoritative bridge from canonical output back to physical source. Unexpanded spans map one-to-one; generated macro-expansion text maps to the physical invocation provenance defined by the macro-expansion contract.
 
-Block comments that overlap retained text are restored as needed so retained output remains lexically balanced. Removed-line provenance is computed from the final canonical representation, after such restoration.
+A comment that starts on a directive line belongs to that directive, even when it ends on a later line, so it is masked with the directive (see [the shared line model](api.md#suggested-edits-and-source-ranges)). Block comments that overlap retained text are restored as needed so retained output remains lexically balanced. Removed-line provenance is computed from the final canonical representation, after such restoration.
 
 Coordinate-sensitive parsers and analyzers should normally consume `result.source` plus `result.source_map`, not the compact representation described below.
 

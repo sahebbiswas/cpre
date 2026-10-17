@@ -164,6 +164,8 @@ if edit is not None:
 
 Every cpre component uses the same physical line model as GCC and Clang: a line ends at `\n`, `\r\n` or a lone `\r`. Form feed, vertical tab and the other characters Python's `str.splitlines()` treats as line boundaries (`\x1c`–`\x1e`, `\x85`, U+2028, U+2029) are ordinary characters within a line, so a `#` after other text on that same line does not start a directive. Only space, tab, form feed and vertical tab are accepted before `#` at the start of a directive line.
 
+Comments are read the way GCC and Clang read them: a comment is one space, and it is removed before directives are. A directive therefore ends at the first line break that is not inside a comment and not escaped by a backslash. A `/* ... */` comment that starts on a directive line and ends on a later line is part of that directive, together with whatever follows the comment, and so is a `//` comment that a backslash-newline continues onto the next line. Every component treats such a directive as one unit that spans those physical lines: its ranges and `removed_lines` cover all of them, preprocessing masks them line for line, and the lines after it keep their physical line numbers. A `#` that follows a comment which started after other text on its line does not start a directive, while a `#` that follows a comment which began the line does.
+
 Dead/redundant branch findings intentionally do not imply mechanical branch deletion. Do not synthesize destructive fixes merely because a branch is unreachable or redundant; apply automatic changes only when an explicit structured edit is present and suitable for the host tool's policy.
 
 ## Macro assumptions
