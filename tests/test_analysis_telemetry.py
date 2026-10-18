@@ -84,6 +84,25 @@ def test_work_exhaustion_leaves_components_unfinished():
     assert telemetry.work == 4  # the limit plus the one unit that exceeded it
 
 
+def test_work_exhaustion_keeps_finished_and_already_failed_components():
+    finished = analyze_source(MULTI, options=AnalysisOptions(max_work=100), telemetry=True)
+    assert not finished.complete and finished.telemetry is not None
+    assert [c.status for c in finished.telemetry.components] == [
+        "analyzed",
+        "analyzed",
+        "unfinished",
+    ]
+    failed = analyze_source(MULTI, options=AnalysisOptions(max_atoms=1, max_work=8), telemetry=True)
+    assert failed.telemetry is not None and not failed.partial
+    assert [(c.status, c.resource) for c in failed.telemetry.components] == [
+        ("incomplete", "atoms"),
+        ("incomplete", "atoms"),
+        ("unfinished", None),
+    ]
+    # The curtailed result itself carries no component entries to point at.
+    assert all(c.incomplete_component is None for c in failed.telemetry.components)
+
+
 def test_assumptions_are_covered():
     result = analyze_source(MULTI, assumptions={"A": True}, telemetry=True)
     assert result.telemetry is not None and result.telemetry.atoms >= 5
@@ -134,6 +153,19 @@ def test_cli_json_has_telemetry_only_when_requested(capsys, source_file):
     without = {k: v for k, v in data.items() if k != "telemetry"}
     assert main(["--json", source_file]) == 0
     assert json.loads(capsys.readouterr().out) == without
+
+
+def test_cli_batch_json_keeps_clean_files_when_telemetry_is_requested(capsys, tmp_path):
+    clean = tmp_path / "clean.c"
+    clean.write_bytes(b"#if A\n#endif\n")
+    other = tmp_path / "other.c"
+    other.write_bytes(b"int x;\n")
+    assert main(["--json", str(clean), str(other)]) == 0
+    assert json.loads(capsys.readouterr().out)["files"] == []
+    assert main(["--json", "--telemetry", str(clean), str(other)]) == 0
+    files = json.loads(capsys.readouterr().out)["files"]
+    assert [f["path"] for f in files] == [str(clean), str(other)]
+    assert all("telemetry" in f for f in files)
 
 
 def test_cli_text_reports_telemetry_on_stderr_and_leaves_stdout_alone(capsys, source_file):

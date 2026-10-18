@@ -142,6 +142,10 @@ class AnalysisTrace:
 
     atoms: int = 0
     components: list[ComponentTrace] = field(default_factory=list)
+    # The engine's own failure map (filled as limits are hit) and the components whose
+    # groups have all been analyzed, so a curtailed run still reports its progress.
+    failures: dict[int, AnalysisLimitExceeded] = field(default_factory=dict)
+    finished: set[int] = field(default_factory=set)
 
 
 @dataclass
@@ -299,6 +303,8 @@ def _analyze(
         elif clause == FALSE:
             context_satisfiable = False
     failures: dict[int, AnalysisLimitExceeded] = {}
+    if trace is not None:
+        trace.failures = failures
     for root, component in components.items():
         try:
             component.bdd = BDD(component.atoms, limits=resolved_limits, budget=resolved_budget)
@@ -418,6 +424,7 @@ def _analyze(
                         error.line = branch.line
                     raise
 
+    remaining = Counter(component for component in group_components if component in component_atoms)
     for index, group in enumerate(tree.groups):
         component_id = group_components[index]
         if component_id in failures:
@@ -428,6 +435,13 @@ def _analyze(
             if not recoverable(error):
                 raise
             failures[component_id] = error
+        else:
+            if trace is not None and component_id in remaining:
+                remaining[component_id] -= 1
+                if remaining[component_id] == 0:
+                    trace.finished.add(component_id)
+    if trace is not None:
+        trace.finished.update(component_atoms)
     for index, group in enumerate(tree.groups):
         if group_components[index] in failures:
             _clear_analysis([group])

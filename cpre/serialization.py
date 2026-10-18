@@ -184,6 +184,8 @@ def build_file_json(
             has_visible = True
         if analysis.telemetry is not None:
             f_data["telemetry"] = telemetry_to_dict(analysis.telemetry)
+            # Requested diagnostics are the point of the run, so keep clean files in a batch.
+            has_visible = True
     else:
         # Conditional analysis did not run: the status is unknown, not "complete".
         f_data.update(complete=None, partial=None, incomplete=None, incomplete_components=None)

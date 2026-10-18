@@ -338,7 +338,7 @@ for c in t.components:
     c.incomplete_component  # index into result.incomplete_components, else None
 ```
 
-Components are the independent Boolean subproblems described above, in analysis order; conditional groups without atoms are not components. `"incomplete"` components hit a per-component limit, and `"unfinished"` ones were still pending when the shared `max_work` budget ended the whole analysis (the figures describe the point where it stopped). The exact observed value of a limit is in the corresponding `AnalysisIncomplete` diagnostic. `nodes` is the number of Boolean-function nodes a component's manager created; no node identifiers or table internals are exposed.
+Components are the independent Boolean subproblems described above, in analysis order; conditional groups without atoms are not components. `"incomplete"` components hit a per-component limit, and `"unfinished"` ones were still pending when the shared `max_work` budget ended the whole analysis (the figures describe the point where it stopped; components that had finished or had already hit a per-component limit keep that status even though the result as a whole is incomplete). The exact observed value of a limit is in the corresponding `AnalysisIncomplete` diagnostic. `nodes` is the number of Boolean-function nodes a component's manager created; no node identifiers or table internals are exposed.
 
 Telemetry is diagnostic only: findings, diagnostics and completeness are identical with it on or off, the figures are deterministic, and they are **not** part of the compatibility contract (the cost model and counters may change in any release).
 

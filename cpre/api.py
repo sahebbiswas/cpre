@@ -255,7 +255,6 @@ def _telemetry(
     *,
     failures: dict[int, _AnalysisLimitExceeded],
     positions: dict[int, int],
-    curtailed: bool,
 ) -> AnalysisTelemetry:
     """The opt-in telemetry for one analysis; ``positions`` maps component ids to
     :class:`IncompleteComponent` indices."""
@@ -264,7 +263,7 @@ def _telemetry(
         nodes = len(item.bdd.nodes) - 2 if item.bdd is not None else 0
         if item.id in failures:
             status, resource = "incomplete", failures[item.id].resource
-        elif curtailed:
+        elif item.id not in trace.finished:
             status, resource = "unfinished", None
         else:
             status, resource = "analyzed", None
@@ -369,7 +368,7 @@ def analyze_source(
     limits = resolved_options._resource_limits()
     budget = _AnalysisBudget(limits.max_work)
     assumption_expression = _assumption_expression(normalized) if normalized is not None else None
-    trace = _AnalysisTrace()
+    trace = _AnalysisTrace() if telemetry else None
     try:
         main = _analyze_tree_partial(
             parse_source(source, distinguish_defined=normalized is not None),
@@ -418,10 +417,8 @@ def analyze_source(
             distinguish_defined=normalized is not None,
             error=error,
             telemetry=(
-                _telemetry(
-                    trace, resolved_options, budget, failures={}, positions={}, curtailed=True
-                )
-                if telemetry
+                _telemetry(trace, resolved_options, budget, failures=trace.failures, positions={})
+                if trace is not None
                 else None
             ),
         )
@@ -466,9 +463,8 @@ def analyze_source(
                 budget,
                 failures=failures,
                 positions={component: position for position, component in enumerate(failed_groups)},
-                curtailed=False,
             )
-            if telemetry
+            if trace is not None
             else None
         ),
     )
