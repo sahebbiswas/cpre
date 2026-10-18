@@ -7,11 +7,12 @@ to build its ``--json`` output; other front ends can use them for the same docum
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from . import reporting
 from ._types import AnalysisIncomplete, AnalysisResult, IncompleteComponent
+from .coverage import BranchCoverageResult, CoverageConfiguration
 from .macro_analysis import MacroAnalysisResult, MacroSimplificationResult
 from .macro_environment import MacroEnvironmentEntry
 from .model import ConditionalTree
@@ -238,6 +239,58 @@ def macro_environment_document(
             "file": str(path),
             "unknown_names": unknown_names,
             "macros": [macro_environment_entry_to_dict(entry) for entry in entries],
+        },
+    )
+
+
+def cover_document(
+    path: Path | str,
+    result: BranchCoverageResult,
+    *,
+    flags: Callable[[CoverageConfiguration], list[str]],
+) -> dict[str, object]:
+    """The ``cpre cover --json`` document.
+
+    ``configurations`` and ``outcomes`` are ``null`` when the analysis was incomplete
+    (the result is atomic then); ``flags`` renders the ``cpre preprocess`` arguments
+    that select one configuration.
+    """
+    configurations: list[dict[str, object]] | None = None
+    outcomes: list[dict[str, object]] | None = None
+    if result.configurations is not None and result.outcomes is not None:
+        configurations = [
+            {
+                "index": index,
+                "flags": flags(item),
+                "required": [
+                    {"kind": a.kind.value, "symbol": a.symbol, "value": a.value}
+                    for a in item.required
+                ],
+                "dont_care": list(item.dont_care),
+                "covers": list(item.covers),
+            }
+            for index, item in enumerate(result.configurations)
+        ]
+        outcomes = [
+            {
+                "index": index,
+                "group_line": outcome.group_line,
+                "branch_line": outcome.branch_line,
+                "directive": outcome.directive,
+                "status": outcome.status.value,
+                "configuration": outcome.configuration,
+                "reason": outcome.reason,
+            }
+            for index, outcome in enumerate(result.outcomes)
+        ]
+    return top_level(
+        "cover",
+        {
+            "file": str(path),
+            "complete": result.complete,
+            "configurations": configurations,
+            "outcomes": outcomes,
+            "incomplete": incomplete_to_dict(result.incomplete) if result.incomplete else None,
         },
     )
 

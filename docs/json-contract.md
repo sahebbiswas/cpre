@@ -15,6 +15,7 @@ Every top-level document has `schema` as its first key. The value is `cpre.<kind
 | `cpre.simplify-macros-preview/1` | `cpre simplify-macros --check --json` and `--diff --json` |
 | `cpre.preprocess/1` | `cpre preprocess --json` |
 | `cpre.macro-environment/1` | `cpre preprocess --dump-macros --json` |
+| `cpre.cover/1` | `cpre cover --json` |
 | `cpre.unknown-macros/1` | `cpre preprocess --list-unknown-macros --json` |
 | `cpre.expression/1` | `cpre test-input --json` |
 
@@ -67,6 +68,14 @@ Every top-level document has `schema` as its first key. The value is `cpre.<kind
 
 `file`, `unknown_names` (`open` or `undefined`), `macros`. Each macro is `{name, defined, replacement, parameters, variadic, origin, path}`: `defined` is `false` for an explicitly undefined name (then `replacement` is `null`); `parameters` is `null` for an object-like macro; `origin` is `command-line`, `seed` or `standard-macro`; `path` is the seed file for `seed` and `null` otherwise. `macros` is sorted by name, then origin. It is cpre's configured environment, not a compiler's predefined-macro catalog.
 
+### `cpre.cover/1`
+
+`file`, `complete`, `configurations`, `outcomes`, `incomplete`.
+
+- `configurations`: `{index, flags, required, dont_care, covers}`. `flags` are the `cpre preprocess` arguments selecting the configuration; `required` is a list of `{kind, symbol, value}` Boolean assignments (`kind` is `macro_value`, `macro_defined` or `predicate`); `dont_care` names macros the required set leaves free; `covers` indexes `outcomes`.
+- `outcomes`: `{index, group_line, branch_line, directive, status, configuration, reason}` in source order. `status` is `covered`, `unsatisfiable` or `not_covered`; `branch_line` and `directive` are `null` for the "no branch selected" outcome; `configuration` indexes `configurations` and is `null` unless covered; `reason` is `null` for covered outcomes.
+- `incomplete`: an analysis diagnostic when `complete` is `false`, else `null`. An incomplete result is atomic, so `configurations` and `outcomes` are then `null` (unknown), not `[]`.
+
 ### `cpre.expression/1`
 
 `input`, `simplified`, `equivalent`, `changed`, `semantics`, `symbolic_literals`.
@@ -86,4 +95,4 @@ Resource telemetry and similar diagnostic extras (see issue #103) are not part o
 
 ## Consumers
 
-New JSON output reuses these conventions and the builders in `cpre.serialization`: `simplify-macros --check`/`--diff` (`cpre.simplify-macros-preview/1`) already does; `--dump-macros` (`cpre.macro-environment/1`) too; `cpre cover` (#126) is planned.
+New JSON output reuses these conventions and the builders in `cpre.serialization`: `simplify-macros --check`/`--diff` (`cpre.simplify-macros-preview/1`) already does; `--dump-macros` (`cpre.macro-environment/1`) too; `cpre cover` (`cpre.cover/1`) too.

@@ -53,7 +53,7 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
         metavar="N",
         help=("with --compact, retain at most N preprocessing-created blank lines (default: 0)"),
     )
-    _add_include_options(parser)
+    add_include_options(parser)
     parser.add_argument(
         "--json",
         action="store_true",
@@ -162,7 +162,7 @@ def _add_configuration_options(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_include_options(parser: argparse.ArgumentParser) -> None:
+def add_include_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--skip-includes",
         action="store_true",
