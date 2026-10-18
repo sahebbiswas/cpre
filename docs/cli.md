@@ -360,6 +360,13 @@ cpre preprocess --config-from seed.h target.c
 cpre preprocess -I include --has-include-from-search src/feature.c
 ```
 
+`--has-include SPEC` gives explicit answers instead of, or on top of, the search. `SPEC` is the header spelling in its delimiters followed by `=1` (available) or `=0` (unavailable): `'<opt.h>=1'` or `'"local.h"=0'`. Quote it for the shell. The option is repeatable and keys on form and spelling, so `<x.h>` and `"x.h"` are different queries, and the spelling is the one after macro expansion (`#define H <opt.h>` / `__has_include(H)` is answered by `<opt.h>`). Explicit answers need no `-I` and turn on `defined(__has_include)`. They win over the search: with `--has-include-from-search`, only the queries without an explicit answer go to the search; without it, a reachable query nobody answered stays an incomplete result (`include availability is unknown for <x.h>`, exit status `2`). A value that is not of that form, or two different answers for one header, fails with a diagnostic and exit status `2`. This is the CLI form of the API's `include_query=` callback.
+
+```bash
+cpre preprocess --has-include '<optional.h>=1' --has-include '"local.h"=0' src/feature.c
+cpre preprocess -I include --has-include-from-search --has-include '<sys/epoll.h>=1' src/feature.c   # epoll from the flag, the rest from the search
+```
+
 `cpre preprocess` currently accepts one source file. Directory/batch processing is intentionally not inherited from the symbolic analysis CLI. Without `-I`, `--iquote`, or `--skip-includes`, reachable `#include` directives, unsupported pragmas, `__has_include` queries (unless `--has-include-from-search` is given), and other constructs outside the documented concrete-preprocessing contract remain governed by the library's atomic incomplete-result behavior.
 
 For the full transformation, configuration, mapping, deterministic-context, and host-callback contract, see [Concrete preprocessing](preprocessing.md) and [Concrete macro configuration](concrete-configuration.md). For canonical versus compact output semantics, see [Compact preprocessing output](compact-preprocessing.md).
