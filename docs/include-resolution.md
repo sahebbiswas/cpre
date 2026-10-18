@@ -104,7 +104,7 @@ It searches as follows:
 - **`#include_next`:** continues after the directory that contains the includer.
 - **Absolute header names:** used as written.
 
-Identities are normalized joined paths. Files are read as UTF-8 by default, with line endings preserved. Read failures raise `AnalysisError` with `source_read_error`. It never consults compiler default or system directories.
+Identities are normalized joined paths. Files are read as UTF-8 by default, with line endings preserved. Read failures raise `AnalysisError` with `source_read_error`. It also provides `exists(request)`, which finds the same file without reading it; `__has_include` probes use it (see [Answers from the include resolver](has-include.md#answers-from-the-include-resolver)). It never consults compiler default or system directories.
 
 The CLI exposes it as `-I DIR`/`--include-dir DIR`, `--iquote DIR`, and `--max-include-depth N`, and answers `__has_include` from the same search with `--has-include-from-search`. See the [CLI guide](cli.md#concrete-preprocessing).
 
