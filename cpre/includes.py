@@ -14,7 +14,7 @@ import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import Protocol, Union
+from typing import Protocol, Union, runtime_checkable
 
 from .errors import AnalysisError, ErrorCode, SourceLocation
 
@@ -79,6 +79,20 @@ class IncludeResolver(Protocol):
 
     def __call__(self, request: IncludeRequest) -> ResolvedInclude | None:
         """Return the included source, or ``None`` when it cannot be resolved."""
+        ...
+
+
+@runtime_checkable
+class ExistenceIncludeResolver(IncludeResolver, Protocol):
+    """An include resolver that can also answer ``__has_include`` without reading.
+
+    ``exists`` receives the same request ``__call__`` would and returns whether the header
+    can be found, without reading it, so a probe of an unreadable or undecodable header
+    still answers ``True``. Resolvers without it are probed through ``__call__``.
+    """
+
+    def exists(self, request: IncludeRequest) -> bool:
+        """Return whether the header can be found."""
         ...
 
 
@@ -152,7 +166,8 @@ class SearchPathResolver:
             return (includer_dir, *chain)
         return chain
 
-    def __call__(self, request: IncludeRequest) -> ResolvedInclude | None:
+    def _locate(self, request: IncludeRequest) -> str | None:
+        """The first existing candidate file for ``request``, without reading it."""
         if os.path.isabs(request.header):
             candidates = [request.header]
         else:
@@ -160,8 +175,17 @@ class SearchPathResolver:
                 os.path.join(directory, request.header) for directory in self._directories(request)
             ]
         for candidate in candidates:
-            if not os.path.isfile(candidate):
-                continue
+            if os.path.isfile(candidate):
+                return candidate
+        return None
+
+    def exists(self, request: IncludeRequest) -> bool:
+        """Whether ``request`` finds a file; nothing is read, so an undecodable header counts."""
+        return self._locate(request) is not None
+
+    def __call__(self, request: IncludeRequest) -> ResolvedInclude | None:
+        candidate = self._locate(request)
+        if candidate is not None:
             identity = os.path.normpath(candidate)
             try:
                 with open(candidate, encoding=self.encoding, newline="") as handle:
@@ -179,6 +203,7 @@ class SearchPathResolver:
 
 __all__ = [
     "DEFAULT_MAX_INCLUDE_DEPTH",
+    "ExistenceIncludeResolver",
     "IncludeForm",
     "IncludeOutcome",
     "IncludeRecord",

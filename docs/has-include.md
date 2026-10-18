@@ -76,6 +76,7 @@ With `include_resolver=` you can also opt into `has_include_from_resolver=True`.
 
 - The request has the query's header spelling and form, `directive="include"`, the query's location, `includer` set to the identity of the source containing the query, and that source's `depth`. Quoted-form queries therefore search relative to the containing source, as `#include` does.
 - Probing does not include anything: the returned source is not preprocessed and the probe is not recorded in `includes`.
+- A resolver that also provides `exists(request) -> bool` (the `ExistenceIncludeResolver` protocol in `cpre.includes`) is asked that instead, with the same request, and the probe reads nothing. `SearchPathResolver` provides it: a header that exists but is not valid UTF-8, or cannot be read, answers available, as a compiler's `__has_include` does, while `#include` of the same header still fails with `source_read_error`. `exists` must return a `bool`; anything else is an `invalid_configuration` error. Resolvers without `exists`, such as a plain function, are probed through `__call__` exactly as before, so a probe there is "would `#include` succeed".
 - An explicit `True` or `False` from `include_query` takes precedence and the resolver is not called; only `None` falls back.
 - Queries stay lazy: the resolver is asked only for queries that decide a reachable condition.
 - `defined(__has_include)` is true when either source of answers is enabled.

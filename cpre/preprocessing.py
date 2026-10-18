@@ -31,6 +31,7 @@ from .expansion import Expansion, ExpansionError, SourceMapping
 from .expressions import conjunction, disjunction, expression_atoms_in_order, negate
 from .includes import (
     DEFAULT_MAX_INCLUDE_DEPTH,
+    ExistenceIncludeResolver,
     IncludeForm,
     IncludeOutcome,
     IncludeRecord,
@@ -988,7 +989,20 @@ class _QueryAnswerer:
         request = IncludeRequest(
             query.header, query.form, "include", occurrence.location, includer, context.depth
         )
-        resolved = includes.resolver(request)
+        resolver = includes.resolver
+        if isinstance(resolver, ExistenceIncludeResolver):
+            # A resolver that can say whether a header exists answers the probe without
+            # reading it, as a compiler's __has_include does.
+            found = resolver.exists(request)
+            if type(found) is not bool:
+                raise AnalysisError(
+                    "include_resolver.exists must return True or False",
+                    code=ErrorCode.INVALID_CONFIGURATION,
+                    location=occurrence.location,
+                    filename=includer,
+                )
+            return found
+        resolved = resolver(request)
         if resolved is not None and not isinstance(resolved, ResolvedInclude):
             raise AnalysisError(
                 "include_resolver must return a ResolvedInclude or None",
