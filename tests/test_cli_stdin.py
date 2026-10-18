@@ -38,8 +38,10 @@ def test_stdin_analysis_equals_file_analysis(monkeypatch, capsys, tmp_path):
     path.write_bytes(SOURCE.encode())
     _, from_stdin, _ = _run(monkeypatch, capsys, ["--json", "-"])
     assert main(["--json", str(path)]) == 0
-    from_file = capsys.readouterr().out
-    assert from_stdin.replace("<stdin>", "X") == from_file.replace(str(path), "X")
+    from_file = json.loads(capsys.readouterr().out)
+    from_stdin = json.loads(from_stdin)
+    assert from_stdin.pop("path") == "<stdin>" and from_file.pop("path") == str(path)
+    assert from_stdin == from_file
 
 
 def test_malformed_stdin_exits_2_with_diagnostics_on_stderr(monkeypatch, capsys):
