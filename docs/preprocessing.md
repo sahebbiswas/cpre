@@ -247,6 +247,7 @@ def handle_pragma(pragma):
         return cpre.PragmaDisposition.CONSUME
     return cpre.PragmaDisposition.UNSUPPORTED
 
+
 result = cpre.preprocess_source(source, pragma_handler=handle_pragma)
 ```
 

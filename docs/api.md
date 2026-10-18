@@ -259,15 +259,15 @@ Downstream tools should preserve this distinction. Converting incomplete analysi
 ```python
 source = "".join(f"#if FEATURE_{n}\n#endif\n" for n in range(500))
 
-cpre.analyze_source(source).complete                        # True: 500 components of one atom each
+cpre.analyze_source(source).complete  # True: 500 components of one atom each
 cpre.analyze_source(
     "#if A && B\n#endif\n#if B && C\n#endif\n",
     options=cpre.AnalysisOptions(max_atoms=2),
-).complete                                                  # False: A, B, C form one component
+).complete  # False: A, B, C form one component
 cpre.analyze_source(
     "#if A && B\n#endif\n#if C && D\n#endif\n",
     options=cpre.AnalysisOptions(max_atoms=2),
-).complete                                                  # True: two independent components
+).complete  # True: two independent components
 ```
 
 Partitioning applies to `analyze_source()`. The exact Boolean queries and macro simplification reason about a single expression at a time and apply `max_atoms` to that whole expression. Concrete preprocessing applies `max_atoms` and `max_bdd_nodes` to each reachable condition; see [Resource limits](preprocessing.md#resource-limits).
@@ -298,19 +298,19 @@ No finding is reported for any line inside an incomplete component, and the bran
 
 ```python
 source = (
-    "#if A\n#if A\nx;\n#endif\n#endif\n"   # lines 1-5: redundant nested #if A
-    "#if B && C && D\n#endif\n"              # lines 6-7: three atoms
+    "#if A\n#if A\nx;\n#endif\n#endif\n"  # lines 1-5: redundant nested #if A
+    "#if B && C && D\n#endif\n"  # lines 6-7: three atoms
 )
 result = cpre.analyze_source(source, options=cpre.AnalysisOptions(max_atoms=2))
 
-result.complete                                   # False
-result.partial                                    # True
-[f.location.line for f in result.findings]        # [2]
+result.complete  # False
+result.partial  # True
+[f.location.line for f in result.findings]  # [2]
 component = result.incomplete_components[0]
-[g.location.line for g in component.groups]       # [6]
-component.atoms                                   # ('B', 'C', 'D')
-component.resource                                # 'atoms'
-result.incomplete[0].component                    # 0
+[g.location.line for g in component.groups]  # [6]
+component.atoms  # ('B', 'C', 'D')
+component.resource  # 'atoms'
+result.incomplete[0].component  # 0
 ```
 
 Interpret results as follows:
@@ -348,7 +348,7 @@ The same data appears on preprocessing failures: a `PreprocessDiagnostic` with `
 ```python
 result = cpre.preprocess_source("#if __GNUC__ >= 4\n#endif\n")
 diagnostic = result.incomplete[0]
-diagnostic.condition                       # '__GNUC__ >= 4'
+diagnostic.condition  # '__GNUC__ >= 4'
 [item.name for item in diagnostic.unresolved]  # ['__GNUC__']
 ```
 

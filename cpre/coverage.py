@@ -10,6 +10,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from ._coverage_integers import (
+    integer_semantics,
+    opaque_comparison_names,
+    parse_comparison,
+    solve_integers,
+)
 from ._types import AnalysisIncomplete, AnalysisOptions, _translate_parse_error
 from .analysis import _macro_semantics, tree_expressions
 from .configuration import MacroConfiguration, UnknownNamePolicy
@@ -26,6 +32,7 @@ from .model import (
     ConditionError,
     DefinedVariable,
     Expression,
+    Predicate,
     Variable,
 )
 from .parser import parse_source
@@ -163,12 +170,18 @@ def _required(
 
 
 def _configuration(
-    cube: dict[BooleanAtom, bool], required: dict[BooleanAtom, bool], names: list[str]
+    cube: dict[BooleanAtom, bool],
+    required: dict[BooleanAtom, bool],
+    names: list[str],
+    solved: dict[str, int],
 ) -> tuple[MacroConfiguration, tuple[str, ...]]:
     integers: dict[str, int] = {}
     undefined: set[str] = set()
     dont_care: list[str] = []
-    for name in names:
+    for name in sorted({*names, *solved}):
+        if name in solved:
+            integers[name] = solved[name]
+            continue
         defined = cube.get(DefinedVariable(name))
         value = cube.get(Variable(name))
         if value is True or (defined is True and value is None):
@@ -224,11 +237,13 @@ def cover_branches(
     A satisfiable outcome the generated configurations do not reach is
     ``NOT_COVERED`` with a reason. This happens when the Boolean model and
     concrete preprocessing disagree: source-order ``#define``/``#undef``, included
-    headers, names fixed by ``context``, or opaque comparisons such as
-    ``VERSION >= 3``, for which cpre never invents integer values.
+    headers, names fixed by ``context``, comparisons that cannot hold for one value
+    (``V > 3 && V < 2``), or opaque expressions such as ``VERSION % 2 == 1``, for
+    which cpre does not invent integer values.
 
     Macros are assigned ``1`` (defined and true), ``0`` (defined and false), or
-    left undefined. When exact analysis, or concrete preprocessing of a generated
+    left undefined; a macro compared with an integer literal (``VERSION >= 3``)
+    gets an integer that satisfies all the comparisons required on it. When exact analysis, or concrete preprocessing of a generated
     configuration, exceeds a resource limit, the result is atomic:
     ``configurations`` and ``outcomes`` are ``None`` and ``incomplete`` explains
     the limit. Malformed conditionals raise :class:`ParseError`.
@@ -329,6 +344,8 @@ def cover_branches(
 
     generated: list[tuple[CoverageConfiguration, set[int]]] = []
 
+    opaque_names: set[str] = set()
+
     def attempt(
         choices: list[tuple[BDD, int, int]],
     ) -> tuple[set[int], str | None]:
@@ -339,7 +356,8 @@ def cover_branches(
             part = _cube(bdd, root)
             cube.update(part)
             needed.update(_required(bdd, base, root, part))
-        configuration, dont_care = _configuration(cube, needed, names)
+        solved, _ = solve_integers(needed, fixed | opaque_names)
+        configuration, dont_care = _configuration(cube, needed, names, solved)
         selected, failure = run(configuration)
         if selected:
             required = tuple(
@@ -364,16 +382,32 @@ def cover_branches(
                 ConditionalTree([tree.groups[number] for number in groups]),
                 legacy_symbolic=False,
             )
-            local = list(dict.fromkeys([*local, *expression_atoms_in_order(semantics)]))
+            # Comparisons of one macro with integer literals must agree with some
+            # integer; everything else about a comparison stays opaque.
+            opaque_names.update(opaque_comparison_names(local))
+            integer_facts = integer_semantics(local, fixed)
+            constrained = (
+                conjunction(semantics, integer_facts) if integer_facts is not None else semantics
+            )
+            local = list(dict.fromkeys([*local, *expression_atoms_in_order(constrained)]))
             bdd = BDD(local, limits=limits, budget=budget)
-            base = bdd.build(semantics)
+            base = bdd.build(constrained)
+            unconstrained = bdd.build(semantics) if integer_facts is not None else base
             managers.append((bdd, base))
             mine = [p for p in range(len(targets)) if component_of[owners[p]] == rank]
             for position in mine:
                 roots[position] = bdd.apply("and", base, bdd.build(targets[position].expression))
                 if roots[position] == 0:
-                    status[position] = BranchOutcomeStatus.UNSATISFIABLE
-                    reasons[position] = "the outcome's path condition is unsatisfiable"
+                    plain = bdd.apply("and", unconstrained, bdd.build(targets[position].expression))
+                    if plain == 0:
+                        status[position] = BranchOutcomeStatus.UNSATISFIABLE
+                        reasons[position] = "the outcome's path condition is unsatisfiable"
+                    else:
+                        status[position] = BranchOutcomeStatus.NOT_COVERED
+                        reasons[position] = (
+                            "the integer comparisons it requires cannot all hold for one value"
+                            " of the same macro"
+                        )
             planned: set[int] = set()
             component_plans: list[int] = []
             for position in mine:
@@ -433,7 +467,7 @@ def cover_branches(
             predicates = sorted(
                 atom.text
                 for atom, value in local_needed.items()
-                if value and not isinstance(atom, Variable)
+                if value and isinstance(atom, Predicate) and parse_comparison(atom.text) is None
             )
             if predicates and failure_reason is None:
                 failure += (
