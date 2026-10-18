@@ -124,7 +124,10 @@ import cpre
 source = open("src/driver.c", encoding="utf-8").read()
 needed = [item.name for item in cpre.unknown_macros_in_source(source)]
 coverage = cpre.cover_branches(source, filename="src/driver.c", skip_includes=True)
-print(needed, len(coverage.configurations or ()))
+if coverage.incomplete is not None:
+    print(needed, "coverage incomplete:", coverage.incomplete)
+else:
+    print(needed, len(coverage.configurations))
 ```
 
 `BranchCoverageResult.configurations` and `outcomes` are `None` when the analysis was incomplete; check `incomplete` first ([Branch-covering configurations](branch-coverage.md)).

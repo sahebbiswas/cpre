@@ -70,11 +70,12 @@ The analysis step writes the SARIF file before it sets the exit status, and `if:
 ## Check only the files a pull request changed
 
 ```bash
-git diff --name-only --diff-filter=d origin/main...HEAD -- '*.c' '*.h' '*.cpp' '*.hpp' \
-  | xargs -r cpre --fail-on-findings
+git diff --name-only -z --diff-filter=d origin/main...HEAD \
+    -- '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hh' '*.hpp' '*.hxx' \
+  | xargs -0 -r cpre --fail-on-findings
 ```
 
-`--diff-filter=d` leaves out deleted files, and `-r` (GNU `xargs`) skips cpre entirely when nothing matched. cpre has no whole-project state, so analyzing a subset gives the same answer for those files as a full scan.
+`-z` and `xargs -0` keep paths with spaces intact, `--diff-filter=d` leaves out deleted files, and `-r` (GNU `xargs`) skips cpre entirely when nothing matched. cpre has no whole-project state, so analyzing a subset gives the same answer for those files as a full scan.
 
 ## Run cpre as a pre-commit hook
 
@@ -179,11 +180,14 @@ cpre cover src/driver.c --skip-includes
 # unsatisfiable: line 7: #elif: the outcome's path condition is unsatisfiable
 ```
 
-Every non-comment line is a verified argument list; together they select every reachable branch outcome. Run something under each one:
+Every non-comment line is a verified argument list; together they select every reachable branch outcome. Check the exit status before consuming the lines, so an incomplete result (status `2`, no configuration lines) or an uncovered outcome (status `1`, partial lines) is never mistaken for a full matrix:
 
 ```bash
-cpre cover src/driver.c --skip-includes | grep -v '^#' | while IFS= read -r flags; do
-  eval "cpre preprocess src/driver.c --skip-includes --compact $flags" > "out-$((n=n+1)).c"
+matrix=$(cpre cover src/driver.c --skip-includes) || { echo "cover: incomplete or uncovered" >&2; exit 1; }
+n=0
+printf '%s\n' "$matrix" | grep -v '^#' | while IFS= read -r flags; do
+  n=$((n+1))
+  eval "cpre preprocess src/driver.c --skip-includes --compact $flags" > "out-$n.c"
 done
 ```
 

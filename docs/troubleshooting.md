@@ -43,7 +43,7 @@ Status `2` outranks `1`. With several inputs, one failure makes the whole run `2
 | `include processing is not supported` | A reachable `#include` and no way to resolve it | [Includes](#includes) |
 | `cannot resolve #include <x.h>` | Search directories were given but the header was not found | [Includes](#includes) |
 | `condition is not determined by the current macro state` | A reachable condition needs a macro you did not set | [Unknown macros](#unknown-macros) |
-| `__has_include requires caller-provided include availability` | `__has_include` with no answer | [Unknown macros](#has_include) |
+| `__has_include requires caller-provided include availability` | `__has_include` with no answer | [`__has_include`](has-include.md) |
 | `#pragma preprocessing directive is not supported …` | Reachable pragma, no pragma policy | [Pragmas and `#error`](#pragmas-and-error) |
 | `#error preprocessing directive is not supported …` | A reachable `#error` | [Pragmas and `#error`](#pragmas-and-error) |
 | `analysis limit exceeded for atoms\|bdd_nodes\|work` | Bounded reasoning ran out | [Analysis limit exceeded](#analysis-limit-exceeded) |
