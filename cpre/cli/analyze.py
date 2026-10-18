@@ -22,6 +22,7 @@ from ..text_reports import (
     format_incomplete,
     format_incomplete_component,
     render_combined_report,
+    telemetry_lines,
 )
 from ._common import (
     EXIT_ERROR,
@@ -101,6 +102,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="disable conditional directive analysis",
     )
     parser.add_argument(
+        "--telemetry",
+        action="store_true",
+        help=(
+            "diagnostic only: report how conditional analysis used its resources (atoms, "
+            "components, nodes, work); a 'telemetry' object in --json output, otherwise "
+            "lines on stderr; findings are unchanged"
+        ),
+    )
+    parser.add_argument(
         "--macros",
         action="store_true",
         help=argparse.SUPPRESS,
@@ -109,10 +119,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _analyze_conditionals(
-    path: Path, source: str, run: _Run
+    path: Path, source: str, run: _Run, *, telemetry: bool, echo_telemetry: bool
 ) -> tuple[ConditionalTree | None, AnalysisResult]:
-    result = analyze_source(source, filename=str(path))
+    result = analyze_source(source, filename=str(path), telemetry=telemetry)
     run.analyses.append(result)
+    if echo_telemetry and result.telemetry is not None:
+        for line in telemetry_lines(result.telemetry):
+            print(f"{path}: telemetry: {line}", file=sys.stderr)
     if not result.complete:
         for diagnostic in result.incomplete:
             if diagnostic.component is None:
@@ -168,6 +181,8 @@ def _analyze_files(
     enable_conditionals: bool,
     enable_macros: bool,
     symbolic_literals: tuple[int, ...],
+    telemetry: bool = False,
+    echo_telemetry: bool = False,
 ) -> _Run:
     run = _Run()
     for path in paths:
@@ -176,7 +191,9 @@ def _analyze_files(
             tree: ConditionalTree | None = None
             c_result: AnalysisResult | None = None
             if enable_conditionals:
-                tree, c_result = _analyze_conditionals(path, source, run)
+                tree, c_result = _analyze_conditionals(
+                    path, source, run, telemetry=telemetry, echo_telemetry=echo_telemetry
+                )
             m_results: tuple[MacroAnalysisResult, ...] = ()
             if enable_macros:
                 m_results = _analyze_macros(path, source, symbolic_literals, run)
@@ -266,11 +283,19 @@ def analyze_main(argv: Sequence[str] | None = None) -> int:
     symbolic_literals = symbolic_literals_from(parser, args)
     paths = input_paths(parser, args)
     enable_macros = not args.no_macros
+    if args.telemetry and args.no_conditionals:
+        parser.error(
+            "--telemetry describes conditional analysis; it cannot be used with --no-conditionals"
+        )
+    if args.telemetry and args.sarif:
+        parser.error("--telemetry cannot be combined with --sarif")
     run = _analyze_files(
         paths,
         enable_conditionals=not args.no_conditionals,
         enable_macros=enable_macros,
         symbolic_literals=symbolic_literals,
+        telemetry=args.telemetry,
+        echo_telemetry=args.telemetry and not args.json,
     )
     _write_results(
         run,

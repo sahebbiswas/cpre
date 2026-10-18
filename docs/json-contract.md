@@ -43,6 +43,7 @@ Every top-level document has `schema` as its first key. The value is `cpre.<kind
 - `incomplete_components`: `{index, groups, atoms, diagnostics}` per component that did not finish; `groups` entries are `{line, end_line, directive, condition}`.
 - `macros`: `{name, line, column, candidate, simplified, original, replacement, equivalent, rewritable, reason, semantics, symbolic_literals}`.
 - `semantics` is `ordinary` or `symbolic-literal`; `symbolic_literals` lists the integers treated as free atoms.
+- `telemetry` appears only with `--telemetry` and is diagnostic (see [Opt-in diagnostic data](#opt-in-diagnostic-data)).
 
 ### `cpre.simplify-macros/1` (file record)
 
@@ -91,7 +92,9 @@ The number after the slash is the **major version** of that document kind.
 
 ## Opt-in diagnostic data
 
-Resource telemetry and similar diagnostic extras (see issue #103) are not part of the compatibility contract: they appear only when requested, under a clearly named key, and may change in any release.
+Diagnostic extras are not part of the compatibility contract: they appear only when requested, under a clearly named key, and may change in any release (even within a major version).
+
+`cpre --json --telemetry` adds `telemetry` to each `cpre.analysis/1` file record: `{atoms, components, limits, work}`, where `components` is a list of `{atoms, groups, nodes, status, resource, incomplete_component}` and `limits` is `{max_atoms, max_bdd_nodes, max_work}`. Consumers should treat it as a debugging aid: its presence, field set and meaning can change without a version bump. Without `--telemetry` the key is absent, and the rest of the document is identical.
 
 ## Consumers
 

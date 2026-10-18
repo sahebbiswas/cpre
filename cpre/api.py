@@ -10,6 +10,8 @@ from ._types import (
     AnalysisIncomplete,
     AnalysisOptions,
     AnalysisResult,
+    AnalysisTelemetry,
+    ComponentTelemetry,
     ContextualSimplification,
     ExactSimplification,
     Finding,
@@ -24,6 +26,7 @@ from ._types import (
     _normalize_assumptions,
     _translate_parse_error,
 )
+from .analysis import AnalysisTrace as _AnalysisTrace
 from .analysis import PartialAnalysis as _PartialAnalysis
 from .analysis import _clear_analysis as _engine_clear_analysis
 from .analysis import analyze_tree_partial as _analyze_tree_partial
@@ -245,12 +248,50 @@ def _incomplete_diagnostic(
     )
 
 
+def _telemetry(
+    trace: _AnalysisTrace,
+    options: AnalysisOptions,
+    budget: _AnalysisBudget,
+    *,
+    failures: dict[int, _AnalysisLimitExceeded],
+    positions: dict[int, int],
+) -> AnalysisTelemetry:
+    """The opt-in telemetry for one analysis; ``positions`` maps component ids to
+    :class:`IncompleteComponent` indices."""
+    components = []
+    for item in trace.components:
+        nodes = len(item.bdd.nodes) - 2 if item.bdd is not None else 0
+        if item.id in failures:
+            status, resource = "incomplete", failures[item.id].resource
+        elif item.id not in trace.finished:
+            status, resource = "unfinished", None
+        else:
+            status, resource = "analyzed", None
+        components.append(
+            ComponentTelemetry(
+                atoms=item.atoms,
+                groups=item.groups,
+                nodes=nodes,
+                status=status,
+                resource=resource,
+                incomplete_component=positions.get(item.id),
+            )
+        )
+    return AnalysisTelemetry(
+        atoms=trace.atoms,
+        components=tuple(components),
+        limits=options,
+        work=budget.work,
+    )
+
+
 def _incomplete_result(
     source: str,
     *,
     filename: str | None,
     distinguish_defined: bool,
     error: _AnalysisLimitExceeded,
+    telemetry: AnalysisTelemetry | None = None,
 ) -> AnalysisResult:
     tree = parse_source(source, distinguish_defined=distinguish_defined)
     return AnalysisResult(
@@ -258,6 +299,7 @@ def _incomplete_result(
         tree=tree,
         filename=filename,
         incomplete=(_incomplete_diagnostic(error),),
+        telemetry=telemetry,
     )
 
 
@@ -299,8 +341,13 @@ def analyze_source(
     filename: str | None = None,
     assumptions: MacroAssumptions | Mapping[str, bool] | None = None,
     options: AnalysisOptions | None = None,
+    telemetry: bool = False,
 ) -> AnalysisResult:
     """Analyze source with optional assumptions and deterministic resource limits.
+
+    ``telemetry=True`` additionally fills :attr:`AnalysisResult.telemetry` with
+    diagnostic resource figures (see :class:`AnalysisTelemetry`); findings and
+    incomplete results are identical with it on or off.
 
     Limits are applied per independent component as described on
     :class:`AnalysisOptions`. When a component exceeds ``max_atoms`` or
@@ -321,12 +368,14 @@ def analyze_source(
     limits = resolved_options._resource_limits()
     budget = _AnalysisBudget(limits.max_work)
     assumption_expression = _assumption_expression(normalized) if normalized is not None else None
+    trace = _AnalysisTrace() if telemetry else None
     try:
         main = _analyze_tree_partial(
             parse_source(source, distinguish_defined=normalized is not None),
             assumptions=assumption_expression,
             limits=limits,
             budget=budget,
+            trace=trace,
         )
         baseline: _PartialAnalysis | None = (
             _analyze_tree_partial(parse_source(source), limits=limits, budget=budget)
@@ -367,6 +416,11 @@ def analyze_source(
             filename=filename,
             distinguish_defined=normalized is not None,
             error=error,
+            telemetry=(
+                _telemetry(trace, resolved_options, budget, failures=trace.failures, positions={})
+                if trace is not None
+                else None
+            ),
         )
     except ModelConditionError as error:
         raise _translate_parse_error(error, filename) from error
@@ -402,6 +456,17 @@ def analyze_source(
         filename=filename,
         incomplete=tuple(diagnostic for item in components for diagnostic in item.diagnostics),
         incomplete_components=tuple(components),
+        telemetry=(
+            _telemetry(
+                trace,
+                resolved_options,
+                budget,
+                failures=failures,
+                positions={component: position for position, component in enumerate(failed_groups)},
+            )
+            if trace is not None
+            else None
+        ),
     )
 
 
@@ -413,6 +478,8 @@ for _public in (
     AnalysisIncomplete,
     AnalysisOptions,
     AnalysisResult,
+    AnalysisTelemetry,
+    ComponentTelemetry,
     ContextualSimplification,
     ExactSimplification,
     Finding,
@@ -432,6 +499,8 @@ __all__ = [
     "AnalysisIncomplete",
     "AnalysisOptions",
     "AnalysisResult",
+    "AnalysisTelemetry",
+    "ComponentTelemetry",
     "ConditionError",
     "ConditionalTree",
     "ContextualSimplification",
