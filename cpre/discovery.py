@@ -10,10 +10,20 @@ from .model import ConditionError
 SOURCE_SUFFIXES = frozenset({".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"})
 
 
+STDIN_PATH = Path("<stdin>")
+"""Standard input as a source: the logical filename every message, JSON field and
+``__FILE__`` uses for it. The command line spells it ``-``."""
+
+
 def source_paths(inputs: Sequence[Path], recursive: bool) -> list[Path]:
     paths: list[Path] = []
     seen: set[Path] = set()
     for input_path in inputs:
+        if input_path == STDIN_PATH:
+            if STDIN_PATH not in seen:
+                seen.add(STDIN_PATH)
+                paths.append(STDIN_PATH)
+            continue
         if input_path.is_file():
             candidates = [input_path]
         elif input_path.is_dir():
@@ -36,4 +46,4 @@ def source_paths(inputs: Sequence[Path], recursive: bool) -> list[Path]:
     return paths
 
 
-__all__ = ["SOURCE_SUFFIXES", "source_paths"]
+__all__ = ["SOURCE_SUFFIXES", "STDIN_PATH", "source_paths"]

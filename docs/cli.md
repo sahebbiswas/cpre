@@ -61,6 +61,23 @@ Discovery is deterministic: matching files under each directory are sorted, and 
 
 A directory supplied without `--recursive`, a missing path, or a recursive directory with no matching C/C++ files is an invocation error. `argparse` reports the error on stderr and terminates with status `2`.
 
+### Standard input
+
+`-` reads one source from standard input, so cpre can sit in a pipeline. It is explicit: cpre never reads stdin unless `-` is given. It works for the source commands (`cpre`, `cpre simplify-macros`, `cpre preprocess`, `cpre cover`).
+
+```bash
+git show HEAD:src/config.c | cpre -
+git show HEAD:src/config.c | cpre simplify-macros --diff -
+cat src/config.c | cpre preprocess -D FEATURE=1 - > expanded.c
+```
+
+- **Logical filename.** Standard input is always named `<stdin>`: in diagnostics (`<stdin>: ...`), in JSON `path`/`file` fields, in diff headers, and as `__FILE__` during preprocessing. A file that is literally named `-` is reachable as `./-`.
+- **Streams.** Results go to stdout and diagnostics to stderr, exactly as for a file, with the same exit statuses. Input is read in full as UTF-8 and line endings are preserved exactly where they are for files (`simplify-macros`, `preprocess`, `cover`); undecodable input is an error (status `2`).
+- **Mixing and repeating.** `-` can be combined with files (`cpre a.c - b.c`, in the order given) but only once.
+- **Includes.** `#include "..."` from standard input has no containing directory, so it searches the `--iquote` and `-I` directories after the current working directory, like a compiler reading `-`. Multi-file resolution is otherwise unchanged.
+- **No rewriting.** `simplify-macros --rewrite`/`--in-place` rejects `-` with a usage error (status `2`) before reading anything, since standard input cannot be rewritten. Use `--diff` or `--check` (also with `--json`) and apply the diff to a real file.
+- `preprocess --dump-macros` and `--config-from` do not read the source, so they leave standard input untouched.
+
 ## Default text reporting
 
 Without an output-format flag, cpre writes a human-readable report to stdout.

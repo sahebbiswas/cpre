@@ -6,7 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from ..discovery import source_paths
+from ..discovery import STDIN_PATH, source_paths
 from ..errors import CpreError
 from ..macro_analysis import _resolve_symbolic_literals
 from ..model import ConditionError
@@ -51,8 +51,40 @@ def symbolic_literals_from(
         parser.error(error.message)
 
 
+def source_argument(value: str) -> Path:
+    """The argparse type of a source operand: ``-`` is standard input, anything else a path.
+
+    A file literally named ``-`` is reachable as ``./-``.
+    """
+    return STDIN_PATH if value == "-" else Path(value)
+
+
+def is_stdin(path: Path) -> bool:
+    return path == STDIN_PATH
+
+
+def read_source(path: Path, *, newline: str | None) -> str:
+    """The UTF-8 text of a source file or of standard input.
+
+    ``newline`` has the meaning it has for ``open()``: ``None`` translates line endings
+    to ``\\n``, ``""`` keeps them exactly. Standard input is read in full, as bytes, so
+    both behave the same for it as for a file. Undecodable input raises
+    ``UnicodeDecodeError``, as for a file.
+    """
+    if is_stdin(path):
+        buffer = getattr(sys.stdin, "buffer", None)
+        text = buffer.read().decode("utf-8") if buffer is not None else sys.stdin.read()
+        if newline is None:
+            text = text.replace("\r\n", "\n").replace("\r", "\n")
+        return text
+    with open(path, encoding="utf-8", newline=newline) as handle:
+        return handle.read()
+
+
 def input_paths(parser: argparse.ArgumentParser, args: argparse.Namespace) -> list[Path]:
     """The source files named by ``args.sources``, expanding directories when recursive."""
+    if sum(1 for path in args.sources if is_stdin(path)) > 1:
+        parser.error("standard input ('-') can be read only once")
     try:
         return source_paths(args.sources, args.recursive)
     except ConditionError as error:

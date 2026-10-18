@@ -21,7 +21,7 @@ from ..serialization import (
 )
 from ..text_reports import format_incomplete, unknown_macro_hint
 from ..unknown_macros import UnknownMacro, unknown_macros_in_source
-from ._common import EXIT_ERROR, EXIT_OK
+from ._common import EXIT_ERROR, EXIT_OK, read_source, source_argument
 from .has_include_answers import answer_provider, parse_has_include_answers
 from .preprocess_configuration import configuration_with_origins
 
@@ -37,8 +37,8 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
     parser.add_argument(
         "sources",
         nargs="+",
-        type=Path,
-        help="C/C++ source files; directory inputs are not supported",
+        type=source_argument,
+        help="a C/C++ source file, or - for standard input; directory inputs are not supported",
     )
     _add_configuration_options(parser)
     parser.add_argument(
@@ -355,8 +355,7 @@ def preprocess_main(
             if args.has_include
             else None
         )
-        with path.open("r", encoding="utf-8", newline="") as handle:
-            source = handle.read()
+        source = read_source(path, newline="")
         if args.list_unknown_macros:
             unknown = unknown_macros_in_source(
                 source, filename=str(path), configuration=configuration, context=context
