@@ -9,7 +9,6 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from .._types import AnalysisOptions
 from ..coverage import (
     BranchCoverageResult,
     BranchOutcome,
@@ -21,8 +20,16 @@ from ..errors import CpreError
 from ..includes import DEFAULT_MAX_INCLUDE_DEPTH, SearchPathResolver
 from ..preprocessing import PreprocessingContext
 from ..serialization import cover_document
-from ..text_reports import format_error, format_incomplete
-from ._common import EXIT_ERROR, EXIT_FINDINGS, EXIT_OK, read_source, source_argument
+from ..text_reports import format_error, format_incomplete, include_hint
+from ._common import (
+    EXIT_ERROR,
+    EXIT_FINDINGS,
+    EXIT_OK,
+    add_limit_options,
+    analysis_options_from,
+    read_source,
+    source_argument,
+)
 from .has_include_answers import answer_provider, parse_has_include_answers
 from .preprocess import add_include_options
 from .preprocess_configuration import parse_name_value
@@ -47,15 +54,7 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
         help="supply a deterministic value for a supported standard predefined macro",
     )
     add_include_options(parser)
-    parser.add_argument(
-        "--max-atoms", type=int, metavar="N", help="resource limit per independent component"
-    )
-    parser.add_argument(
-        "--max-bdd-nodes", type=int, metavar="N", help="resource limit per independent component"
-    )
-    parser.add_argument(
-        "--max-work", type=int, metavar="N", help="resource limit shared by all components"
-    )
+    add_limit_options(parser)
     parser.add_argument(
         "--json",
         action="store_true",
@@ -116,16 +115,7 @@ def cover_main(argv: Sequence[str] | None = None, prog: str = "cpre cover") -> i
                 raise ValueError("--standard-macro requires NAME=VALUE")
             standard[name] = replacement
         context = PreprocessingContext(standard_macros=standard) if standard else None
-        limits = {
-            key: value
-            for key, value in (
-                ("max_atoms", args.max_atoms),
-                ("max_bdd_nodes", args.max_bdd_nodes),
-                ("max_work", args.max_work),
-            )
-            if value is not None
-        }
-        options = AnalysisOptions(**limits)
+        options = analysis_options_from(parser, args)
         include_query = (
             answer_provider(parse_has_include_answers(args.has_include))
             if args.has_include
@@ -159,8 +149,18 @@ def cover_main(argv: Sequence[str] | None = None, prog: str = "cpre cover") -> i
         print(json.dumps(cover_document(path, result, flags=configuration_flags), indent=2))
     elif result.incomplete is None:
         _write_text(result)
+        assert result.outcomes is not None
+        for outcome in result.outcomes:
+            hint = include_hint(outcome.reason or "")
+            if hint is not None:
+                print(f"{path}: hint: {hint}", file=sys.stderr)
+                break
     else:
-        print(f"{path}: {format_incomplete(result.incomplete)}", file=sys.stderr)
+        message = format_incomplete(result.incomplete)
+        print(f"{path}: {message}", file=sys.stderr)
+        hint = include_hint(message)
+        if hint is not None:
+            print(f"{path}: hint: {hint}", file=sys.stderr)
     if result.incomplete is not None:
         return EXIT_ERROR
     assert result.outcomes is not None

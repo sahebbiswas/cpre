@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import __version__, reporting
-from .._types import AnalysisResult
+from .._types import AnalysisOptions, AnalysisResult
 from ..api import analyze_source
 from ..errors import CpreError, ErrorCode
 from ..macro_analysis import MacroAnalysisResult, analyze_macros
@@ -28,7 +28,9 @@ from ._common import (
     EXIT_ERROR,
     EXIT_FINDINGS,
     EXIT_OK,
+    add_limit_options,
     add_symbolic_literal_options,
+    analysis_options_from,
     input_paths,
     is_batch,
     read_source,
@@ -112,6 +114,7 @@ def build_parser() -> argparse.ArgumentParser:
             "lines on stderr; findings are unchanged"
         ),
     )
+    add_limit_options(parser)
     parser.add_argument(
         "--macros",
         action="store_true",
@@ -121,9 +124,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _analyze_conditionals(
-    path: Path, source: str, run: _Run, *, telemetry: bool, echo_telemetry: bool
+    path: Path,
+    source: str,
+    run: _Run,
+    *,
+    options: AnalysisOptions,
+    telemetry: bool,
+    echo_telemetry: bool,
 ) -> tuple[ConditionalTree | None, AnalysisResult]:
-    result = analyze_source(source, filename=str(path), telemetry=telemetry)
+    result = analyze_source(source, filename=str(path), options=options, telemetry=telemetry)
     run.analyses.append(result)
     if echo_telemetry and result.telemetry is not None:
         for line in telemetry_lines(result.telemetry):
@@ -143,9 +152,15 @@ def _analyze_conditionals(
 
 
 def _analyze_macros(
-    path: Path, source: str, symbolic_literals: tuple[int, ...], run: _Run
+    path: Path,
+    source: str,
+    symbolic_literals: tuple[int, ...],
+    run: _Run,
+    options: AnalysisOptions,
 ) -> tuple[MacroAnalysisResult, ...]:
-    results = analyze_macros(source, filename=str(path), symbolic_literals=symbolic_literals)
+    results = analyze_macros(
+        source, filename=str(path), symbolic_literals=symbolic_literals, options=options
+    )
     for r in results:
         if not r.complete and r.incomplete:
             report_failure(path, format_incomplete(r.incomplete))
@@ -183,6 +198,7 @@ def _analyze_files(
     enable_conditionals: bool,
     enable_macros: bool,
     symbolic_literals: tuple[int, ...],
+    options: AnalysisOptions,
     telemetry: bool = False,
     echo_telemetry: bool = False,
 ) -> _Run:
@@ -194,11 +210,16 @@ def _analyze_files(
             c_result: AnalysisResult | None = None
             if enable_conditionals:
                 tree, c_result = _analyze_conditionals(
-                    path, source, run, telemetry=telemetry, echo_telemetry=echo_telemetry
+                    path,
+                    source,
+                    run,
+                    options=options,
+                    telemetry=telemetry,
+                    echo_telemetry=echo_telemetry,
                 )
             m_results: tuple[MacroAnalysisResult, ...] = ()
             if enable_macros:
-                m_results = _analyze_macros(path, source, symbolic_literals, run)
+                m_results = _analyze_macros(path, source, symbolic_literals, run, options)
             run.files.append(_FileResult(path, tree, m_results, c_result))
         except CpreError as error:
             _record_failure(path, error, run)
@@ -283,6 +304,7 @@ def analyze_main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     symbolic_literals = symbolic_literals_from(parser, args)
+    options = analysis_options_from(parser, args)
     paths = input_paths(parser, args)
     enable_macros = not args.no_macros
     if args.telemetry and args.no_conditionals:
@@ -296,6 +318,7 @@ def analyze_main(argv: Sequence[str] | None = None) -> int:
         enable_conditionals=not args.no_conditionals,
         enable_macros=enable_macros,
         symbolic_literals=symbolic_literals,
+        options=options,
         telemetry=args.telemetry,
         echo_telemetry=args.telemetry and not args.json,
     )

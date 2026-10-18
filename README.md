@@ -20,13 +20,21 @@ cpre has grown beyond a conditional-linting CLI into a set of focused, integrati
 
 The [documentation index](https://github.com/sahebbiswas/cpre/blob/main/docs/README.md) keeps the detailed contracts separate from this overview; the README is intentionally focused on the capabilities a new user should understand first.
 
+## Where to start
+
+- **New here?** [Getting started](https://github.com/sahebbiswas/cpre/blob/main/docs/getting-started.md) installs cpre and walks through each command on a small sample project, with real output.
+- **Setting up CI or a hook?** The [cookbook](https://github.com/sahebbiswas/cpre/blob/main/docs/cookbook.md) has ready-made recipes: exit-status gating, SARIF upload, pull-request-only checks, pre-commit, macro cleanup, configuration matrices.
+- **Something failed or looks wrong?** [Troubleshooting](https://github.com/sahebbiswas/cpre/blob/main/docs/troubleshooting.md) maps each message and exit status to its cause and fix.
+- **Embedding in Python?** The [API guide](https://github.com/sahebbiswas/cpre/blob/main/docs/api.md) has a [public API index](https://github.com/sahebbiswas/cpre/blob/main/docs/api.md#public-api-index) and [typical setups](https://github.com/sahebbiswas/cpre/blob/main/docs/api.md#typical-setups).
+
 ## Installation
 
 ```bash
 python -m pip install cpre
+cpre --version
 ```
 
-For development:
+cpre needs Python 3.9 or later and has no runtime dependencies. For development:
 
 ```bash
 git clone https://github.com/sahebbiswas/cpre.git
@@ -90,12 +98,20 @@ cpre preprocess source.c --dump-macros -D FEATURE   # the macro environment cpre
 git show HEAD:source.c | cpre preprocess -D FEATURE -   # '-' reads stdin (named <stdin>)
 ```
 
+Generate configurations that together exercise every reachable branch:
+
+```bash
+cpre cover source.c --skip-includes   # each line is an argument list for `cpre preprocess`
+```
+
 Quickly evaluate and simplify arbitrary Boolean expressions:
 
 ```bash
 cpre test-input 'A && (A || B)'
 cpre test-input --json '(A && B) || (A && !B)'
 ```
+
+Exit status is `0` on completion, `1` for findings (with `--fail-on-findings`, or an uncovered `cpre cover` outcome or pending `simplify-macros --check` rewrite) and `2` when cpre could not finish. Status `2` is never a clean result. If analysis stops at a size limit, raise it with `--max-atoms`, `--max-bdd-nodes` or `--max-work`; `--telemetry` shows where the cost went.
 
 By default, text and JSON reports show notable branches and simplified macros; `--verbose` includes unchanged branches and unsimplified macros. `--json` emits structural conditional trees alongside macro simplification results, while `--sarif` emits findings for static-analysis interchange. Specific analyses can be disabled with `--no-macros` or `--no-conditionals`. See the [CLI guide](https://github.com/sahebbiswas/cpre/blob/main/docs/cli.md) for discovery rules, batch output, stderr behavior, and the `0`/`1`/`2` exit-status contract.
 
@@ -151,8 +167,12 @@ See [Concrete preprocessing](https://github.com/sahebbiswas/cpre/blob/main/docs/
 
 The [documentation index](https://github.com/sahebbiswas/cpre/blob/main/docs/README.md) links the full user and integration guides. Key references include:
 
+- [Getting started](https://github.com/sahebbiswas/cpre/blob/main/docs/getting-started.md)
+- [Cookbook](https://github.com/sahebbiswas/cpre/blob/main/docs/cookbook.md)
+- [Troubleshooting](https://github.com/sahebbiswas/cpre/blob/main/docs/troubleshooting.md)
 - [Command-line interface](https://github.com/sahebbiswas/cpre/blob/main/docs/cli.md)
 - [Python API integration](https://github.com/sahebbiswas/cpre/blob/main/docs/api.md)
+- [JSON output contract](https://github.com/sahebbiswas/cpre/blob/main/docs/json-contract.md)
 - [Macro Boolean simplification](https://github.com/sahebbiswas/cpre/blob/main/docs/macro-simplification.md)
 - [Concrete preprocessing](https://github.com/sahebbiswas/cpre/blob/main/docs/preprocessing.md)
 - [Branch-covering configurations](https://github.com/sahebbiswas/cpre/blob/main/docs/branch-coverage.md)

@@ -6,6 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from .._types import AnalysisOptions
 from ..discovery import STDIN_PATH, source_paths
 from ..errors import CpreError
 from ..macro_analysis import _resolve_symbolic_literals
@@ -47,6 +48,47 @@ def symbolic_literals_from(
         raw_literals.extend(args.symbolic_literals)
     try:
         return _resolve_symbolic_literals(raw_literals)
+    except CpreError as error:
+        parser.error(error.message)
+
+
+def add_limit_options(parser: argparse.ArgumentParser) -> None:
+    """The ``--max-atoms`` / ``--max-bdd-nodes`` / ``--max-work`` resource limits."""
+    parser.add_argument(
+        "--max-atoms",
+        type=int,
+        metavar="N",
+        help="resource limit: distinct Boolean atoms per independent component (default: 64)",
+    )
+    parser.add_argument(
+        "--max-bdd-nodes",
+        type=int,
+        metavar="N",
+        help="resource limit: decision-diagram nodes per independent component (default: 100000)",
+    )
+    parser.add_argument(
+        "--max-work",
+        type=int,
+        metavar="N",
+        help="resource limit: work units shared by the whole analysis (default: 500000)",
+    )
+
+
+def analysis_options_from(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> AnalysisOptions:
+    """The ``AnalysisOptions`` selected by the limit options; an invalid value is a usage error."""
+    limits = {
+        key: value
+        for key, value in (
+            ("max_atoms", args.max_atoms),
+            ("max_bdd_nodes", args.max_bdd_nodes),
+            ("max_work", args.max_work),
+        )
+        if value is not None
+    }
+    try:
+        return AnalysisOptions(**limits)
     except CpreError as error:
         parser.error(error.message)
 
