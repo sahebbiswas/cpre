@@ -117,6 +117,16 @@ def test_simplify_macros_preview_document_fields(source, capsys):
     assert "rewritten" not in data
 
 
+def test_macro_environment_document_fields(source, capsys):
+    _, data = _run(capsys, ["preprocess", "--dump-macros", "--json", "-D", "X", str(source)])
+    assert set(data) == {"schema", "file", "unknown_names", "macros"}
+    assert data["schema"] == "cpre.macro-environment/1"
+    assert all(
+        set(m) == {"name", "defined", "replacement", "parameters", "variadic", "origin", "path"}
+        for m in data["macros"]
+    )
+
+
 def test_preprocess_document_distinguishes_complete_incomplete_and_empty(source, capsys):
     _, incomplete = _run(capsys, ["preprocess", "--json", str(source)])
     assert set(incomplete) == PREPROCESS_KEYS and incomplete["schema"] == "cpre.preprocess/1"
@@ -164,6 +174,7 @@ def test_documented_contract_names_every_schema_kind():
         "analysis",
         "simplify-macros",
         "simplify-macros-preview",
+        "macro-environment",
         "preprocess",
         "unknown-macros",
         "expression",
