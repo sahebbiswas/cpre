@@ -521,7 +521,7 @@ Exit status with `--diff` or `--check`:
 | `1` | With `--check`, at least one file would change. Without `--check`, `--fail-on-findings` is given and a simplifiable macro was found. |
 | `2` | A file could not be read or decoded, a macro could not be fully analyzed, rewrite verification failed, or the options are invalid. Files that were processed are still reported. |
 
-`--diff` and `--check` cannot be combined with `--rewrite`/`--in-place`; doing so is a usage error with exit status `2`.
+`--diff` and `--check` cannot be combined with `--rewrite`/`--in-place`; doing so is a usage error with exit status `2`. Every outcome, including incomplete and unsupported macros, is tabulated in [Semantic verification](macro-simplification.md#semantic-verification).
 
 ### Previews as JSON
 

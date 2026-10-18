@@ -819,3 +819,81 @@ def test_check_json_unreadable_file_exits_2_and_reports_on_stderr(tmp_path, caps
     code = main(["simplify-macros", "--json", "--check", str(bad)])
     captured = capsys.readouterr()
     assert code == 2 and captured.err and captured.out == ""
+
+
+# --- Semantic verification contract (issue #104) -------------------------------------------
+
+_TOO_MANY_ATOMS = "#define BIG (" + " && ".join(f"A{i}" for i in range(70)) + ")\n"
+_SIMPLIFIABLE = "#define FEAT (A && A)\n"
+
+
+@pytest.mark.parametrize("mode", [["--check"], ["--diff"], ["--check", "--json"], []])
+def test_unverifiable_macro_is_incomplete_and_never_modifies_source(tmp_path, capsys, mode):
+    source = tmp_path / "big.c"
+    source.write_text(_TOO_MANY_ATOMS, encoding="utf-8")
+
+    assert main(["simplify-macros", *mode, str(source)]) == 2
+    assert "analysis limit exceeded" in capsys.readouterr().err
+    assert source.read_text(encoding="utf-8") == _TOO_MANY_ATOMS
+
+
+def test_unverifiable_macro_with_rewrite_leaves_file_untouched(tmp_path, capsys):
+    source = tmp_path / "big.c"
+    source.write_text(_TOO_MANY_ATOMS, encoding="utf-8")
+
+    assert main(["simplify-macros", "--rewrite", str(source)]) == 2
+    capsys.readouterr()
+    assert source.read_text(encoding="utf-8") == _TOO_MANY_ATOMS
+
+
+def test_incomplete_macro_does_not_block_verified_rewrite_of_others(tmp_path, capsys):
+    source = tmp_path / "mixed.c"
+    source.write_text(_TOO_MANY_ATOMS + _SIMPLIFIABLE, encoding="utf-8")
+
+    assert main(["simplify-macros", "--check", str(source)]) == 2
+    assert source.read_text(encoding="utf-8") == _TOO_MANY_ATOMS + _SIMPLIFIABLE
+    capsys.readouterr()
+
+
+def test_incomplete_macro_left_intact_while_verified_macro_is_rewritten(tmp_path, capsys):
+    source = tmp_path / "mixed.c"
+    source.write_text(_TOO_MANY_ATOMS + _SIMPLIFIABLE, encoding="utf-8")
+
+    assert main(["simplify-macros", "--rewrite", str(source)]) == 2
+    capsys.readouterr()
+    assert source.read_text(encoding="utf-8") == _TOO_MANY_ATOMS + "#define FEAT (!!A)\n"
+
+
+def test_check_exit_status_distinguishes_clean_changed_and_incomplete(tmp_path, capsys):
+    clean = tmp_path / "clean.c"
+    clean.write_text("#define OK (A || B)\n", encoding="utf-8")
+    changed = tmp_path / "changed.c"
+    changed.write_text(_SIMPLIFIABLE, encoding="utf-8")
+
+    assert main(["simplify-macros", "--check", str(clean)]) == 0
+    assert main(["simplify-macros", "--check", str(changed)]) == 1
+    assert main(["simplify-macros", "--diff", str(changed)]) == 0
+    assert main(["simplify-macros", "--check", "--diff", str(changed)]) == 1
+    capsys.readouterr()
+
+
+def test_unsupported_macro_is_reported_not_rewritten_and_exits_zero(tmp_path, capsys):
+    source = tmp_path / "unsupported.c"
+    text = '#define F(x) (x && x)\n#define S "a"\n#define N 42\n'
+    source.write_text(text, encoding="utf-8")
+
+    assert main(["simplify-macros", "--check", str(source)]) == 0
+    capsys.readouterr()
+    results = cpre.analyze_macros(text)
+    assert all(not r.candidate and r.reason for r in results)
+    assert cpre.rewrite_macros(text) == text
+
+
+def test_library_resource_limit_is_none_equivalence_with_reason():
+    res = cpre.analyze_macros(
+        "#define FEAT (A && B && C)\n", options=cpre.AnalysisOptions(max_atoms=1)
+    )[0]
+    assert res.is_equivalent is None
+    assert res.complete is False
+    assert res.incomplete is not None
+    assert "resource limit exceeded" in (res.reason or "")
