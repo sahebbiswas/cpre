@@ -277,7 +277,7 @@ The two policies are independent:
 | `--config-from-unknown-names {open,undefined}` | every `--config-from` seed | the `--unknown-names` value |
 | `--unknown-names {open,undefined}` | the target | `open` |
 
-Without `--config-from-unknown-names`, behavior is unchanged: seeds use the target's policy. `--config-from-unknown-names` without `--config-from` is a usage error. The seed's detected include guard is stripped whatever the policy, so an open-world target that tests `FLAGS_H` still sees it as unknown (and reports it as an unresolved condition). The API equivalent is `MacroConfiguration.from_source(text, unknown_names="undefined")`, with the result passed on in a configuration that uses the target's policy.
+Without `--config-from-unknown-names`, behavior is unchanged: seeds use the target's policy. `--config-from-unknown-names` without `--config-from` is a usage error. The seed's detected include guard is stripped whatever the policy, so an open-world target that tests `FLAGS_H` still sees it as unknown (and reports it as an unresolved condition) unless the command sets it explicitly with `-D FLAGS_H` or `-U FLAGS_H`, which are re-applied after the seeds. The API equivalent is `MacroConfiguration.from_source(text, unknown_names="undefined")`, with the result passed on in a configuration that uses the target's policy.
 
 Precedence is deterministic:
 
