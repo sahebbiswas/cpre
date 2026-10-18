@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from .configuration import MacroConfiguration
+from .errors import AnalysisError, ErrorCode
 from .preprocessing import PreprocessingContext
 
 COMMAND_LINE = "command-line"
@@ -39,6 +40,9 @@ def macro_environment(
 ) -> list[MacroEnvironmentEntry]:
     """The configured entries sorted by name, then origin.
 
+    Raises ``AnalysisError`` when ``context`` supplies a name the configuration also
+    settles, exactly as preprocessing does.
+
     ``origins`` maps a name to the seed path that set it; a name mapped to ``None`` (or
     absent) came from the command line, or from the caller when no CLI is involved.
     """
@@ -64,7 +68,14 @@ def macro_environment(
             path,
         )
     if context is not None:
+        configured = {name for name, _ in entries}
         for name, replacement in context.standard_macros.items():
+            if name in configured:
+                # The same conflict preprocessing itself reports.
+                raise AnalysisError(
+                    f"preprocessing context conflicts with configured macro: {name}",
+                    code=ErrorCode.INVALID_CONFIGURATION,
+                )
             entries[(name, STANDARD_MACRO)] = MacroEnvironmentEntry(
                 name, True, replacement, None, False, STANDARD_MACRO, None
             )

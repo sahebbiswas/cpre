@@ -170,3 +170,40 @@ def test_dumped_environment_reproduces_the_run(capsys, files, tmp_path):
     replay = [arg for name, _, _, value in dumped for arg in ("-D", f"{name}={value}")]
     assert main(["preprocess", *replay, cond]) == 0
     assert capsys.readouterr().out == direct
+
+
+def test_standard_macro_colliding_with_a_configured_name_is_rejected(capsys, files):
+    for flag in (["-D", "__STDC__=1"], ["-U", "__STDC__"]):
+        code = main(
+            [
+                "preprocess",
+                "--dump-macros",
+                *flag,
+                "--standard-macro",
+                "__STDC__=1",
+                files["target"],
+            ]
+        )
+        assert code == 2
+        assert "conflicts with configured macro: __STDC__" in capsys.readouterr().err
+
+
+def test_seed_paths_are_escaped_in_text_records(capsys, tmp_path):
+    seed = tmp_path / "se\ted.h"
+    try:
+        seed.write_bytes(b"#define A 1\n")
+    except OSError:  # pragma: no cover - filesystems that reject tabs in names
+        pytest.skip("filename with a tab is not supported")
+    target = _write(tmp_path / "t.c", "int x;\n")
+    assert main(["preprocess", "--dump-macros", "--config-from", str(seed), target]) == 0
+    (line,) = capsys.readouterr().out.splitlines()
+    assert len(line.split("\t")) == 4 and "\\t" in line
+
+
+def test_repeating_a_seed_state_keeps_the_earlier_origin(capsys, tmp_path, files):
+    repeat = _write(tmp_path / "repeat.h", "#define SHARED first\n")
+    _, data = _dump(
+        capsys, files, "--config-from", files["first"], "--config-from", repeat, as_json=True
+    )
+    shared = next(m for m in data["macros"] if m["name"] == "SHARED")
+    assert shared["path"] == files["first"]

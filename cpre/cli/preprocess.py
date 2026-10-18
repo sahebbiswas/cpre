@@ -257,7 +257,7 @@ def _print_macro_environment(
         if entry.parameters is not None:
             parameters = [*entry.parameters, *(["..."] if entry.variadic else [])]
             name = f"{name}({','.join(parameters)})"
-        origin = f"seed:{entry.path}" if entry.path is not None else entry.origin
+        origin = f"seed:{_escape(entry.path)}" if entry.path is not None else entry.origin
         state = "defined" if entry.defined else "undefined"
         replacement = _escape(entry.replacement) if entry.replacement is not None else ""
         print(f"{name}\t{state}\t{origin}\t{replacement}")
