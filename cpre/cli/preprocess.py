@@ -296,6 +296,12 @@ def preprocess_main(
         if built is None:
             return EXIT_ERROR
         configuration, context = built
+        # Validated before any early return, so a malformed answer always fails.
+        include_query = (
+            answer_provider(parse_has_include_answers(args.has_include))
+            if args.has_include
+            else None
+        )
         with path.open("r", encoding="utf-8", newline="") as handle:
             source = handle.read()
         if args.list_unknown_macros:
@@ -303,11 +309,6 @@ def preprocess_main(
                 source, filename=str(path), configuration=configuration, context=context
             )
             return _print_unknown_macros(path, unknown, as_json=args.json)
-        include_query = (
-            answer_provider(parse_has_include_answers(args.has_include))
-            if args.has_include
-            else None
-        )
         resolver = (
             SearchPathResolver(args.include_dirs, quote_paths=args.quote_dirs)
             if args.include_dirs or args.quote_dirs

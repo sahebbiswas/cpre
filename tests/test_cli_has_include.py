@@ -20,7 +20,7 @@ def tree(tmp_path):
     inc.mkdir()
     (inc / "found.h").write_text("")
     target = tmp_path / "t.c"
-    target.write_text(SOURCE)
+    target.write_bytes(SOURCE.encode())
     return inc, target
 
 
@@ -30,9 +30,10 @@ def _kept(out):
 
 def test_explicit_answers_match_the_api_include_query(tmp_path, capsys):
     target = tmp_path / "t.c"
-    target.write_text(SOURCE.replace("#if __has_include(<found.h>)\nint found;\n#endif\n", ""))
+    text = SOURCE.replace("#if __has_include(<found.h>)\nint found;\n#endif\n", "")
+    target.write_bytes(text.encode())
     expected = cpre.preprocess_source(
-        target.read_text(),
+        text,
         filename=str(target),
         include_query=lambda q: {"<opt.h>": True, '"local.h"': False}.get(
             f"<{q.header}>" if q.form is IncludeForm.ANGLE else f'"{q.header}"'
@@ -45,9 +46,8 @@ def test_explicit_answers_match_the_api_include_query(tmp_path, capsys):
 
 def test_angle_and_quoted_forms_are_distinct(tmp_path, capsys):
     target = tmp_path / "t.c"
-    target.write_text(
-        '#if __has_include(<x.h>)\nint a;\n#endif\n#if __has_include("x.h")\nint b;\n#endif\n'
-    )
+    text = '#if __has_include(<x.h>)\nint a;\n#endif\n#if __has_include("x.h")\nint b;\n#endif\n'
+    target.write_bytes(text.encode())
     assert (
         main(["preprocess", "--has-include", "<x.h>=1", "--has-include", '"x.h"=0', str(target)])
         == 0
@@ -57,7 +57,7 @@ def test_angle_and_quoted_forms_are_distinct(tmp_path, capsys):
 
 def test_macro_expanded_spelling_is_matched(tmp_path, capsys):
     target = tmp_path / "t.c"
-    target.write_text("#define H <opt.h>\n#if __has_include(H)\nint yes;\n#endif\n")
+    target.write_bytes(b"#define H <opt.h>\n#if __has_include(H)\nint yes;\n#endif\n")
     assert main(["preprocess", "--has-include", "<opt.h>=1", str(target)]) == 0
     assert "int yes;" in capsys.readouterr().out
 
@@ -114,3 +114,9 @@ def test_conflicting_answers_fail_but_repeats_are_fine(tree, capsys):
     )
     assert "conflicting answers for <a.h>" in capsys.readouterr().err
     assert parse_has_include_answers(["<a.h>=1", "<a.h>=1"]) == {(IncludeForm.ANGLE, "a.h"): True}
+
+
+def test_malformed_answers_fail_even_with_list_unknown_macros(tree, capsys):
+    _, target = tree
+    assert main(["preprocess", "--list-unknown-macros", "--has-include", "bogus", str(target)]) == 2
+    assert "--has-include: expected" in capsys.readouterr().err
