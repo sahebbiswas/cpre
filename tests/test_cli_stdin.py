@@ -170,3 +170,16 @@ def test_real_pipeline_through_a_subprocess():
         check=False,
     )
     assert failed.returncode == 2 and failed.stdout == b"" and failed.stderr.startswith(b"<stdin>:")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="'<' and '>' are not valid in Windows names")
+def test_a_real_file_named_like_stdin_is_still_a_file(monkeypatch, capsys, tmp_path):
+    (tmp_path / "<stdin>").write_bytes(b"#if FROM_FILE\n#endif\n")
+    monkeypatch.chdir(tmp_path)
+    _stdin(monkeypatch, "#if FROM_STDIN\n#endif\n")
+    assert main(["preprocess", "--list-unknown-macros", "./<stdin>"]) == 0
+    assert capsys.readouterr().out.startswith("FROM_FILE\t")
+    assert main(["preprocess", "--list-unknown-macros", "-"]) == 0
+    assert capsys.readouterr().out.startswith("FROM_STDIN\t")
+    assert main(["--json", "--verbose", "<stdin>", "-"]) == 0
+    assert len(json.loads(capsys.readouterr().out)["files"]) == 2

@@ -11,17 +11,18 @@ SOURCE_SUFFIXES = frozenset({".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", "
 
 
 STDIN_PATH = Path("<stdin>")
-"""Standard input as a source: the logical filename every message, JSON field and
-``__FILE__`` uses for it. The command line spells it ``-``."""
+"""Standard input as a source. Its string form is the logical filename every message, JSON
+field and ``__FILE__`` uses; the command line spells it ``-``. It is recognized by
+*identity* (``path is STDIN_PATH``), never by value, so a real file that happens to be
+named ``<stdin>`` stays an ordinary file."""
 
 
 def source_paths(inputs: Sequence[Path], recursive: bool) -> list[Path]:
     paths: list[Path] = []
     seen: set[Path] = set()
     for input_path in inputs:
-        if input_path == STDIN_PATH:
-            if STDIN_PATH not in seen:
-                seen.add(STDIN_PATH)
+        if input_path is STDIN_PATH:
+            if STDIN_PATH not in paths:
                 paths.append(STDIN_PATH)
             continue
         if input_path.is_file():

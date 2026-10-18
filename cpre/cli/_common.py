@@ -60,7 +60,8 @@ def source_argument(value: str) -> Path:
 
 
 def is_stdin(path: Path) -> bool:
-    return path == STDIN_PATH
+    """Whether ``path`` is the standard-input marker (by identity; see ``STDIN_PATH``)."""
+    return path is STDIN_PATH
 
 
 def read_source(path: Path, *, newline: str | None) -> str:

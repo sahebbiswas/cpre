@@ -71,12 +71,12 @@ git show HEAD:src/config.c | cpre simplify-macros --diff -
 cat src/config.c | cpre preprocess -D FEATURE=1 - > expanded.c
 ```
 
-- **Logical filename.** Standard input is always named `<stdin>`: in diagnostics (`<stdin>: ...`), in JSON `path`/`file` fields, in diff headers, and as `__FILE__` during preprocessing. A file that is literally named `-` is reachable as `./-`.
+- **Logical filename.** Standard input is always named `<stdin>`: in diagnostics (`<stdin>: ...`), in JSON `path`/`file` fields, in diff headers, and as `__FILE__` during preprocessing. A file that is literally named `-` is reachable as `./-`, and a file named `<stdin>` is still an ordinary file.
 - **Streams.** Results go to stdout and diagnostics to stderr, exactly as for a file, with the same exit statuses. Input is read in full as UTF-8 and line endings are preserved exactly where they are for files (`simplify-macros`, `preprocess`, `cover`); undecodable input is an error (status `2`).
 - **Mixing and repeating.** `-` can be combined with files (`cpre a.c - b.c`, in the order given) but only once.
 - **Includes.** `#include "..."` from standard input has no containing directory, so it searches the `--iquote` and `-I` directories after the current working directory, like a compiler reading `-`. Multi-file resolution is otherwise unchanged.
 - **No rewriting.** `simplify-macros --rewrite`/`--in-place` rejects `-` with a usage error (status `2`) before reading anything, since standard input cannot be rewritten. Use `--diff` or `--check` (also with `--json`) and apply the diff to a real file.
-- `preprocess --dump-macros` and `--config-from` do not read the source, so they leave standard input untouched.
+- `preprocess --dump-macros` does not read the source, so it leaves standard input untouched. Other `preprocess` modes, including with `--config-from`, read the seed files first and then standard input.
 
 ## Default text reporting
 
