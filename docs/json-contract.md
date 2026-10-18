@@ -12,6 +12,7 @@ Every top-level document has `schema` as its first key. The value is `cpre.<kind
 | --- | --- |
 | `cpre.analysis/1` | `cpre --json` |
 | `cpre.simplify-macros/1` | `cpre simplify-macros --json` |
+| `cpre.simplify-macros-preview/1` | `cpre simplify-macros --check --json` and `--diff --json` |
 | `cpre.preprocess/1` | `cpre preprocess --json` |
 | `cpre.unknown-macros/1` | `cpre preprocess --list-unknown-macros --json` |
 | `cpre.expression/1` | `cpre test-input --json` |
@@ -45,6 +46,10 @@ Every top-level document has `schema` as its first key. The value is `cpre.<kind
 
 `path`, `rewritten`, `applied_count`, `verified`, `semantics`, `symbolic_literals`, `macros` (same macro records as above). `rewritten` means the file was written.
 
+### `cpre.simplify-macros-preview/1` (file record)
+
+`path`, `would_change`, `applied_count`, `verified`, `diff`, `semantics`, `symbolic_literals`. Nothing is written in a preview, so there is no `rewritten` field: `would_change` says whether `--rewrite` would change the file, and `applied_count` is the number of rewrites it would apply (`0` when nothing would change). `diff` is the unified diff text when `--diff` was given and the file would change, otherwise `null`. For a batch, files that would not change are omitted unless `--verbose` is given; a single file always gets its record.
+
 ### `cpre.preprocess/1`
 
 `file`, `complete`, `source`, `diagnostics`, `skipped_includes`.
@@ -76,4 +81,4 @@ Resource telemetry and similar diagnostic extras (see issue #103) are not part o
 
 ## Consumers
 
-New JSON output reuses these conventions and the builders in `cpre.serialization`: `simplify-macros --check`/`--diff` (#141), `--dump-macros` (#101) and `cpre cover` (#126) are planned.
+New JSON output reuses these conventions and the builders in `cpre.serialization`: `simplify-macros --check`/`--diff` (`cpre.simplify-macros-preview/1`) already does; `--dump-macros` (#101) and `cpre cover` (#126) are planned.

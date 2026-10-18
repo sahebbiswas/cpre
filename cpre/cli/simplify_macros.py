@@ -11,7 +11,12 @@ from pathlib import Path
 from .. import reporting
 from ..errors import CpreError
 from ..macro_analysis import MacroSimplificationResult, simplify_macros
-from ..serialization import batch_document, build_simplify_macros_json, top_level
+from ..serialization import (
+    batch_document,
+    build_simplify_macros_json,
+    build_simplify_macros_preview_json,
+    top_level,
+)
 from ..text_reports import (
     format_error,
     format_incomplete,
@@ -72,7 +77,7 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
     parser.add_argument(
         "--json",
         action="store_true",
-        help="write the analysis results as JSON",
+        help="write the analysis results as JSON (with --diff/--check, the preview result)",
     )
     parser.add_argument(
         "--verbose",
@@ -150,6 +155,28 @@ def _write_json(
         print(json.dumps(top_level("simplify-macros", f_data), indent=2))
 
 
+def _write_preview_json(
+    file_results: _FileResults,
+    args: argparse.Namespace,
+    *,
+    batch: bool,
+    symbolic_literals: tuple[int, ...],
+) -> None:
+    """The ``--check``/``--diff`` ``--json`` document; nothing here was written."""
+    records = []
+    for path, res in file_results:
+        diff = unified_diff(path, res.source, res.rewritten_source) if args.diff else None
+        record, would_change = build_simplify_macros_preview_json(
+            path, res, diff=diff, symbolic_literals=symbolic_literals
+        )
+        if would_change or args.verbose or not batch:
+            records.append(record)
+    if batch:
+        print(json.dumps(batch_document("simplify-macros-preview", records), indent=2))
+    elif records:
+        print(json.dumps(top_level("simplify-macros-preview", records[0]), indent=2))
+
+
 def _write_reports(file_results: _FileResults, args: argparse.Namespace, *, batch: bool) -> None:
     if batch:
         color = sys.stdout.isatty()
@@ -185,8 +212,6 @@ def simplify_macros_main(
     preview = args.diff or args.check
     if args.rewrite and preview:
         parser.error("--rewrite cannot be combined with --diff or --check")
-    if args.json and preview:
-        parser.error("--json cannot be combined with --diff or --check")
     symbolic_literals = symbolic_literals_from(parser, args)
     paths = input_paths(parser, args)
     batch = is_batch(args)
@@ -195,7 +220,11 @@ def simplify_macros_main(
 
     changed = [(path, res) for path, res in file_results if res.rewritten_source != res.source]
     if preview:
-        if args.diff:
+        if args.json:
+            _write_preview_json(
+                file_results, args, batch=batch, symbolic_literals=symbolic_literals
+            )
+        elif args.diff:
             for path, res in changed:
                 write_exact(unified_diff(path, res.source, res.rewritten_source))
         if args.check:

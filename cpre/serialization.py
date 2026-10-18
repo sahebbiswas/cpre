@@ -190,6 +190,31 @@ def build_simplify_macros_json(
     return f_data, has_visible
 
 
+def build_simplify_macros_preview_json(
+    path: Path | str,
+    res: MacroSimplificationResult,
+    *,
+    diff: str | None,
+    symbolic_literals: tuple[int, ...],
+) -> tuple[dict[str, object], bool]:
+    """The record for one file in a ``--check``/``--diff`` run, and whether it would change.
+
+    Nothing was written, so there is no ``rewritten`` field; ``would_change`` reports what
+    ``--rewrite`` would do. ``diff`` is the unified diff text, or ``None`` when not requested.
+    """
+    would_change = res.rewritten_source != res.source
+    record: dict[str, object] = {
+        "path": str(path),
+        "would_change": would_change,
+        "applied_count": res.applied_count if would_change else 0,
+        "verified": res.verified,
+        "diff": diff if would_change else None,
+        "semantics": semantics_name(symbolic_literals),
+        "symbolic_literals": list(symbolic_literals),
+    }
+    return record, would_change
+
+
 def unknown_macros_document(path: Path | str, unknown: Sequence[UnknownMacro]) -> dict[str, object]:
     """The ``--list-unknown-macros --json`` document."""
     return top_level(
