@@ -80,11 +80,13 @@ def load_seed_configuration(
     base: MacroConfiguration,
     context: PreprocessingContext | None,
     unknown_names: UnknownNamePolicy,
+    exclude: frozenset[str] = frozenset(),
 ) -> MacroConfiguration | None:
     """Evaluate one ``--config-from`` seed file, reporting failures on stderr.
 
     ``unknown_names`` is the seed policy; the target policy is restored by
-    ``overlay_configuration`` once every seed is applied.
+    ``overlay_configuration`` once every seed is applied. ``exclude`` names are removed
+    from the layered result, as ``MacroConfiguration.from_source(exclude=)`` does.
     """
     if seed.is_dir():
         print(f"{seed}: --config-from requires a file, not a directory", file=sys.stderr)
@@ -98,6 +100,7 @@ def load_seed_configuration(
             context=context,
             unknown_names=unknown_names,
             base=base,
+            exclude=exclude,
         )
     except IncompleteConfigurationError as error:
         _report_seed_failure(seed, error, unknown_names)
@@ -147,21 +150,45 @@ def _explicit_configuration(
     return configuration, context
 
 
+def _restricted(explicit: MacroConfiguration, names: frozenset[str]) -> MacroConfiguration:
+    """The part of ``explicit`` that settles ``names``."""
+    return MacroConfiguration(
+        definitions=[definition for definition in explicit.definitions if definition.name in names],
+        undefined=explicit.undefined & names,
+        unknown_names=explicit.unknown_names,
+    )
+
+
+def _excluded_names(args: argparse.Namespace) -> list[str]:
+    """The validated ``--config-exclude`` names."""
+    names = []
+    for value in args.config_exclude:
+        if "=" in value:
+            raise ValueError("--config-exclude accepts only a macro name")
+        name, _ = parse_name_value(value, "--config-exclude")
+        names.append(name)
+    return names
+
+
 def configuration_from_arguments(
     args: argparse.Namespace,
 ) -> tuple[MacroConfiguration, PreprocessingContext | None] | None:
     """The configuration for the run, or ``None`` after a ``--config-from`` seed failed.
 
-    Raises ``ValueError`` for a malformed ``-D``/``-U``/``--standard-macro`` value.
+    Raises ``ValueError`` for a malformed ``-D``/``-U``/``--standard-macro``/``--config-exclude``
+    value.
     """
     configuration, context = _explicit_configuration(args)
     if args.config_from:
         explicit = configuration
         seed_policy = UnknownNamePolicy(args.config_from_unknown_names or args.unknown_names)
+        excluded = frozenset(_excluded_names(args))
         for seed in args.config_from:
-            seeded = load_seed_configuration(seed, configuration, context, seed_policy)
+            seeded = load_seed_configuration(seed, configuration, context, seed_policy, excluded)
             if seeded is None:
                 return None
-            configuration = seeded
+            # An exclusion strips a name the command line set explicitly too, but later
+            # seeds must still see that setting while their conditions are evaluated.
+            configuration = overlay_configuration(seeded, _restricted(explicit, excluded))
         configuration = overlay_configuration(configuration, explicit)
     return configuration, context

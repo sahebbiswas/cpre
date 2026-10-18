@@ -108,6 +108,18 @@ def _add_configuration_options(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--config-exclude",
+        dest="config_exclude",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help=(
+            "remove NAME from the configuration derived by --config-from (a private helper "
+            "macro or a guard the detector does not recognize); repeatable; the seed still "
+            "sees its own definition, and -D/-U of the same name still win"
+        ),
+    )
+    parser.add_argument(
         "--unknown-names",
         choices=[policy.value for policy in UnknownNamePolicy],
         default=UnknownNamePolicy.OPEN.value,
@@ -201,6 +213,8 @@ def _check_options(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
         parser.error("--compact cannot be combined with --list-unknown-macros")
     if args.has_include_from_search and not (args.include_dirs or args.quote_dirs):
         parser.error("--has-include-from-search requires -I or --iquote")
+    if args.config_exclude and not args.config_from:
+        parser.error("--config-exclude requires --config-from")
     if args.config_from_unknown_names is not None and not args.config_from:
         parser.error("--config-from-unknown-names requires --config-from")
     if len(args.sources) != 1:

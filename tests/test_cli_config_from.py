@@ -265,3 +265,102 @@ def test_config_from_help_includes_example(capsys):
     assert "cpre preprocess --unknown-names undefined --config-from flags.h" in " ".join(
         out.split()
     )
+
+
+SEED_WITH_HELPER = "#define HELPER 1\n#define KEEP HELPER\n#define LEVEL 2\n"
+HELPER_TARGET = "#ifdef HELPER\nint helper;\n#endif\nint k = KEEP;\nint l = LEVEL;\n"
+
+
+def _helper_files(tmp_path):
+    return (
+        _write(tmp_path / "flags.h", SEED_WITH_HELPER),
+        _write(tmp_path / "target.c", HELPER_TARGET),
+    )
+
+
+def test_config_exclude_matches_api_exclude(tmp_path, capsys):
+    flags, target = _helper_files(tmp_path)
+    configuration = cpre.MacroConfiguration.from_source(
+        SEED_WITH_HELPER, filename=str(flags), unknown_names="undefined", exclude={"HELPER"}
+    )
+    argv = [
+        "preprocess",
+        "--unknown-names",
+        "undefined",
+        "--config-from",
+        str(flags),
+        "--config-exclude",
+        "HELPER",
+        str(target),
+    ]
+    assert main(argv) == 0
+    out = capsys.readouterr().out
+    assert out == _expected(target, configuration)
+    assert "int helper;" not in out
+    # The seed still saw HELPER while it was evaluated, so KEEP was defined from it.
+    assert "int k =  HELPER ;" in out
+
+
+def test_config_exclude_is_repeatable_and_applies_to_every_seed(tmp_path, capsys):
+    flags, target = _helper_files(tmp_path)
+    other = _write(tmp_path / "other.h", "#define EXTRA 5\n")
+    target.write_bytes(b"int e = EXTRA;\nint l = LEVEL;\nint k = KEEP;\n")
+    argv = ["preprocess", "--unknown-names", "undefined"]
+    for seed in (flags, other):
+        argv += ["--config-from", str(seed)]
+    argv += ["--config-exclude", "EXTRA", "--config-exclude", "LEVEL", str(target)]
+    assert main(argv) == 0
+    out = capsys.readouterr().out
+    assert "int e = EXTRA;" in out and "int l = LEVEL;" in out and "int k =  1 ;" in out
+
+
+def test_explicit_define_and_undef_win_over_config_exclude(tmp_path, capsys):
+    flags, target = _helper_files(tmp_path)
+    base = ["preprocess", "--unknown-names", "undefined", "--config-from", str(flags)]
+    assert main([*base, "--config-exclude", "HELPER", "-DHELPER=3", str(target)]) == 0
+    out = capsys.readouterr().out
+    assert "int helper;" in out and "int k =  3 ;" in out
+
+    assert main([*base, "--config-exclude", "LEVEL", "-DLEVEL=9", str(target)]) == 0
+    assert "int l =  9 ;" in capsys.readouterr().out
+
+    assert main([*base, "--config-exclude", "HELPER", "-UHELPER", str(target)]) == 0
+    assert "int helper;" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "value, message",
+    [
+        ("1x", "invalid macro name"),
+        ("A=1", "accepts only a macro name"),
+        ("", "invalid macro name"),
+    ],
+)
+def test_config_exclude_rejects_invalid_names(tmp_path, capsys, value, message):
+    flags, target = _helper_files(tmp_path)
+    argv = ["preprocess", "--config-from", str(flags), "--config-exclude", value, str(target)]
+    assert main(argv) == 2
+    assert message in capsys.readouterr().err
+
+
+def test_config_exclude_requires_config_from(tmp_path, capsys):
+    _, target = _helper_files(tmp_path)
+    with pytest.raises(SystemExit) as raised:
+        main(["preprocess", "--config-exclude", "HELPER", str(target)])
+    assert raised.value.code == 2
+    assert "--config-exclude requires --config-from" in capsys.readouterr().err
+
+
+def test_excluded_explicit_name_stays_visible_to_later_seeds(tmp_path, capsys):
+    first = _write(tmp_path / "first.h", "#define FIRST 1\n")
+    second = _write(
+        tmp_path / "second.h", "#if HELPER == 3\n#define SAW_HELPER 1\n#endif\n#define HELPER 7\n"
+    )
+    target = _write(tmp_path / "target.c", "int s = SAW_HELPER;\nint h = HELPER;\n")
+    argv = ["preprocess", "--unknown-names", "undefined"]
+    argv += ["--config-from", str(first), "--config-from", str(second)]
+    argv += ["--config-exclude", "HELPER", "-DHELPER=3", str(target)]
+    assert main(argv) == 0
+    out = capsys.readouterr().out
+    assert "int s =  1 ;" in out
+    assert "int h =  3 ;" in out

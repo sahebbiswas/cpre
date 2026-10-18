@@ -285,6 +285,13 @@ Precedence is deterministic:
 2. `--config-from` may be repeated; seeds are applied in command-line order, each layered on the previous result with the API's last-definition-wins `base=` semantics.
 3. Explicit `-D` and `-U` options are then re-applied, so they always win over any seed `#define` or `#undef` of the same name.
 
+`--config-exclude NAME` removes a name from the configuration the seeds derive, matching the `exclude=` parameter of `MacroConfiguration.from_source()`. Use it for guards the detector does not recognize (a guard followed by trailing directives, say) and for private helper macros that should not reach the target. It is repeatable and applies to every seed. The seed still sees its own definition of `NAME` while it is evaluated, so a seed `#define KEEP HELPER` still defines `KEEP`; only the resulting configuration loses `HELPER`, from every category (definition, presence, undefined). Explicit `-D` and `-U` of the same name always win, because they are re-applied after the seeds (step 3). `--config-exclude` without `--config-from` is a usage error, and a value that is not a macro name (`1x`, `A=1`) fails with a diagnostic and exit status `2`:
+
+```text
+cpre preprocess --unknown-names undefined --config-from flags.h --config-exclude HELPER target.c
+cpre preprocess --unknown-names undefined --config-from flags.h --config-exclude HELPER -D HELPER=3 target.c   # HELPER=3
+```
+
 A seed that cannot be read, is malformed, contains an active `#include`, has a condition that is not determined, or defines or undefines a `--standard-macro` name fails before the target is read, with diagnostics such as `flags.h: invalid --config-from seed: line 1: ...` on stderr and exit status `2`. Seeds never read headers from the filesystem; `-I` and `--iquote` apply only to the target. A seed `#define __STDC__ 0` run with `--standard-macro __STDC__=1`, for example, reports `s.h: invalid --config-from seed: line 1: seed redefines __STDC__, which the preprocessing context supplies`; pass the value you want with `--standard-macro` instead. See [Construction from source](concrete-configuration.md#construction-from-source).
 
 ### Unresolved conditions and unknown macros
