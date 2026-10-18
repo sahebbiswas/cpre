@@ -800,3 +800,44 @@ def test_multiple_top_level_groups_not_stripped():
     derived = MacroConfiguration.from_source(seed, unknown_names=UnknownNamePolicy.UNDEFINED)
     assert "A_H" in {d.name for d in derived.definitions}
     assert "B_H" in {d.name for d in derived.definitions}
+
+
+GUARDED = "#ifndef FLAGS_H\n#define FLAGS_H\n#define FEATURE 1\n#endif\n"
+
+
+def test_detected_guard_is_undefined_while_an_open_world_seed_is_read():
+    config = MacroConfiguration.from_source(GUARDED)
+    assert config == MacroConfiguration(integers={"FEATURE": 1})
+    assert config.unknown_names is UnknownNamePolicy.OPEN
+    closed = MacroConfiguration.from_source(GUARDED, unknown_names="undefined")
+    assert closed.unknown_names is UnknownNamePolicy.UNDEFINED
+    assert closed == MacroConfiguration(integers={"FEATURE": 1}, unknown_names="undefined")
+
+
+def test_if_not_defined_guard_form_is_covered():
+    text = "#if !defined(FLAGS_H)\n#define FLAGS_H\n#define FEATURE\n#endif\n"
+    assert MacroConfiguration.from_source(text) == MacroConfiguration(presence={"FEATURE"})
+
+
+def test_another_unset_name_in_a_guarded_seed_still_fails():
+    text = "#ifndef FLAGS_H\n#define FLAGS_H\n#ifndef LEVEL\n#define LEVEL 1\n#endif\n#endif\n"
+    with pytest.raises(IncompleteConfigurationError) as raised:
+        MacroConfiguration.from_source(text)
+    assert "LEVEL" in str(raised.value)
+
+
+def test_a_base_setting_of_the_guard_is_not_overridden():
+    # The base defines FLAGS_H, so the guard is false and the body is skipped; the
+    # guard is stripped from the result either way.
+    base = MacroConfiguration(presence={"FLAGS_H"})
+    assert MacroConfiguration.from_source(GUARDED, base=base) == MacroConfiguration()
+    undefined_base = MacroConfiguration(undefined={"FLAGS_H"})
+    assert MacroConfiguration.from_source(GUARDED, base=undefined_base) == MacroConfiguration(
+        integers={"FEATURE": 1}
+    )
+
+
+def test_a_guard_that_is_reused_is_not_detected_and_stays_open():
+    text = "#ifndef FLAGS_H\n#define FLAGS_H\n#define FEATURE 1\n#endif\n#if FLAGS_H\n#endif\n"
+    with pytest.raises(IncompleteConfigurationError):
+        MacroConfiguration.from_source(text)

@@ -89,6 +89,8 @@ A macro name is stripped automatically only when all of the following hold:
 3. The `#endif` closes the file (no directives or non-whitespace code follow).
 4. The name is not used again as a condition or as a replacement.
 
+While the seed is evaluated, a detected guard that the `base` configuration, `-D`/`-U` or the preprocessing context does not already settle is treated as undefined under the default `unknown_names="open"` policy, because the guard idiom assumes it. A guarded seed whose body is otherwise determined therefore evaluates without `unknown_names="undefined"`, and the guard is still stripped from the result. Every other name keeps the requested policy: a body that tests another unset name, such as `#ifndef LEVEL`, is still not determined and fails as incomplete.
+
 Anything that does not match is left in the configuration. The detector does not guess or apply a broader "first `#ifndef` wins" rule:
 - A macro used both as a guard and as a later condition or replacement stays.
 - A nested `#ifndef` that is not the file guard stays.
