@@ -282,11 +282,11 @@ cpre verifies every macro simplification semantically; there is no separate `--v
 
 | Situation | What cpre does | Exit status |
 | --- | --- | --- |
-| Verify without changing anything | `--check`, `--diff` and `--check --json` run the full rewrite and verification in memory and never write a file | `0` unchanged, `1` would change |
+| Verify without changing anything | `--check`, `--diff` and `--check --json` run the full rewrite and verification in memory and never write a file | `--check`: `0` unchanged, `1` would change. `--diff` alone prints the diff and exits `0`; add `--check` to gate on it |
 | Equivalent replacement | The original and simplified expressions are compared with a BDD under the active semantic mode; the result is reported with `is_equivalent == True`, applied only with `--rewrite`, then re-parsed and re-analyzed (`verified`) | `0` |
 | Replacement not proven equivalent | Never applied. A rewrite whose re-analysis disagrees aborts with a verification error and no file is written | `2` |
 | Resource limit exceeded (atoms or work) | The macro is incomplete: `is_equivalent` is `None`, `incomplete` carries the diagnostic, `reason` starts with `resource limit exceeded`. It is never rewritten and never counted as clean, and stderr names the limit | `2` |
 | Unsupported definition (function-like, string, non-Boolean literal, unsupported operator) | Not a candidate: `candidate` is false with a `reason`. It is not an error and is never rewritten | unaffected |
 | Proven equivalent but unparenthesized | Reported as `proven equivalent; not rewritten`, never rewritten | unaffected |
 
-An incomplete macro does not stop other macros in the same file from being analyzed: with `--rewrite`, the independently verified macros are still rewritten and the incomplete one is left byte-for-byte as it was, but the run exits `2`. Raise the limits (`AnalysisOptions(max_atoms=..., max_work=...)`) to resolve an incomplete result; see [Exit status contract](cli.md#exit-status-contract).
+An incomplete macro does not stop other macros in the same file from being analyzed: with `--rewrite`, the independently verified macros are still rewritten and the incomplete one is left byte-for-byte as it was, but the run exits `2`. Raise the limits (`AnalysisOptions(max_atoms=..., max_bdd_nodes=..., max_work=...)`; the diagnostic names the limit that was hit) to resolve an incomplete result; see [Exit status contract](cli.md#exit-status-contract).

@@ -872,6 +872,8 @@ def test_check_exit_status_distinguishes_clean_changed_and_incomplete(tmp_path, 
 
     assert main(["simplify-macros", "--check", str(clean)]) == 0
     assert main(["simplify-macros", "--check", str(changed)]) == 1
+    assert main(["simplify-macros", "--diff", str(changed)]) == 0
+    assert main(["simplify-macros", "--check", "--diff", str(changed)]) == 1
     capsys.readouterr()
 
 
