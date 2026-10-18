@@ -107,8 +107,11 @@ def test_errors_exit_2(capsys, tmp_path):
     bad = _write(tmp_path, "#if\n#endif\n", "bad.c")
     assert main(["cover", bad]) == 2
     assert capsys.readouterr().err
-    assert main(["cover", "--max-atoms", "0", bad]) == 2
-    capsys.readouterr()
+    # An invalid limit is a usage error (SystemExit 2), like every other command.
+    with pytest.raises(SystemExit) as caught:
+        main(["cover", "--max-atoms", "0", bad])
+    assert caught.value.code == 2
+    assert "max_atoms must be a positive integer" in capsys.readouterr().err
 
 
 def test_usage_errors(capsys, tmp_path):

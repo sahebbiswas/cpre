@@ -4,8 +4,11 @@ Use this index to choose the guide that matches your integration surface.
 
 ## Start here
 
-- [Command-line interface](cli.md) — invocation, inputs/discovery, text/JSON/SARIF reporting, CI behavior, errors, and exit statuses.
-- [Python API integration](api.md) — public symbolic expressions/algebra/interchange, `analyze_source()`, structured findings, simplifications, edits, errors, resource limits, and compatibility expectations.
+- [Getting started](getting-started.md) — install, a sample project, and each command with real output; the ten-minute path to a first result.
+- [Cookbook](cookbook.md) — recipes for CI gating, SARIF upload, pull-request-only checks, pre-commit, macro cleanup, finding needed macros, downstream preprocessing, configuration matrices, stdin pipelines and embedding.
+- [Troubleshooting](troubleshooting.md) — triage questions, a message index, fixes for includes, unknown macros, pragmas and analysis limits, and what to include in a bug report.
+- [Command-line interface](cli.md) — command overview, invocation, inputs/discovery, text/JSON/SARIF reporting, CI behavior, errors, and exit statuses.
+- [Python API integration](api.md) — the public API index and typical setups, public symbolic expressions/algebra/interchange, `analyze_source()`, structured findings, simplifications, edits, errors, resource limits, and compatibility expectations.
 - [Exact Boolean queries and witnesses](boolean-queries.md) — satisfiability, implication/equivalence proofs, exact simplification, deterministic witnesses, and explicit incomplete-result semantics.
 - [Macro Boolean simplification](macro-simplification.md) — bounded ROBDD reasoning for object-like `#define` replacement lists, conservative candidate classification, opt-in symbolic-literal mode, and semantic equivalence proofs.
 - [Lossless conditional structure](conditional-structure.md) — `parse_conditionals()`, exact physical ranges, nested branches, recovery diagnostics, and source-preserving downstream integration.

@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from .. import reporting
+from .._types import AnalysisOptions
 from ..errors import CpreError
 from ..macro_analysis import MacroSimplificationResult, simplify_macros
 from ..serialization import (
@@ -27,7 +28,9 @@ from ._common import (
     EXIT_ERROR,
     EXIT_FINDINGS,
     EXIT_OK,
+    add_limit_options,
     add_symbolic_literal_options,
+    analysis_options_from,
     input_paths,
     is_batch,
     is_stdin,
@@ -93,11 +96,15 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
         help="exit with status 1 when simplifiable macros are found",
     )
     add_symbolic_literal_options(parser, "macro")
+    add_limit_options(parser)
     return parser
 
 
 def _simplify_files(
-    paths: Sequence[Path], args: argparse.Namespace, symbolic_literals: tuple[int, ...]
+    paths: Sequence[Path],
+    args: argparse.Namespace,
+    symbolic_literals: tuple[int, ...],
+    options: AnalysisOptions,
 ) -> tuple[_FileResults, bool]:
     """Simplify (and with ``--rewrite`` write) each file; also whether any failed."""
     preview = args.diff or args.check
@@ -113,6 +120,7 @@ def _simplify_files(
                 # --rewrite, so they report exactly what it would write.
                 rewrite=args.rewrite or preview,
                 symbolic_literals=symbolic_literals,
+                options=options,
             )
             for r in res.results:
                 if not r.complete and r.incomplete:
@@ -219,10 +227,11 @@ def simplify_macros_main(
             "standard input cannot be rewritten in place; use --diff or --check, or name a file"
         )
     symbolic_literals = symbolic_literals_from(parser, args)
+    options = analysis_options_from(parser, args)
     paths = input_paths(parser, args)
     batch = is_batch(args)
 
-    file_results, had_errors = _simplify_files(paths, args, symbolic_literals)
+    file_results, had_errors = _simplify_files(paths, args, symbolic_literals, options)
 
     changed = [(path, res) for path, res in file_results if res.rewritten_source != res.source]
     if preview:

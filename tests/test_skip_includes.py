@@ -263,3 +263,21 @@ def test_cli_closed_skip_mode_does_not_guess_header_macros(tmp_path, capsys):
     assert capsys.readouterr().out == ""
     assert main([*arguments, "-DFEATURE", "--compact"]) == 0
     assert capsys.readouterr().out == "int on;\n"
+
+
+def test_unresolved_include_hint_names_the_fix(tmp_path, capsys):
+    source = tmp_path / "main.c"
+    source.write_text('#include "config.h"\n#ifdef A\nint a;\n#endif\n', encoding="utf-8")
+
+    assert main(["preprocess", str(source), "-D", "A"]) == 2
+    err = capsys.readouterr().err
+    assert f"{source}: hint: pass -I DIR (or --iquote DIR)" in err
+    assert "--skip-includes" in err
+
+    assert main(["cover", str(source)]) == 1
+    captured = capsys.readouterr()
+    assert f"{source}: hint: pass -I DIR" in captured.err
+    assert "hint:" not in captured.out
+
+    assert main(["preprocess", "--json", str(source), "-D", "A"]) == 2
+    assert "hint:" not in capsys.readouterr().out

@@ -91,6 +91,16 @@ def unknown_macro_hint(item: UnknownMacro) -> str:
     return f"supply -D {item.name} or -U {item.name}"
 
 
+INCLUDE_HINT = "pass -I DIR (or --iquote DIR) to resolve includes, or --skip-includes to mask them"
+
+
+def include_hint(message: str) -> str | None:
+    """Return a how-to-fix hint when ``message`` reports unresolved include processing."""
+    if "include processing is not supported" in message:
+        return INCLUDE_HINT
+    return None
+
+
 def render_macro_report(
     results: Sequence[MacroAnalysisResult],
     *,

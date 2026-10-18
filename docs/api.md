@@ -18,6 +18,151 @@ The names exported by `cpre.__all__` are the supported public boundary. Internal
 
 The public surface includes the symbolic expression model/algebra, symbolic analysis result/error model, source locations and edits, macro assumptions/configuration types, concrete preprocessing types, and macro Boolean simplification analysis (`analyze_macro()`, `analyze_macros()`, `MacroAnalysisResult`). This guide focuses on `analyze_source()` and the reusable symbolic expression surface; see [Macro Boolean simplification](macro-simplification.md) for object-like macro analysis, and [Concrete preprocessing](preprocessing.md) for `preprocess_source()`, `PreprocessResult`, `compact()`, macro environments, deterministic preprocessing context, opt-in include skipping (`skip_includes=True`, `SkippedInclude`), caller-resolved includes ([`include_resolver=`](include-resolution.md), `cpre.includes`), and pragma handling. See [Branch-covering configurations](branch-coverage.md) for `cover_branches()`, `BranchCoverageResult`, `BranchOutcome`, `BranchOutcomeStatus`, and `CoverageConfiguration`.
 
+## Public API index
+
+Every name in `cpre.__all__`, by purpose, with the guide that owns its contract. If a name is not in this table or in `cpre.__all__`, it is not public.
+
+| Purpose | Names | Guide |
+| --- | --- | --- |
+| Version | `__version__` (also `cpre --version`) | [CLI](cli.md#version) |
+| Conditional analysis | `analyze_source`, `AnalysisOptions`, `AnalysisResult`, `AnalysisIncomplete`, `IncompleteComponent`, `IncompleteGroup`, `AnalysisTelemetry`, `ComponentTelemetry` | this guide |
+| Findings and edits | `Finding`, `FindingKind`, `ExactSimplification`, `ContextualSimplification`, `SuggestedEdit`, `FixConfidence`, `SourceLocation`, `SourceRange` | this guide |
+| Conditional tree (analysis result) | `ConditionalTree` | this guide |
+| Lossless structure | `parse_conditionals`, `ConditionalStructureTree`, `ConditionalBlock`, `ConditionalBranch`, `ConditionalDirective`, `DirectiveToken`, `StructuralSourceLocation`, `StructuralSourceRange`, `StructureDiagnostic`, `StructureDiagnosticCode` | [Conditional structure](conditional-structure.md) |
+| Symbolic expressions | `Variable`, `DefinedVariable`, `Predicate`, `Constant`, `TRUE`, `FALSE`, `Negation`, `Conjunction`, `Disjunction`, `Expression`, `BooleanAtom`, `conjunction`, `disjunction`, `negate`, `normalize`, `simplify`, `format_expression`, `ordered_atoms`, `expression_predicates`, `expression_to_dict`, `expression_from_dict` | this guide |
+| Exact Boolean queries | `satisfiable`, `implies`, `equivalent`, `exact_simplify`, `witness_assignment`, `SatisfiabilityResult`, `ProofResult`, `SimplificationResult`, `WitnessResult`, `WitnessAssignment`, `WitnessAtomKind` | [Boolean queries](boolean-queries.md) |
+| Macro simplification | `analyze_macro`, `analyze_macros`, `simplify_macros`, `rewrite_macros`, `MacroAnalysisResult`, `MacroSimplificationResult` | [Macro simplification](macro-simplification.md) |
+| Macro state and configuration | `MacroAssumptions`, `MacroConfiguration`, `MacroDefinition`, `MacroState`, `MacroEnvironment`, `UnknownNamePolicy`, `PreprocessingContext` | [Concrete configuration](concrete-configuration.md) |
+| Unknown macros | `unknown_macros`, `unknown_macros_in_source`, `UnknownMacro`, `MacroUse` | [below](#unknown-macro-dependencies) |
+| Concrete preprocessing | `preprocess_source`, `compact`, `PreprocessResult`, `PreprocessDiagnostic`, `SkippedInclude`, `SourceMapping` | [Preprocessing](preprocessing.md) |
+| Pragmas | `PragmaHandler`, `Pragma`, `PragmaDisposition`, `PragmaOrigin` | [Pragma handling](pragma-handling.md) |
+| Branch coverage | `cover_branches`, `BranchCoverageResult`, `BranchOutcome`, `BranchOutcomeStatus`, `CoverageConfiguration` | [Branch coverage](branch-coverage.md) |
+| Errors | `CpreError` (alias `ConditionError`), `ParseError`, `AnalysisError`, `IncompleteConfigurationError`, `ErrorCode` | [Structured errors](#structured-errors) |
+
+`MacroEnvironment` is the mutable per-run macro state that the preprocessor updates as it reads `#define` and `#undef`; hosts normally see only the detached, read-only snapshot in `PreprocessResult.macros` and can ignore the class. The include-resolution helpers live in the documented submodule `cpre.includes` (`SearchPathResolver`, see [Include resolution](include-resolution.md)); it is the one public module outside the top-level package.
+
+`ConditionError` is kept as another name for `CpreError`, so existing `except cpre.ConditionError` handlers keep working; new code should use `CpreError`.
+
+## Typical setups
+
+Each setup is a complete, runnable starting point against the sample project from [Getting started](getting-started.md#the-sample-project). The [cookbook](cookbook.md) has the command-line equivalents.
+
+**1. A CI script or lint-style host: one file, three outcomes.**
+
+```python
+import cpre
+
+source = open("src/driver.c", encoding="utf-8").read()
+try:
+    result = cpre.analyze_source(source, filename="src/driver.c")
+except cpre.CpreError as error:
+    status = ("error", error.code.value, error.location)
+else:
+    if result.complete:
+        status = ("findings" if result.findings else "clean", result.findings)
+    elif result.partial:
+        status = ("partial", result.findings, result.incomplete_components)
+    else:
+        status = ("incomplete", result.incomplete)
+print(status[0])
+```
+
+**2. A build-aware analyzer: known configuration, limits you control.**
+
+```python
+import cpre
+
+options = cpre.AnalysisOptions(max_atoms=128, max_work=1_000_000)
+assumptions = cpre.MacroAssumptions(
+    defined={"TURBO"},
+    undefined={"SLOW"},
+    values={"DEBUG": False},
+)
+source = open("src/driver.c", encoding="utf-8").read()
+result = cpre.analyze_source(
+    source, filename="src/driver.c", assumptions=assumptions, options=options
+)
+for finding in result.findings:
+    # Keep configuration-specific findings apart from configuration-independent ones.
+    scope = "this build" if finding.depends_on_assumptions else "any build"
+    print(finding.kind.value, finding.location.line, scope)
+```
+
+**3. Feeding a parser one selected translation unit: configuration and includes.**
+
+```python
+import cpre
+from cpre.includes import SearchPathResolver
+
+header = open("include/config.h", encoding="utf-8").read()
+project = cpre.MacroConfiguration.from_source(header, unknown_names="undefined")
+# Per-run choices layer on top of the project configuration (last definition wins).
+configuration = cpre.MacroConfiguration.from_source(
+    "#define DEBUG\n", base=project, unknown_names="undefined"
+)
+source = open("src/driver.c", encoding="utf-8").read()
+result = cpre.preprocess_source(
+    source,
+    filename="src/driver.c",
+    configuration=configuration,
+    include_resolver=SearchPathResolver(["include"]),
+)
+if result.complete:
+    text, mapping = result.source, result.source_map
+else:
+    for diagnostic in result.incomplete:
+        print(diagnostic.location.line, diagnostic.code.value, diagnostic.message)
+```
+
+The configuration is built the way `--config-from` and `-D` build it: the project header first, then per-run choices layered on top. `configuration=` and `assumptions=` are mutually exclusive, so a Boolean assumption cannot silently conflict with a concrete definition. See [External macro configuration](preprocessing.md#external-macro-configuration).
+
+**4. Configuration tooling: what is needed, and what covers it.**
+
+```python
+import cpre
+
+source = open("src/driver.c", encoding="utf-8").read()
+needed = [item.name for item in cpre.unknown_macros_in_source(source)]
+coverage = cpre.cover_branches(source, filename="src/driver.c", skip_includes=True)
+if coverage.incomplete is not None:
+    print(needed, "coverage incomplete:", coverage.incomplete)
+else:
+    print(needed, len(coverage.configurations))
+```
+
+`BranchCoverageResult.configurations` and `outcomes` are `None` when the analysis was incomplete; check `incomplete` first ([Branch-covering configurations](branch-coverage.md)).
+
+**5. A refactoring or formatting tool: lossless structure, not interpretation.**
+
+```python
+import cpre
+
+source = open("src/driver.c", encoding="utf-8").read()
+tree = cpre.parse_conditionals(source, filename="src/driver.c")
+for diagnostic in tree.diagnostics:
+    print(diagnostic.code.value, diagnostic.message)
+print(len(tree.blocks), "conditional blocks")
+```
+
+Use `parse_conditionals()` when you need exact ranges and tolerant recovery; use `analyze_source()` when you need meaning ([Lossless conditional structure](conditional-structure.md)).
+
+**6. Macro hygiene in a tool: report, then rewrite only what is verified.**
+
+```python
+import cpre
+
+source = open("src/driver.c", encoding="utf-8").read()
+outcome = cpre.simplify_macros(source, filename="src/driver.c", rewrite=True)
+for result in outcome.results:
+    if result.simplified and not result.rewritable:
+        print(result.name, "reported, not rewritten")
+if outcome.rewritten:
+    assert outcome.verified
+    updated = outcome.rewritten_source
+```
+
+`simplify_macros(..., rewrite=False)` is strictly read-only; the rewrite re-parses and re-analyzes its own output and raises `AnalysisError` if that verification fails ([Semantic verification](macro-simplification.md#semantic-verification)).
+
 ## Symbolic expression API
 
 Downstream analyzers that need configuration-independent Boolean structure can construct and inspect expressions using top-level `cpre` imports only:

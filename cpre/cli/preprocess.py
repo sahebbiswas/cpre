@@ -19,7 +19,7 @@ from ..serialization import (
     preprocess_document,
     unknown_macros_document,
 )
-from ..text_reports import format_incomplete, unknown_macro_hint
+from ..text_reports import format_incomplete, include_hint, unknown_macro_hint
 from ..unknown_macros import UnknownMacro, unknown_macros_in_source
 from ._common import EXIT_ERROR, EXIT_OK, read_source, source_argument
 from .has_include_answers import answer_provider, parse_has_include_answers
@@ -300,6 +300,9 @@ def _write_diagnostics(path: Path, result: PreprocessResult) -> None:
     for diagnostic in result.incomplete:
         origin = diagnostic.source_identity or path
         print(f"{origin}: {format_incomplete(diagnostic)}", file=sys.stderr)
+        hint = include_hint(diagnostic.message)
+        if hint is not None:
+            print(f"{origin}: hint: {hint}", file=sys.stderr)
         if isinstance(diagnostic, PreprocessDiagnostic):
             for item in diagnostic.unresolved:
                 print(f"{origin}: hint: {unknown_macro_hint(item)}", file=sys.stderr)

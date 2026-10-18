@@ -1,5 +1,19 @@
 # Command-line interface
 
+New to cpre? Start with [Getting started](getting-started.md); for recipes see the [cookbook](cookbook.md), and for messages and exit statuses see [Troubleshooting](troubleshooting.md). This page is the reference.
+
+## Commands at a glance
+
+| Command | Purpose | Reads other files? | Exit `1` means |
+| --- | --- | --- | --- |
+| `cpre FILE…` | Dead, redundant and simplifiable branches and macros; text, `--json` or `--sarif` | No | `--fail-on-findings` and a finding exists |
+| `cpre simplify-macros FILE…` (also spelled `analyze-macros`) | Report, `--diff`, `--check` or `--rewrite` macro simplifications | No | `--check` with a pending rewrite, or `--fail-on-findings` and a finding |
+| `cpre preprocess FILE` | One concrete configuration: transformed source, `--list-unknown-macros`, `--dump-macros` | Only through `-I`/`--iquote`/`--config-from` | not used |
+| `cpre cover FILE` | Verified `-D`/`-U` argument lists that together select every reachable branch | Only through `-I`/`--iquote` | An outcome is not covered |
+| `cpre test-input EXPR` | Evaluate and simplify one Boolean expression | No | not used |
+
+Every command exits `2` when it could not complete. `-` reads standard input where a source is expected.
+
 ## Version
 
 Use `--version` to identify the installed cpre release without opening a source file:
@@ -239,6 +253,23 @@ If an integration requires checking only conditional branches or only macro defi
 
 `--telemetry` is a diagnostic option that explains how conditional analysis used its resources: distinct atoms, the independent components with their atom, group and node counts, the work consumed, and the limits in force. It never changes findings or exit status. With `--json` each file record gains a `telemetry` object; otherwise the figures go to stderr as `PATH: telemetry: ...` lines, leaving stdout untouched. It cannot be combined with `--no-conditionals` or `--sarif`. Telemetry is diagnostic, not a compatibility contract (see [json-contract.md](json-contract.md#opt-in-diagnostic-data) and [api.md](api.md#resource-telemetry)).
 
+### Resource limits
+
+Conditional and macro reasoning is bounded so it always terminates deterministically (see [Independent components and budget semantics](api.md#independent-components-and-budget-semantics)). Three options set the limits for `cpre`, `cpre simplify-macros`/`analyze-macros`, `cpre cover` and `cpre test-input`; each takes a positive integer and an invalid value is a usage error (status `2`):
+
+| Option | Default | Applies to |
+| --- | --- | --- |
+| `--max-atoms N` | 64 | distinct Boolean atoms in each independent component (the whole expression, for macros) |
+| `--max-bdd-nodes N` | 100000 | decision-diagram nodes in each independent component |
+| `--max-work N` | 500000 | work units shared by the whole analysis |
+
+```bash
+cpre --max-atoms 128 generated/table.h
+cpre simplify-macros --check --max-work 2000000 src/config.h
+```
+
+Raising a limit lets a larger case finish at the cost of time and memory; it never changes the answer for a case that already completed. Reports and `--json` name the limit that was hit and the observed size. Combine with `--telemetry` to see which component is expensive. Steps for working out which limit to raise are in [Troubleshooting](troubleshooting.md#analysis-limit-exceeded). The Python equivalent is `AnalysisOptions`.
+
 ## Concrete preprocessing
 
 Use the dedicated `preprocess` command when a downstream tool needs one concretely selected source representation:
@@ -257,7 +288,7 @@ cpre preprocess --dump-macros --config-from flags.h -D LEVEL=2 target.c
 cpre preprocess --json source.c
 ```
 
-The command is deliberately explicit and does not infer compiler or build state from the host. `-D NAME` creates an empty object-like macro, while `-D NAME=VALUE` supplies explicit replacement text. `-U NAME` records an explicit undefined macro. `--unknown-names undefined` opts into closed-world handling for names absent from the supplied configuration; the default is `open`.
+The command is deliberately explicit and does not infer compiler or build state from the host. `-D NAME` creates an empty object-like macro, while `-D NAME=VALUE` supplies explicit replacement text. `-U NAME` records an explicit undefined macro. The long forms are `--define` and `--undef`. `--unknown-names undefined` opts into closed-world handling for names absent from the supplied configuration; the default is `open`.
 
 Canonical coordinate-preserving output is the default and corresponds to `PreprocessResult.source`. Use `--compact` only when a presentation-oriented view is desired:
 
@@ -266,7 +297,7 @@ cpre preprocess source.c --define FEATURE --compact
 cpre preprocess source.c --compact --max-blank-lines 1
 ```
 
-Incomplete preprocessing never emits partial transformed source. Diagnostics are written to stderr and the command exits with status `2`. A successful preprocessing run exits `0`; this command does not use findings-oriented `--fail-on-findings` semantics.
+Incomplete preprocessing never emits partial transformed source. Diagnostics are written to stderr and the command exits with status `2`. A reachable `#include` with no `-I`/`--iquote` and no `--skip-includes` is the most common first failure; the diagnostic is followed by a `hint:` line naming the options that fix it (text output only; `--json` is unchanged). Includes are never searched unless you pass a search directory; see [Troubleshooting](troubleshooting.md#includes). A successful preprocessing run exits `0`; this command does not use findings-oriented `--fail-on-findings` semantics.
 
 `--config-from PATH` seeds the configuration from a macro file instead of spelling each macro out as `-D/-U`. The seed is evaluated exactly like `MacroConfiguration.from_source()`: its final macro state becomes the initial state for the target, and a standard include guard is detected and stripped. The seed is evaluated with the command's `--standard-macro` context and, by default, its `--unknown-names` policy. A condition on a name nobody set, such as `#ifndef LEVEL`, is therefore not determined in the default open-world mode (the command prints a hint when that happens). The seed's own detected include guard (`FLAGS_H` below) is the one exception: while the seed is read it is undefined, as the guard idiom assumes, so a guard alone never fails a seed. A name you set with `-D`/`-U` is left as given. For example, with this `flags.h`:
 
@@ -712,6 +743,10 @@ An incomplete ROBDD computation is never reported as a successful simplification
 --telemetry
     Diagnostic only: report atoms, components, nodes and work used by conditional
     analysis (a `telemetry` object with --json, otherwise lines on stderr).
+
+--max-atoms N / --max-bdd-nodes N / --max-work N
+    Resource limits (defaults 64 / 100000 / 500000); see "Resource limits". Also accepted by
+    simplify-macros, analyze-macros, cover and test-input.
 ```
 
 `--json` and `--sarif` cannot be used together.
