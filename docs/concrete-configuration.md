@@ -143,6 +143,7 @@ The context accepts the standard names cpre explicitly models, including applica
 - `__LINE__` comes from the active logical preprocessing line;
 - `__FILE__` comes from the supplied `filename=` or the active standard `#line` filename;
 - `#line <integer>` changes the logical line assigned to the following source line;
+  - "Following source line" means the line after the whole directive, however many physical lines it spans (a backslash continuation, or a block comment that runs onto the next line). GCC does the same. Clang gives the new number to the directive's second physical line instead, so `__LINE__` after such a directive is one higher there; cpre keeps the GCC reading and records the difference as intentional in the [compiler differential suite](compiler-differential.md).
 - `#line <integer> "file"` also changes the logical file identity;
 - operands of `#line` are macro-expanded before they are interpreted.
 

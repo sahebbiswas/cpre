@@ -7,6 +7,14 @@
     "cpre": "accepted: int first = 1 ; int hundred = 100 ; int next = 101 ;",
     "reason": "Clang gives the new number to the second physical line of a #line directive that a comment spreads over two lines, so the next line is 101. GCC and cpre apply it to the line after the whole directive, as they do for a backslash-continued directive."
   },
+  "line_directive_backslash_continued.c": {
+    "issue": "#156",
+    "kind": "intentional",
+    "compilers": ["clang"],
+    "reference": "accepted",
+    "cpre": "accepted: int first = 1 ; int hundred = 100 ; int next = 101 ;",
+    "reason": "Clang gives the new number to the second physical line of a backslash-continued #line directive, so the next line is 101. GCC and cpre apply it to the line after the whole directive."
+  },
   "if_character_constants.c": {
     "issue": "#50",
     "kind": "intentional",
