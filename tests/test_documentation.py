@@ -155,3 +155,27 @@ def test_troubleshooting_quotes_current_messages(sample_project: Path) -> None:
     _, _, err = _run(["preprocess", "src/driver.c", "-I", "include"])
     assert "condition is not determined by the current macro state" in err
     assert "condition is not determined by the current macro state" in guide
+
+
+def test_cookbook_header_recipe_matches_reality(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cookbook = (DOCS / "cookbook.md").read_text(encoding="utf-8")
+    header = re.search(r"```c\n(#pragma once\n#ifndef WIDGET_H.*?)```", cookbook, re.DOTALL)
+    assert header is not None
+    (tmp_path / "widget.h").write_text(header.group(1), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    code, _, err = _run(["preprocess", "widget.h", "-D", "FEATURE"])
+    assert code == 2 and "#ifndef WIDGET_H (unresolved: WIDGET_H (definedness))" in err
+    code, _, err = _run(["preprocess", "widget.h", "-U", "WIDGET_H", "-D", "FEATURE"])
+    assert code == 2 and "#pragma preprocessing directive is not supported" in err
+    done = subprocess.run(
+        [sys.executable, "-m", "cpre", "preprocess", "widget.h", "--consume-pragma", "once"]
+        + ["-U", "WIDGET_H", "-D", "FEATURE", "--compact"],
+        capture_output=True,
+        text=True,
+    )
+    assert (done.returncode, done.stdout.strip()) == (0, "int f(void);")
+    code, out, _ = _run(["cover", "widget.h", "--consume-pragma", "once"])
+    assert code == 0 and "-D WIDGET_H=1" in out

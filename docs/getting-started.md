@@ -179,6 +179,8 @@ TURBO	definedness	5,7
 
 The listing is a conservative over-approximation that does not read included headers, which is why `TURBO` and `LEVEL` appear even though `config.h` defines them. Pointing cpre at that header with `--config-from include/config.h` (or a `-I` directory) supplies them. If you prefer the compiler's closed-world view, `--unknown-names undefined` treats every name you did not set as undefined. See [Concrete preprocessing](preprocessing.md) and [Concrete macro configuration](concrete-configuration.md).
 
+Running on a header directly? Headers usually carry `#pragma once` and an include guard; both need a decision from you. See [Preprocess a header](cookbook.md#preprocess-a-header-pragma-once-and-include-guards): in short, `--consume-pragma once` and `-U GUARD_NAME`.
+
 ## Step 4: Find configurations that cover every branch
 
 ```bash

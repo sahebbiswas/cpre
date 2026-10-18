@@ -134,7 +134,7 @@ e.h: line 2: reachable pragma is unsupported by the caller's pragma handler: pac
 e.h: hint: add --consume-pragma pack to accept this pragma
 ```
 
-`cpre FILE` and `cpre simplify-macros` are not affected, and pragmas in branches that are not selected are never examined. From Python, pass `pragma_handler=` ([Pragma handling](pragma-handling.md#command-line)).
+A header that has `#pragma once` usually also has an include guard, which needs `-U GUARD_NAME` next; the [header recipe](cookbook.md#preprocess-a-header-pragma-once-and-include-guards) walks through both. `cpre FILE` and `cpre simplify-macros` are not affected, and pragmas in branches that are not selected are never examined. From Python, pass `pragma_handler=` ([Pragma handling](pragma-handling.md#command-line)).
 
 A reachable `#error` is a real result: it means that configuration is not buildable. Pick a configuration that does not reach it (`-D`/`-U`), or analyze symbolically with `cpre FILE`. `#error` in a branch that is not selected is never reported.
 
