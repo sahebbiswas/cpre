@@ -30,7 +30,10 @@ from ._common import (
     add_symbolic_literal_options,
     input_paths,
     is_batch,
+    is_stdin,
+    read_source,
     report_failure,
+    source_argument,
     symbolic_literals_from,
     write_exact,
 )
@@ -46,8 +49,8 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
     parser.add_argument(
         "sources",
         nargs="+",
-        type=Path,
-        help="C/C++ source files, or directories used with --recursive",
+        type=source_argument,
+        help="C/C++ source files, directories used with --recursive, or - for standard input",
     )
     parser.add_argument(
         "--recursive",
@@ -102,8 +105,7 @@ def _simplify_files(
     had_errors = False
     for path in paths:
         try:
-            with open(path, encoding="utf-8", newline="") as f:
-                source = f.read()
+            source = read_source(path, newline="")
             res = simplify_macros(
                 source,
                 filename=str(path),
@@ -212,6 +214,10 @@ def simplify_macros_main(
     preview = args.diff or args.check
     if args.rewrite and preview:
         parser.error("--rewrite cannot be combined with --diff or --check")
+    if args.rewrite and any(is_stdin(path) for path in args.sources):
+        parser.error(
+            "standard input cannot be rewritten in place; use --diff or --check, or name a file"
+        )
     symbolic_literals = symbolic_literals_from(parser, args)
     paths = input_paths(parser, args)
     batch = is_batch(args)

@@ -31,7 +31,9 @@ from ._common import (
     add_symbolic_literal_options,
     input_paths,
     is_batch,
+    read_source,
     report_failure,
+    source_argument,
     symbolic_literals_from,
 )
 
@@ -67,8 +69,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "sources",
         nargs="+",
-        type=Path,
-        help="C/C++ source files, or directories used with --recursive",
+        type=source_argument,
+        help="C/C++ source files, directories used with --recursive, or - for standard input",
     )
     parser.add_argument(
         "--recursive",
@@ -187,7 +189,7 @@ def _analyze_files(
     run = _Run()
     for path in paths:
         try:
-            source = path.read_text(encoding="utf-8")
+            source = read_source(path, newline=None)
             tree: ConditionalTree | None = None
             c_result: AnalysisResult | None = None
             if enable_conditionals:

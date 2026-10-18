@@ -27,6 +27,7 @@ Every top-level document has `schema` as its first key. The value is `cpre.<kind
 - **`[]` means none.** A list field that is `[]` was computed and is empty. For example `"unresolved": []` means no condition depends on an unknown macro.
 - **`null` means not applicable or unknown.** `"source": null` means no output text was produced (the run was incomplete). `"complete": null` in an analysis record means conditional analysis did not run (`--no-conditionals`), so completeness is unknown rather than `true`.
 - **`complete` is the incompleteness signal.** `complete: false` means cpre stopped short of a full answer (a resource limit, or a condition the current macro state cannot decide). The reasons are in `incomplete`/`diagnostics`. A document with `complete: false` is a valid result, not an error document.
+- **Standard input** is named `<stdin>` in `path` and `file`.
 - **Lines are 1-based** and refer to the file named by `path`/`file`, unless a diagnostic carries a `source_identity` naming an included file.
 - **Ordering is deterministic.** Collections follow source order (`groups`, branches, `lines`), name order (`macros` by source position, `unknown_macros` sorted by name), or command-line order (`files`). The same input gives byte-identical output across runs and hash seeds.
 - **Private details are excluded.** Output never contains BDD node identifiers, internal object ids, or memory addresses. Internal dataclass fields are not public because they happen to exist; only fields listed below are.

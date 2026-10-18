@@ -87,6 +87,7 @@ cpre preprocess source.c -D FEATURE
 cpre preprocess source.c --compact
 cpre preprocess source.c --list-unknown-macros   # macros the conditionals still need
 cpre preprocess source.c --dump-macros -D FEATURE   # the macro environment cpre starts from
+git show HEAD:source.c | cpre preprocess -D FEATURE -   # '-' reads stdin (named <stdin>)
 ```
 
 Quickly evaluate and simplify arbitrary Boolean expressions:

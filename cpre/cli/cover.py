@@ -22,7 +22,7 @@ from ..includes import DEFAULT_MAX_INCLUDE_DEPTH, SearchPathResolver
 from ..preprocessing import PreprocessingContext
 from ..serialization import cover_document
 from ..text_reports import format_error, format_incomplete
-from ._common import EXIT_ERROR, EXIT_FINDINGS, EXIT_OK
+from ._common import EXIT_ERROR, EXIT_FINDINGS, EXIT_OK, read_source, source_argument
 from .has_include_answers import answer_provider, parse_has_include_answers
 from .preprocess import add_include_options
 from .preprocess_configuration import parse_name_value
@@ -36,7 +36,9 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
             "conditional-branch outcome of one source file."
         ),
     )
-    parser.add_argument("source", type=Path, help="the C/C++ source file")
+    parser.add_argument(
+        "source", type=source_argument, help="the C/C++ source file, or - for standard input"
+    )
     parser.add_argument(
         "--standard-macro",
         action="append",
@@ -134,8 +136,7 @@ def cover_main(argv: Sequence[str] | None = None, prog: str = "cpre cover") -> i
             if args.include_dirs or args.quote_dirs
             else None
         )
-        with path.open("r", encoding="utf-8", newline="") as handle:
-            source = handle.read()
+        source = read_source(path, newline="")
         result = cover_branches(
             source,
             filename=str(path),
