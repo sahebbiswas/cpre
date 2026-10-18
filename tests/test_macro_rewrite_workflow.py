@@ -704,8 +704,6 @@ def test_simplify_macros_check_errors_exit_2(tmp_path, capsys):
     [
         ["--rewrite", "--diff"],
         ["--in-place", "--check"],
-        ["--json", "--diff"],
-        ["--json", "--check"],
     ],
 )
 def test_simplify_macros_preview_flags_reject_conflicts(tmp_path, capsys, flags):
@@ -751,3 +749,73 @@ def test_unparenthesized_replacement_is_reported_but_never_rewritten(tmp_path, c
 
     # Nothing left that --rewrite would change.
     assert main(["simplify-macros", "--check", str(source)]) == 0
+
+
+_PREVIEW_JSON = "#define FEAT_1 ((0 && A) || B)\nint x;\n"
+
+
+def _preview(tmp_path, capsys, flags, files=(("a.c", _PREVIEW_JSON),)):
+    paths = []
+    for name, text in files:
+        path = tmp_path / name
+        path.write_bytes(text.encode("utf-8"))
+        paths.append(str(path))
+    code = main(["simplify-macros", "--json", *flags, *paths])
+    captured = capsys.readouterr()
+    return code, json.loads(captured.out), captured.err
+
+
+def test_check_json_lists_files_that_would_change_without_writing(tmp_path, capsys):
+    code, data, err = _preview(tmp_path, capsys, ["--check"])
+    assert code == 1
+    assert data == {
+        "schema": "cpre.simplify-macros-preview/1",
+        "path": str(tmp_path / "a.c"),
+        "would_change": True,
+        "applied_count": 1,
+        "verified": True,
+        "diff": None,
+        "semantics": "ordinary",
+        "symbolic_literals": [],
+    }
+    assert "would rewrite" in err
+    assert (tmp_path / "a.c").read_bytes() == _PREVIEW_JSON.encode("utf-8")
+
+
+def test_diff_json_carries_the_unified_diff_and_prints_no_raw_diff(tmp_path, capsys):
+    code, data, _ = _preview(tmp_path, capsys, ["--diff"])
+    assert code == 0
+    assert data["would_change"] is True and "rewritten" not in data
+    assert data["diff"].startswith("--- ") and "+#define FEAT_1 (!!B)" in data["diff"]
+    assert (tmp_path / "a.c").read_bytes() == _PREVIEW_JSON.encode("utf-8")
+
+
+def test_check_json_for_an_unchanged_file_is_still_a_record(tmp_path, capsys):
+    code, data, err = _preview(tmp_path, capsys, ["--check"], files=(("a.c", "int x;\n"),))
+    assert code == 0 and err == ""
+    assert data["would_change"] is False and data["applied_count"] == 0
+    assert data["diff"] is None
+
+
+def test_check_json_batch_omits_unchanged_files_unless_verbose(tmp_path, capsys):
+    files = (("a.c", _PREVIEW_JSON), ("b.c", "int y;\n"))
+    code, data, _ = _preview(tmp_path, capsys, ["--check", "--diff"], files=files)
+    assert code == 1
+    assert data["schema"] == "cpre.simplify-macros-preview/1"
+    assert [f["path"] for f in data["files"]] == [str(tmp_path / "a.c")]
+    assert "schema" not in data["files"][0]
+    _, verbose, _ = _preview(tmp_path, capsys, ["--check", "--verbose"], files=files)
+    assert [f["would_change"] for f in verbose["files"]] == [True, False]
+
+
+def test_check_json_is_deterministic(tmp_path, capsys):
+    first = _preview(tmp_path, capsys, ["--check", "--diff"])
+    assert _preview(tmp_path, capsys, ["--check", "--diff"]) == first
+
+
+def test_check_json_unreadable_file_exits_2_and_reports_on_stderr(tmp_path, capsys):
+    bad = tmp_path / "bad.c"
+    bad.write_bytes(b"\xff\xfe\x00")
+    code = main(["simplify-macros", "--json", "--check", str(bad)])
+    captured = capsys.readouterr()
+    assert code == 2 and captured.err and captured.out == ""

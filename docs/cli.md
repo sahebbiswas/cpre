@@ -480,7 +480,31 @@ Exit status with `--diff` or `--check`:
 | `1` | With `--check`, at least one file would change. Without `--check`, `--fail-on-findings` is given and a simplifiable macro was found. |
 | `2` | A file could not be read or decoded, a macro could not be fully analyzed, rewrite verification failed, or the options are invalid. Files that were processed are still reported. |
 
-`--diff` and `--check` cannot be combined with `--rewrite`/`--in-place` or with `--json`; doing so is a usage error with exit status `2`.
+`--diff` and `--check` cannot be combined with `--rewrite`/`--in-place`; doing so is a usage error with exit status `2`.
+
+### Previews as JSON
+
+`--json` with `--check` and/or `--diff` writes the preview result as one JSON document (schema `cpre.simplify-macros-preview/1`, see [json-contract.md](json-contract.md)) instead of the report or raw diff, with the same exit status and no file modified:
+
+```bash
+cpre simplify-macros --check --json --recursive src
+cpre simplify-macros --check --diff --json source.c
+```
+
+```json
+{
+  "schema": "cpre.simplify-macros-preview/1",
+  "path": "source.c",
+  "would_change": true,
+  "applied_count": 1,
+  "verified": true,
+  "diff": null,
+  "semantics": "ordinary",
+  "symbolic_literals": []
+}
+```
+
+`would_change` reports what `--rewrite` would do (there is no `rewritten` field, since nothing is written), `applied_count` is the number of rewrites it would apply, and `diff` holds the unified diff text when `--diff` is given. With several files the document is `{"schema": ..., "files": [...]}` listing the files that would change (all files with `--verbose`). `--check` still names each such file on stderr.
 
 ## Arbitrary Boolean expression testing with test-input
 

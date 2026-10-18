@@ -108,7 +108,7 @@ from .unknown_macros import MacroUse, UnknownMacro, unknown_macros, unknown_macr
 
 # Single source of truth for the package version (Semantic Versioning 2.0.0).
 # Every pull request merged to main bumps it once; see CONTRIBUTING.md.
-__version__ = "0.33.0"
+__version__ = "0.34.0"
 
 __all__ = [
     "AnalysisError",

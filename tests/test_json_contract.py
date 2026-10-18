@@ -27,6 +27,10 @@ SIMPLIFY_KEYS = {
     "schema", "path", "rewritten", "applied_count", "verified", "semantics", "symbolic_literals",
     "macros",
 }  # fmt: skip
+PREVIEW_KEYS = {
+    "schema", "path", "would_change", "applied_count", "verified", "diff", "semantics",
+    "symbolic_literals",
+}  # fmt: skip
 PREPROCESS_KEYS = {"schema", "file", "complete", "source", "diagnostics", "skipped_includes"}
 UNKNOWN_KEYS = {"schema", "file", "unknown_macros"}
 EXPRESSION_KEYS = {
@@ -107,6 +111,12 @@ def test_simplify_macros_document_fields(source, capsys):
     assert [m["name"] for m in data["macros"]] == ["A", "B"]
 
 
+def test_simplify_macros_preview_document_fields(source, capsys):
+    _, data = _run(capsys, ["simplify-macros", "--json", "--check", "--diff", str(source)])
+    assert set(data) == PREVIEW_KEYS and data["schema"] == "cpre.simplify-macros-preview/1"
+    assert "rewritten" not in data
+
+
 def test_preprocess_document_distinguishes_complete_incomplete_and_empty(source, capsys):
     _, incomplete = _run(capsys, ["preprocess", "--json", str(source)])
     assert set(incomplete) == PREPROCESS_KEYS and incomplete["schema"] == "cpre.preprocess/1"
@@ -150,5 +160,12 @@ def test_output_is_identical_across_hash_seeds(source, seed):
 
 def test_documented_contract_names_every_schema_kind():
     text = (Path(__file__).parent.parent / "docs" / "json-contract.md").read_text(encoding="utf-8")
-    for kind in ("analysis", "simplify-macros", "preprocess", "unknown-macros", "expression"):
+    for kind in (
+        "analysis",
+        "simplify-macros",
+        "simplify-macros-preview",
+        "preprocess",
+        "unknown-macros",
+        "expression",
+    ):
         assert f"cpre.{kind}/1" in text
