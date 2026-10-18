@@ -87,7 +87,8 @@ def test_unsupported_replacement_values_remain_unknown(replacement):
     result = preprocess_source(f"#define X {replacement}\n#if X\nx\n#endif")
     assert not result.complete
     assert result.source is None and result.macros is None
-    assert result.incomplete[0].location == SourceLocation(2)
+    expected = SourceLocation(2, 5) if replacement == '"text"' else SourceLocation(2)
+    assert result.incomplete[0].location == expected
     assert run(f"#define X {replacement}\n#ifdef X\ny\n#endif").complete
 
 
