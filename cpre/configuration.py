@@ -174,20 +174,36 @@ class MacroConfiguration:
         # Deferred: the preprocessor imports this module for ``MacroConfiguration``, and
         # building a configuration from source text runs the preprocessor.
         from .pragmas import _preprocess_with_pragmas
+        from .preprocessing import PreprocessingContext, PreprocessRequest
+
+        # The detected include guard is stripped from the result, so its open-world
+        # value would only block evaluation: while the seed is read, an unconfigured
+        # guard is undefined, exactly as the guard idiom assumes. Every other name
+        # keeps the requested policy.
+        detected_guard = _detect_include_guard(text)
+        guard_undefined: list[str] = []
+        if (
+            detected_guard is not None
+            and UnknownNamePolicy(unknown_names) is UnknownNamePolicy.OPEN
+            and not (base is not None and detected_guard in _configured_names(base))
+            and not (
+                isinstance(context, PreprocessingContext)
+                and detected_guard in context.standard_macros
+            )
+        ):
+            guard_undefined.append(detected_guard)
 
         if base is None:
-            seed_config = cls(unknown_names=unknown_names)
+            seed_config = cls(undefined=guard_undefined, unknown_names=unknown_names)
         else:
             # Pass base definitions through ``definitions=`` so presence and
             # integer replacement text is preserved exactly; the policy comes
             # from the explicit argument so base's policy cannot leak.
             seed_config = cls(
                 definitions=base.definitions,
-                undefined=base.undefined,
+                undefined=[*base.undefined, *guard_undefined],
                 unknown_names=unknown_names,
             )
-        from .preprocessing import PreprocessingContext, PreprocessRequest  # deferred, see above
-
         result = _preprocess_with_pragmas(
             PreprocessRequest(
                 text,
@@ -233,11 +249,7 @@ class MacroConfiguration:
         # stripping. Base definitions also have ``location=None``, so exclude
         # any name the base configured rather than relying on the separate
         # context/configuration conflict check to keep them disjoint.
-        base_names = (
-            {definition.name for definition in base.definitions} | base.undefined
-            if base is not None
-            else set()
-        )
+        base_names = _configured_names(base) if base is not None else set()
         context_names = (
             set(context.standard_macros.keys()) - base_names if context is not None else set()
         )
@@ -276,7 +288,6 @@ class MacroConfiguration:
                     code=ErrorCode.INVALID_CONFIGURATION,
                 )
 
-        detected_guard = _detect_include_guard(text)
         strip_names = set(excluded_names)
         if detected_guard is not None:
             strip_names.add(detected_guard)
@@ -382,6 +393,11 @@ def _configured_environment(configuration: MacroConfiguration) -> MacroEnvironme
 def _condition_environment(environment: MacroLookup) -> MacroLookup:
     # A read-only view: it never mutates the caller-visible final snapshot.
     return _ConditionMacroEnvironment(environment)
+
+
+def _configured_names(configuration: MacroConfiguration) -> set[str]:
+    """Names a configuration defines or marks undefined."""
+    return {definition.name for definition in configuration.definitions} | configuration.undefined
 
 
 def _detect_include_guard(text: str) -> str | None:

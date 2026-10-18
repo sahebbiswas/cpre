@@ -130,7 +130,7 @@ def test_config_from_open_world_guard_reports_hint(tmp_path, capsys):
     assert main(["preprocess", "--config-from", str(flags), str(target)]) == 2
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert f"{flags}: invalid --config-from seed: line 1:" in captured.err
+    assert f"{flags}: invalid --config-from seed: line 4:" in captured.err
     assert "--config-from-unknown-names undefined" in captured.err
     assert "--unknown-names undefined" in captured.err
 
@@ -219,7 +219,7 @@ def test_config_from_open_seed_with_closed_target(tmp_path, capsys):
     argv = ["preprocess", "--unknown-names", "undefined", "--config-from-unknown-names", "open"]
     assert main([*argv, "--config-from", str(flags), str(target)]) == 2
     captured = capsys.readouterr()
-    assert f"{flags}: invalid --config-from seed: line 1:" in captured.err
+    assert f"{flags}: invalid --config-from seed: line 4:" in captured.err
     assert "hint:" in captured.err
 
 
@@ -364,3 +364,20 @@ def test_excluded_explicit_name_stays_visible_to_later_seeds(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "int s =  1 ;" in out
     assert "int h =  3 ;" in out
+
+
+def test_guarded_seed_succeeds_in_open_world_mode(tmp_path, capsys):
+    flags = _write(
+        tmp_path / "flags.h", "#ifndef FLAGS_H\n#define FLAGS_H\n#define FEATURE 1\n#endif\n"
+    )
+    target = _write(tmp_path / "target.c", "int f = FEATURE;\n")
+    assert main(["preprocess", "--config-from", str(flags), str(target)]) == 0
+    assert "int f =  1 ;" in capsys.readouterr().out
+
+
+def test_guarded_seed_with_another_unset_name_still_fails_with_the_hint(tmp_path, capsys):
+    flags = _write(tmp_path / "flags.h", FLAGS)
+    target = _write(tmp_path / "target.c", "int x;\n")
+    assert main(["preprocess", "--config-from", str(flags), str(target)]) == 2
+    err = capsys.readouterr().err
+    assert "#ifndef LEVEL" in err and "--config-from-unknown-names undefined" in err

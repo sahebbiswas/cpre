@@ -244,7 +244,7 @@ cpre preprocess source.c --compact --max-blank-lines 1
 
 Incomplete preprocessing never emits partial transformed source. Diagnostics are written to stderr and the command exits with status `2`. A successful preprocessing run exits `0`; this command does not use findings-oriented `--fail-on-findings` semantics.
 
-`--config-from PATH` seeds the configuration from a macro file instead of spelling each macro out as `-D/-U`. The seed is evaluated exactly like `MacroConfiguration.from_source()`: its final macro state becomes the initial state for the target, and a standard include guard is detected and stripped. The seed is evaluated with the command's `--standard-macro` context and, by default, its `--unknown-names` policy. A condition on a name nobody set, such as the guard `#ifndef FLAGS_H` or `#ifndef LEVEL`, is therefore not determined in the default open-world mode (the command prints a hint when that happens). For example, with this `flags.h`:
+`--config-from PATH` seeds the configuration from a macro file instead of spelling each macro out as `-D/-U`. The seed is evaluated exactly like `MacroConfiguration.from_source()`: its final macro state becomes the initial state for the target, and a standard include guard is detected and stripped. The seed is evaluated with the command's `--standard-macro` context and, by default, its `--unknown-names` policy. A condition on a name nobody set, such as `#ifndef LEVEL`, is therefore not determined in the default open-world mode (the command prints a hint when that happens). The seed's own detected include guard (`FLAGS_H` below) is the one exception: while the seed is read it is undefined, as the guard idiom assumes, so a guard alone never fails a seed. A name you set with `-D`/`-U` is left as given. For example, with this `flags.h`:
 
 ```c
 #ifndef FLAGS_H
@@ -277,7 +277,7 @@ The two policies are independent:
 | `--config-from-unknown-names {open,undefined}` | every `--config-from` seed | the `--unknown-names` value |
 | `--unknown-names {open,undefined}` | the target | `open` |
 
-Without `--config-from-unknown-names`, behavior is unchanged: seeds use the target's policy. `--config-from-unknown-names` without `--config-from` is a usage error. The seed's detected include guard is stripped whatever the policy, so an open-world target that tests `FLAGS_H` still sees it as unknown. The API equivalent is `MacroConfiguration.from_source(text, unknown_names="undefined")`, with the result passed on in a configuration that uses the target's policy.
+Without `--config-from-unknown-names`, behavior is unchanged: seeds use the target's policy. `--config-from-unknown-names` without `--config-from` is a usage error. The seed's detected include guard is stripped whatever the policy, so an open-world target that tests `FLAGS_H` still sees it as unknown (and reports it as an unresolved condition) unless the command sets it explicitly with `-D FLAGS_H` or `-U FLAGS_H`, which are re-applied after the seeds. The API equivalent is `MacroConfiguration.from_source(text, unknown_names="undefined")`, with the result passed on in a configuration that uses the target's policy.
 
 Precedence is deterministic:
 
