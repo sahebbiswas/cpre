@@ -8,6 +8,7 @@ same results live in :mod:`cpre.serialization`.
 from __future__ import annotations
 
 import difflib
+import shlex
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -98,6 +99,26 @@ def include_hint(message: str) -> str | None:
     """Return a how-to-fix hint when ``message`` reports unresolved include processing."""
     if "include processing is not supported" in message:
         return INCLUDE_HINT
+    return None
+
+
+PRAGMA_HINT = (
+    "pass --consume-pragma PREFIX to accept pragmas you know are harmless "
+    "(for example --consume-pragma once)"
+)
+
+
+def pragma_hint(message: str) -> str | None:
+    """Return a how-to-fix hint when ``message`` reports an unhandled reachable pragma."""
+    if (
+        "#pragma preprocessing directive is not supported" in message
+        or "reachable pragma requires caller-provided pragma handling" in message
+    ):
+        return PRAGMA_HINT
+    _, found, payload = message.partition("unsupported by the caller's pragma handler: ")
+    if found and payload.split():
+        first = payload.split()[0].split("(")[0]
+        return f"add --consume-pragma {shlex.quote(first)} to accept this pragma"
     return None
 
 

@@ -144,6 +144,7 @@ cpre preprocess src/driver.c -I include --config-from include/config.h -D DEBUG 
 - Output keeps one line per input line (removed lines are blanked), so line numbers survive. `--compact` removes the blanks but is for humans; the Python `source_map` describes the canonical form only.
 - An incomplete result never produces partial source. `complete: false` plus exit status `2` means "do not parse this".
 - Includes are resolved only from the directories you pass with `-I`/`--iquote`. Use `--skip-includes` to ignore headers you do not have (their macros are then not assumed), and `-I` together with `--skip-includes` to follow the ones that resolve and skip the rest.
+- Reachable pragmas fail closed. Accept the harmless ones with `--consume-pragma once --consume-pragma pack`; they are removed from the output, and any other pragma still makes the result incomplete.
 - `__has_include` needs an answer: `--has-include '<zlib.h>=1'`, or `--has-include-from-search` to let the `-I` search decide.
 
 The same thing from Python, with includes resolved from a directory and `DEBUG` assumed defined:

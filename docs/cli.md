@@ -299,6 +299,14 @@ cpre preprocess source.c --compact --max-blank-lines 1
 
 Incomplete preprocessing never emits partial transformed source. Diagnostics are written to stderr and the command exits with status `2`. A reachable `#include` with no `-I`/`--iquote` and no `--skip-includes` is the most common first failure; the diagnostic is followed by a `hint:` line naming the options that fix it (text output only; `--json` is unchanged). Includes are never searched unless you pass a search directory; see [Troubleshooting](troubleshooting.md#includes). A successful preprocessing run exits `0`; this command does not use findings-oriented `--fail-on-findings` semantics.
 
+`--consume-pragma PREFIX` (repeatable) accepts reachable `#pragma` directives and `_Pragma` operators whose payload starts with the tokens of `PREFIX` and removes them from the output; every other reachable pragma still makes the result incomplete. It is how a header with `#pragma once` (or `pack`, or a diagnostic pragma) is preprocessed from the command line:
+
+```bash
+cpre preprocess header.h -D FEATURE --consume-pragma once
+```
+
+`cpre cover` takes it too. See [Command line](pragma-handling.md#command-line) for matching rules and diagnostics.
+
 `--config-from PATH` seeds the configuration from a macro file instead of spelling each macro out as `-D/-U`. The seed is evaluated exactly like `MacroConfiguration.from_source()`: its final macro state becomes the initial state for the target, and a standard include guard is detected and stripped. The seed is evaluated with the command's `--standard-macro` context and, by default, its `--unknown-names` policy. A condition on a name nobody set, such as `#ifndef LEVEL`, is therefore not determined in the default open-world mode (the command prints a hint when that happens). The seed's own detected include guard (`FLAGS_H` below) is the one exception: while the seed is read it is undefined, as the guard idiom assumes, so a guard alone never fails a seed. A name you set with `-D`/`-U` is left as given. For example, with this `flags.h`:
 
 ```c

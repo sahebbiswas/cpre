@@ -44,7 +44,7 @@ Status `2` outranks `1`. With several inputs, one failure makes the whole run `2
 | `cannot resolve #include <x.h>` | Search directories were given but the header was not found | [Includes](#includes) |
 | `condition is not determined by the current macro state` | A reachable condition needs a macro you did not set | [Unknown macros](#unknown-macros) |
 | `__has_include requires caller-provided include availability` | `__has_include` with no answer | [`__has_include`](has-include.md) |
-| `#pragma preprocessing directive is not supported …` | Reachable pragma, no pragma policy | [Pragmas and `#error`](#pragmas-and-error) |
+| `#pragma preprocessing directive is not supported …` | Reachable pragma that you have not accepted | [Pragmas and `#error`](#pragmas-and-error) |
 | `#error preprocessing directive is not supported …` | A reachable `#error` | [Pragmas and `#error`](#pragmas-and-error) |
 | `analysis limit exceeded for atoms\|bdd_nodes\|work` | Bounded reasoning ran out | [Analysis limit exceeded](#analysis-limit-exceeded) |
 | `conditional at lines 6-8 not analyzed … findings cover only the rest of the file` | Partial result | [Analysis limit exceeded](#analysis-limit-exceeded) |
@@ -116,14 +116,25 @@ Answer it explicitly with `--has-include '<zlib.h>=1'` (quote it; `=0` means una
 Reachable `#pragma` and `#error` directives make concrete preprocessing incomplete rather than being ignored, because cpre cannot know what a pragma means for your build:
 
 ```text
+$ cpre preprocess e.h -D A
 e.h: line 1: #pragma preprocessing directive is not supported during concrete preprocessing
+e.h: hint: pass --consume-pragma PREFIX to accept pragmas you know are harmless (for example --consume-pragma once)
 ```
 
-This includes `#pragma once` in the file you pass directly (inside an included header it is accepted). The command line has no pragma policy yet ([#197](https://github.com/sahebbiswas/cpre/issues/197)); the options today are:
+This includes `#pragma once` in the file you pass directly (inside an included header it is accepted). You decide which pragmas are harmless for your run with `--consume-pragma PREFIX` (repeatable), on `cpre preprocess` and `cpre cover`:
 
-- use `cpre FILE` or `cpre simplify-macros`, which are not affected;
-- call the Python API with `pragma_handler=` to consume the pragmas you accept ([Pragma handling](pragma-handling.md));
-- remove or guard the pragma for the run.
+```bash
+cpre preprocess e.h -D A --consume-pragma once --consume-pragma pack
+```
+
+A prefix matches the first tokens of the pragma's payload, so `once` accepts `#pragma once`, `pack` accepts `pack(push, 1)` and `pack(pop)` but not `packed`, and `GCC diagnostic` accepts every `GCC diagnostic …` pragma. It also matches `_Pragma("…")` operators. Accepted pragmas are removed from the output; anything else still makes the result incomplete, and the message then names it so you can add a prefix:
+
+```text
+e.h: line 2: reachable pragma is unsupported by the caller's pragma handler: pack(push, 1)
+e.h: hint: add --consume-pragma pack to accept this pragma
+```
+
+`cpre FILE` and `cpre simplify-macros` are not affected, and pragmas in branches that are not selected are never examined. From Python, pass `pragma_handler=` ([Pragma handling](pragma-handling.md#command-line)).
 
 A reachable `#error` is a real result: it means that configuration is not buildable. Pick a configuration that does not reach it (`-D`/`-U`), or analyze symbolically with `cpre FILE`. `#error` in a branch that is not selected is never reported.
 

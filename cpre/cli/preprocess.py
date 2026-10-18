@@ -19,10 +19,11 @@ from ..serialization import (
     preprocess_document,
     unknown_macros_document,
 )
-from ..text_reports import format_incomplete, include_hint, unknown_macro_hint
+from ..text_reports import format_incomplete, include_hint, pragma_hint, unknown_macro_hint
 from ..unknown_macros import UnknownMacro, unknown_macros_in_source
 from ._common import EXIT_ERROR, EXIT_OK, read_source, source_argument
 from .has_include_answers import answer_provider, parse_has_include_answers
+from .pragma_options import add_pragma_options, pragma_handler_from
 from .preprocess_configuration import configuration_with_origins
 
 
@@ -54,6 +55,7 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
         help=("with --compact, retain at most N preprocessing-created blank lines (default: 0)"),
     )
     add_include_options(parser)
+    add_pragma_options(parser)
     parser.add_argument(
         "--json",
         action="store_true",
@@ -300,9 +302,9 @@ def _write_diagnostics(path: Path, result: PreprocessResult) -> None:
     for diagnostic in result.incomplete:
         origin = diagnostic.source_identity or path
         print(f"{origin}: {format_incomplete(diagnostic)}", file=sys.stderr)
-        hint = include_hint(diagnostic.message)
-        if hint is not None:
-            print(f"{origin}: hint: {hint}", file=sys.stderr)
+        for hint in (include_hint(diagnostic.message), pragma_hint(diagnostic.message)):
+            if hint is not None:
+                print(f"{origin}: hint: {hint}", file=sys.stderr)
         if isinstance(diagnostic, PreprocessDiagnostic):
             for item in diagnostic.unresolved:
                 print(f"{origin}: hint: {unknown_macro_hint(item)}", file=sys.stderr)
@@ -339,6 +341,7 @@ def preprocess_main(
     parser = build_parser(prog)
     args = parser.parse_args(argv)
     path = _check_options(parser, args)
+    pragma_handler = pragma_handler_from(parser, args)
 
     try:
         built = configuration_with_origins(args)
@@ -379,6 +382,7 @@ def preprocess_main(
             max_include_depth=args.max_include_depth,
             include_query=include_query,
             has_include_from_resolver=args.has_include_from_search,
+            pragma_handler=pragma_handler,
         )
     except (CpreError, ValueError, OSError, UnicodeDecodeError) as error:
         origin = getattr(error, "filename", None) or path

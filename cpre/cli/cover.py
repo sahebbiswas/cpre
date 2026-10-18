@@ -20,7 +20,7 @@ from ..errors import CpreError
 from ..includes import DEFAULT_MAX_INCLUDE_DEPTH, SearchPathResolver
 from ..preprocessing import PreprocessingContext
 from ..serialization import cover_document
-from ..text_reports import format_error, format_incomplete, include_hint
+from ..text_reports import format_error, format_incomplete, include_hint, pragma_hint
 from ._common import (
     EXIT_ERROR,
     EXIT_FINDINGS,
@@ -31,6 +31,7 @@ from ._common import (
     source_argument,
 )
 from .has_include_answers import answer_provider, parse_has_include_answers
+from .pragma_options import add_pragma_options, pragma_handler_from
 from .preprocess import add_include_options
 from .preprocess_configuration import parse_name_value
 
@@ -54,6 +55,7 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
         help="supply a deterministic value for a supported standard predefined macro",
     )
     add_include_options(parser)
+    add_pragma_options(parser)
     add_limit_options(parser)
     parser.add_argument(
         "--json",
@@ -106,6 +108,7 @@ def cover_main(argv: Sequence[str] | None = None, prog: str = "cpre cover") -> i
         parser.error("directory inputs are not supported by cpre cover")
     if args.has_include_from_search and not (args.include_dirs or args.quote_dirs):
         parser.error("--has-include-from-search requires -I or --iquote")
+    pragma_handler = pragma_handler_from(parser, args)
 
     try:
         standard: dict[str, str] = {}
@@ -137,6 +140,7 @@ def cover_main(argv: Sequence[str] | None = None, prog: str = "cpre cover") -> i
             include_resolver=resolver,
             max_include_depth=args.max_include_depth,
             has_include_from_resolver=args.has_include_from_search,
+            pragma_handler=pragma_handler,
         )
     except CpreError as error:
         print(f"{path}: {format_error(error)}", file=sys.stderr)
@@ -150,17 +154,19 @@ def cover_main(argv: Sequence[str] | None = None, prog: str = "cpre cover") -> i
     elif result.incomplete is None:
         _write_text(result)
         assert result.outcomes is not None
+        hints: list[str] = []
         for outcome in result.outcomes:
-            hint = include_hint(outcome.reason or "")
-            if hint is not None:
-                print(f"{path}: hint: {hint}", file=sys.stderr)
-                break
+            hint = include_hint(outcome.reason or "") or pragma_hint(outcome.reason or "")
+            if hint is not None and hint not in hints:
+                hints.append(hint)
+        for hint in hints:
+            print(f"{path}: hint: {hint}", file=sys.stderr)
     else:
         message = format_incomplete(result.incomplete)
         print(f"{path}: {message}", file=sys.stderr)
-        hint = include_hint(message)
-        if hint is not None:
-            print(f"{path}: hint: {hint}", file=sys.stderr)
+        for hint in (include_hint(message), pragma_hint(message)):
+            if hint is not None:
+                print(f"{path}: hint: {hint}", file=sys.stderr)
     if result.incomplete is not None:
         return EXIT_ERROR
     assert result.outcomes is not None
