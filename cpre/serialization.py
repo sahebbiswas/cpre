@@ -17,6 +17,28 @@ from .model import ConditionalTree
 from .preprocessing import PreprocessDiagnostic, PreprocessResult
 from .unknown_macros import UnknownMacro
 
+SCHEMA_VERSION = 1
+"""Major version of the JSON contract in ``docs/json-contract.md``.
+
+Adding a field, a diagnostic ``code`` or a document kind keeps the version; renaming,
+removing, retyping or re-meaning a field raises it.
+"""
+
+
+def schema_id(kind: str) -> str:
+    """The ``schema`` value of a top-level document, such as ``cpre.analysis/1``."""
+    return f"cpre.{kind}/{SCHEMA_VERSION}"
+
+
+def top_level(kind: str, record: dict[str, object]) -> dict[str, object]:
+    """``record`` as a top-level document of ``kind``, with ``schema`` as its first key."""
+    return {"schema": schema_id(kind), **record}
+
+
+def batch_document(kind: str, files: Sequence[dict[str, object]]) -> dict[str, object]:
+    """The top-level document for a batch run, wrapping one record per file."""
+    return top_level(kind, {"files": list(files)})
+
 
 def semantics_name(symbolic_literals: tuple[int, ...]) -> str:
     return "symbolic-literal" if symbolic_literals else "ordinary"
@@ -129,6 +151,9 @@ def build_file_json(
         f_data.update(analysis_status_dict(analysis))
         if not analysis.complete:
             has_visible = True
+    else:
+        # Conditional analysis did not run: the status is unknown, not "complete".
+        f_data.update(complete=None, partial=None, incomplete=None, incomplete_components=None)
 
     if enable_macros:
         visible_macros = [macro_to_dict(r) for r in m_results if (verbose or r.simplified)]
@@ -167,31 +192,34 @@ def build_simplify_macros_json(
 
 def unknown_macros_document(path: Path | str, unknown: Sequence[UnknownMacro]) -> dict[str, object]:
     """The ``--list-unknown-macros --json`` document."""
-    return {
-        "file": str(path),
-        "unknown_macros": [unknown_macro_to_dict(m) for m in unknown],
-    }
+    return top_level(
+        "unknown-macros",
+        {"file": str(path), "unknown_macros": [unknown_macro_to_dict(m) for m in unknown]},
+    )
 
 
 def preprocess_document(
     path: Path | str, result: PreprocessResult, source: str | None
 ) -> dict[str, object]:
     """The ``preprocess --json`` document; ``source`` is the output text to embed."""
-    return {
-        "file": str(path),
-        "complete": result.complete,
-        "source": source,
-        "diagnostics": [preprocess_diagnostic_to_dict(d) for d in result.incomplete],
-        "skipped_includes": [
-            {
-                "directive": skipped.directive,
-                "operand": skipped.operand,
-                "line": skipped.location.line,
-                "source_identity": skipped.source_identity,
-            }
-            for skipped in result.skipped_includes
-        ],
-    }
+    return top_level(
+        "preprocess",
+        {
+            "file": str(path),
+            "complete": result.complete,
+            "source": source,
+            "diagnostics": [preprocess_diagnostic_to_dict(d) for d in result.incomplete],
+            "skipped_includes": [
+                {
+                    "directive": skipped.directive,
+                    "operand": skipped.operand,
+                    "line": skipped.location.line,
+                    "source_identity": skipped.source_identity,
+                }
+                for skipped in result.skipped_includes
+            ],
+        },
+    )
 
 
 def expression_document(
@@ -203,11 +231,14 @@ def expression_document(
     symbolic_literals: tuple[int, ...],
 ) -> dict[str, object]:
     """The ``test-input --json`` document."""
-    return {
-        "input": expression,
-        "simplified": simplified,
-        "equivalent": equivalent,
-        "changed": changed,
-        "semantics": semantics_name(symbolic_literals),
-        "symbolic_literals": list(symbolic_literals),
-    }
+    return top_level(
+        "expression",
+        {
+            "input": expression,
+            "simplified": simplified,
+            "equivalent": equivalent,
+            "changed": changed,
+            "semantics": semantics_name(symbolic_literals),
+            "symbolic_literals": list(symbolic_literals),
+        },
+    )

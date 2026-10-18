@@ -11,7 +11,7 @@ from pathlib import Path
 from .. import reporting
 from ..errors import CpreError
 from ..macro_analysis import MacroSimplificationResult, simplify_macros
-from ..serialization import build_simplify_macros_json
+from ..serialization import batch_document, build_simplify_macros_json, top_level
 from ..text_reports import (
     format_error,
     format_incomplete,
@@ -139,7 +139,7 @@ def _write_json(
             )
             if args.verbose or has_visible:
                 files.append(f_data)
-        print(json.dumps({"files": files}, indent=2))
+        print(json.dumps(batch_document("simplify-macros", files), indent=2))
     elif file_results:
         f_data, _ = build_simplify_macros_json(
             file_results[0][0],
@@ -147,7 +147,7 @@ def _write_json(
             verbose=args.verbose,
             symbolic_literals=symbolic_literals,
         )
-        print(json.dumps(f_data, indent=2))
+        print(json.dumps(top_level("simplify-macros", f_data), indent=2))
 
 
 def _write_reports(file_results: _FileResults, args: argparse.Namespace, *, batch: bool) -> None:
