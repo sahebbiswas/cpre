@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .expressions import conjunction, disjunction, expression_atoms_in_order, negate, simplify
 from .model import (
@@ -122,6 +123,28 @@ def _unique_atoms(expressions: Sequence[Expression]) -> list[BooleanAtom]:
 
 
 @dataclass
+class ComponentTrace:
+    """What one component held, for opt-in telemetry."""
+
+    id: int
+    atoms: int
+    groups: int
+    bdd: BDD | None = None
+
+
+@dataclass
+class AnalysisTrace:
+    """Filled in by :func:`analyze_tree_partial` when passed as ``trace``.
+
+    It is populated before any Boolean manager does work, so it describes the
+    components even when a limit then ends the analysis.
+    """
+
+    atoms: int = 0
+    components: list[ComponentTrace] = field(default_factory=list)
+
+
+@dataclass
 class PartialAnalysis:
     """Outcome of :func:`analyze_tree_partial`.
 
@@ -202,6 +225,7 @@ def analyze_tree_partial(
     assumptions: Expression | None = None,
     limits: ResourceLimits | None = None,
     budget: AnalysisBudget | None = None,
+    trace: AnalysisTrace | None = None,
 ) -> PartialAnalysis:
     """Like :func:`analyze_tree`, but per-component limits do not stop other components.
 
@@ -211,7 +235,9 @@ def analyze_tree_partial(
     deciding whether the assumptions themselves are satisfiable (every
     component's results depend on that).
     """
-    return _analyze(tree, assumptions=assumptions, limits=limits, budget=budget, partial=True)
+    return _analyze(
+        tree, assumptions=assumptions, limits=limits, budget=budget, partial=True, trace=trace
+    )
 
 
 def _analyze(
@@ -221,6 +247,7 @@ def _analyze(
     limits: ResourceLimits | None,
     budget: AnalysisBudget | None,
     partial: bool,
+    trace: AnalysisTrace | None = None,
 ) -> PartialAnalysis:
     use_assumptions = assumptions is not None
     resolved_limits = limits or ResourceLimits()
@@ -254,6 +281,17 @@ def _analyze(
         root = partition.find(atom)
         components.setdefault(root, _Component([], [])).atoms.append(atom)
     component_ids = {root: index for index, root in enumerate(components)}
+    if trace is not None:
+        group_counts = Counter(
+            component_ids[partition.find(members[0])] for members in group_atoms if members
+        )
+        trace.atoms = len(atoms)
+        trace.components = [
+            ComponentTrace(
+                component_ids[root], len(component.atoms), group_counts[component_ids[root]]
+            )
+            for root, component in components.items()
+        ]
     context_satisfiable = True
     for clause, members in zip(clauses, clause_atoms):
         if members:
@@ -268,6 +306,8 @@ def _analyze(
             if not recoverable(error):
                 raise
             failures[component_ids[root]] = error
+        if trace is not None:
+            trace.components[component_ids[root]].bdd = component.bdd
         component.context = conjunction(*component.clauses)
 
     if use_assumptions and tree.groups:

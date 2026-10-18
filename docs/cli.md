@@ -218,6 +218,10 @@ If an integration requires checking only conditional branches or only macro defi
 - `--no-macros`: Disables macro Boolean simplification; only conditional directives are analyzed.
 - `--no-conditionals`: Disables conditional directive analysis; only macro definitions are analyzed.
 
+### Resource telemetry
+
+`--telemetry` is a diagnostic option that explains how conditional analysis used its resources: distinct atoms, the independent components with their atom, group and node counts, the work consumed, and the limits in force. It never changes findings or exit status. With `--json` each file record gains a `telemetry` object; otherwise the figures go to stderr as `PATH: telemetry: ...` lines, leaving stdout untouched. It cannot be combined with `--no-conditionals` or `--sarif`. Telemetry is diagnostic, not a compatibility contract (see [json-contract.md](json-contract.md#opt-in-diagnostic-data) and [api.md](api.md#resource-telemetry)).
+
 ## Concrete preprocessing
 
 Use the dedicated `preprocess` command when a downstream tool needs one concretely selected source representation:
@@ -687,6 +691,10 @@ An incomplete ROBDD computation is never reported as a successful simplification
 
 --no-conditionals
     Disable conditional directive analysis.
+
+--telemetry
+    Diagnostic only: report atoms, components, nodes and work used by conditional
+    analysis (a `telemetry` object with --json, otherwise lines on stderr).
 ```
 
 `--json` and `--sarif` cannot be used together.

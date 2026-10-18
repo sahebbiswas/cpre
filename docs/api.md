@@ -321,6 +321,27 @@ Interpret results as follows:
 
 `complete` keeps its meaning: it is `True` exactly when `incomplete` is empty, so code written before partial results existed still treats a partial result as incomplete.
 
+### Resource telemetry
+
+`analyze_source(..., telemetry=True)` additionally fills `AnalysisResult.telemetry` (otherwise `None`) with a diagnostic account of where the resources went, to explain why a case became expensive or incomplete:
+
+```python
+result = cpre.analyze_source(source, options=cpre.AnalysisOptions(max_atoms=2), telemetry=True)
+t = result.telemetry
+t.atoms  # distinct Boolean atoms in the whole source
+t.work  # shared work units consumed
+t.limits  # the AnalysisOptions in force
+for c in t.components:
+    c.atoms, c.groups, c.nodes  # size of one independent component
+    c.status  # "analyzed", "incomplete" or "unfinished"
+    c.resource  # the limit an incomplete component hit, else None
+    c.incomplete_component  # index into result.incomplete_components, else None
+```
+
+Components are the independent Boolean subproblems described above, in analysis order; conditional groups without atoms are not components. `"incomplete"` components hit a per-component limit, and `"unfinished"` ones were still pending when the shared `max_work` budget ended the whole analysis (the figures describe the point where it stopped). The exact observed value of a limit is in the corresponding `AnalysisIncomplete` diagnostic. `nodes` is the number of Boolean-function nodes a component's manager created; no node identifiers or table internals are exposed.
+
+Telemetry is diagnostic only: findings, diagnostics and completeness are identical with it on or off, the figures are deterministic, and they are **not** part of the compatibility contract (the cost model and counters may change in any release).
+
 ## Unknown macro dependencies
 
 Open-world preprocessing fails when a reachable condition depends on a macro the configuration does not fix. Instead of parsing diagnostic text, query the dependencies directly:

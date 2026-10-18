@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from . import reporting
-from ._types import AnalysisIncomplete, IncompleteComponent
+from ._types import AnalysisIncomplete, AnalysisTelemetry, IncompleteComponent
 from .errors import CpreError
 from .macro_analysis import MacroAnalysisResult
 from .model import ConditionalTree
@@ -186,3 +186,20 @@ def unified_diff(path: Path, before: str, after: str) -> str:
             # Last line without a newline, marked the way diff and patch expect.
             lines.append(line + "\n\\ No newline at end of file\n")
     return "".join(lines)
+
+
+def telemetry_lines(telemetry: AnalysisTelemetry) -> list[str]:
+    """Diagnostic lines describing one analysis's resource use (not a stable format)."""
+    limits = telemetry.limits
+    lines = [
+        f"atoms={telemetry.atoms} components={len(telemetry.components)} "
+        f"work={telemetry.work}/{limits.max_work} "
+        f"(limits: atoms<={limits.max_atoms} bdd_nodes<={limits.max_bdd_nodes})"
+    ]
+    for index, item in enumerate(telemetry.components):
+        status = item.status if item.resource is None else f"{item.status} ({item.resource})"
+        lines.append(
+            f"component {index}: atoms={item.atoms} groups={item.groups} "
+            f"nodes={item.nodes} {status}"
+        )
+    return lines

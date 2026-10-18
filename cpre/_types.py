@@ -141,6 +141,44 @@ class IncompleteComponent:
         )
 
 
+@dataclass(frozen=True)
+class ComponentTelemetry:
+    """Diagnostic size figures for one independent Boolean component.
+
+    ``atoms`` and ``groups`` (top-level conditional groups) count what the component
+    holds; ``nodes`` is the number of Boolean-function nodes its manager created, a
+    deterministic measure of cost. ``status`` is ``"analyzed"``, ``"incomplete"`` (it
+    hit a per-component limit; ``resource`` names it and ``incomplete_component``
+    indexes :attr:`AnalysisResult.incomplete_components`) or ``"unfinished"`` (the
+    shared work budget ended the whole analysis before it finished).
+    """
+
+    atoms: int
+    groups: int
+    nodes: int
+    status: str
+    resource: str | None = None
+    incomplete_component: int | None = None
+
+
+@dataclass(frozen=True)
+class AnalysisTelemetry:
+    """Opt-in, diagnostic-only account of how an analysis used its resources.
+
+    Returned as :attr:`AnalysisResult.telemetry` only when ``analyze_source`` is called
+    with ``telemetry=True``. ``atoms`` is the number of distinct Boolean atoms,
+    ``components`` the independent components in analysis order (conditional groups
+    without atoms are not components), ``limits`` the limits in force, and ``work``
+    the shared work units consumed. All figures are deterministic. This is not part of
+    the compatibility contract: figures and the cost model may change in any release.
+    """
+
+    atoms: int
+    components: tuple[ComponentTelemetry, ...]
+    limits: AnalysisOptions
+    work: int
+
+
 @dataclass(frozen=True, init=False)
 class MacroAssumptions:
     """Explicit macro state supplied by a library caller.
@@ -286,6 +324,7 @@ class AnalysisResult:
     filename: str | None = None
     incomplete: tuple[AnalysisIncomplete, ...] = ()
     incomplete_components: tuple[IncompleteComponent, ...] = ()
+    telemetry: AnalysisTelemetry | None = None
 
     @property
     def complete(self) -> bool:

@@ -11,7 +11,12 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from . import reporting
-from ._types import AnalysisIncomplete, AnalysisResult, IncompleteComponent
+from ._types import (
+    AnalysisIncomplete,
+    AnalysisResult,
+    AnalysisTelemetry,
+    IncompleteComponent,
+)
 from .coverage import BranchCoverageResult, CoverageConfiguration
 from .macro_analysis import MacroAnalysisResult, MacroSimplificationResult
 from .macro_environment import MacroEnvironmentEntry
@@ -112,6 +117,30 @@ def analysis_status_dict(analysis: AnalysisResult) -> dict[str, object]:
     }
 
 
+def telemetry_to_dict(telemetry: AnalysisTelemetry) -> dict[str, object]:
+    """Opt-in diagnostic telemetry; not part of the compatibility contract."""
+    return {
+        "atoms": telemetry.atoms,
+        "components": [
+            {
+                "atoms": item.atoms,
+                "groups": item.groups,
+                "nodes": item.nodes,
+                "status": item.status,
+                "resource": item.resource,
+                "incomplete_component": item.incomplete_component,
+            }
+            for item in telemetry.components
+        ],
+        "limits": {
+            "max_atoms": telemetry.limits.max_atoms,
+            "max_bdd_nodes": telemetry.limits.max_bdd_nodes,
+            "max_work": telemetry.limits.max_work,
+        },
+        "work": telemetry.work,
+    }
+
+
 def macro_to_dict(result: MacroAnalysisResult) -> dict[str, object]:
     return {
         "name": result.name,
@@ -153,6 +182,8 @@ def build_file_json(
         f_data.update(analysis_status_dict(analysis))
         if not analysis.complete:
             has_visible = True
+        if analysis.telemetry is not None:
+            f_data["telemetry"] = telemetry_to_dict(analysis.telemetry)
     else:
         # Conditional analysis did not run: the status is unknown, not "complete".
         f_data.update(complete=None, partial=None, incomplete=None, incomplete_components=None)
