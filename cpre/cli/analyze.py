@@ -16,7 +16,7 @@ from ..errors import CpreError, ErrorCode
 from ..macro_analysis import MacroAnalysisResult, analyze_macros
 from ..model import ConditionalTree
 from ..sarif import ToolNotification, sarif_log
-from ..serialization import build_file_json
+from ..serialization import batch_document, build_file_json, top_level
 from ..text_reports import (
     format_error,
     format_incomplete,
@@ -231,10 +231,10 @@ def _write_results(
                 f_data, has_visible = _file_json(file, args, enable_macros, symbolic_literals)
                 if args.verbose or has_visible:
                     documents.append(f_data)
-            print(json.dumps({"files": documents}, indent=2))
+            print(json.dumps(batch_document("analysis", documents), indent=2))
         elif files:
             f_data, _ = _file_json(files[0], args, enable_macros, symbolic_literals)
-            print(json.dumps(f_data, indent=2))
+            print(json.dumps(top_level("analysis", f_data), indent=2))
     elif batch:
         color = sys.stdout.isatty()
         reports = []

@@ -23,6 +23,7 @@ Use this index to choose the guide that matches your integration surface.
 
 ## Integration and compatibility
 
+- [JSON output contract](json-contract.md) — `schema` identifiers, field sets, ordering, absent/empty/unknown/incomplete conventions, and the versioning policy.
 - [SARIF output](sarif.md) — SARIF 2.1.0 rules, fixes, notifications, and code-scanning integration.
 - [Downstream compatibility](downstream-compatibility.md) — supported transformation and API guarantees for consumers.
 - [C-GULL concrete preprocessing migration profile](cgull-migration-profile.md) — bounded `preprocess_source()`/`pcpp` replacement profile for C-GULL.

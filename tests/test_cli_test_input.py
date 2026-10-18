@@ -118,6 +118,7 @@ def test_cli_test_input_json_output(capsys):
     assert main(["test-input", "--json", "A && (A || B)"]) == 0
     data = json.loads(capsys.readouterr().out)
     assert data == {
+        "schema": "cpre.expression/1",
         "input": "A && (A || B)",
         "simplified": "A",
         "equivalent": True,
@@ -130,6 +131,7 @@ def test_cli_test_input_json_output(capsys):
     assert main(["test-input", "--json", "A"]) == 0
     data_unchanged = json.loads(capsys.readouterr().out)
     assert data_unchanged == {
+        "schema": "cpre.expression/1",
         "input": "A",
         "simplified": "A",
         "equivalent": True,
@@ -142,6 +144,7 @@ def test_cli_test_input_json_output(capsys):
     assert main(["test-input", "--json", "--symbolic-zero", "(A && 0) || (A && !0)"]) == 0
     data_symbolic = json.loads(capsys.readouterr().out)
     assert data_symbolic == {
+        "schema": "cpre.expression/1",
         "input": "(A && 0) || (A && !0)",
         "simplified": "A",
         "equivalent": True,

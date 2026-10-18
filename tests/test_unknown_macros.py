@@ -279,6 +279,7 @@ def test_cli_json_success_contains_source(tmp_path, capsys):
     assert main(["preprocess", "--json", "-D", "FEAT", "--compact", str(target)]) == 0
     document = json.loads(capsys.readouterr().out)
     assert document == {
+        "schema": "cpre.preprocess/1",
         "file": str(target),
         "complete": True,
         "source": "int x;\n",

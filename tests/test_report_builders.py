@@ -52,6 +52,10 @@ def test_file_json_without_trees_or_macros_is_empty_but_well_formed():
     assert document == {
         "path": "f.c",
         "groups": [],
+        "complete": None,
+        "partial": None,
+        "incomplete": None,
+        "incomplete_components": None,
         "macros": [],
         "semantics": "symbolic-literal",
         "symbolic_literals": [0],

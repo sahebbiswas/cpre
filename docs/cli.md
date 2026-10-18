@@ -88,16 +88,18 @@ cpre --json source.c
 cpre --recursive --json src
 ```
 
+Every `--json` document starts with a `schema` identifier (`cpre.analysis/1` here) and follows the conventions in [json-contract.md](json-contract.md), which also defines the compatibility policy.
+
 For a single non-directory input, stdout contains an object with:
 - `groups`: structural conditional-tree groups (or empty array if none/disabled). Groups of an incomplete component are not listed here.
 - `macros`: array of macro analysis results, each with `name`, `line`, `column`, `candidate`, `simplified`, `original` (the original replacement), `replacement` (the simplified replacement, or `null`), `equivalent`, `rewritable`, `reason`, `semantics`, and `symbolic_literals`.
-- When conditional analysis is enabled, the completeness of that analysis:
+- The completeness of conditional analysis (all four fields are `null` when conditional analysis is disabled with `--no-conditionals`, because completeness is then unknown):
   - `complete`: `true` only if every conditional was analyzed.
   - `partial`: `true` if only some independent components were left unanalyzed, so the listed `groups` are proven.
   - `incomplete`: the limit diagnostics, each with `code`, `resource`, `limit`, `observed`, `message`, `line` (or `null`), and `component` (an index into `incomplete_components`, or `null` when the whole analysis was curtailed).
   - `incomplete_components`: one object per unanalyzed component with `index`, `groups` (each with `line`, `end_line`, `directive`, `condition`), `atoms`, and `diagnostics`.
 
-In batch mode, stdout contains an object with a `files` array; each entry includes `path` plus the `groups` and `macros` fields for that source.
+In batch mode, stdout contains an object with `schema` and a `files` array; each entry includes `path` plus the `groups` and `macros` fields for that source.
 
 The same filtering rule applies as text output: the default JSON view omits unchanged branches and unsimplified/skipped macros, while `--verbose --json` includes the full tree and all analyzed macros. In filtered batch mode, files whose filtered results have no notable entries are omitted. Files whose analysis was incomplete are always included.
 
@@ -311,6 +313,7 @@ A name used only as a definedness test is never given a value suggestion. Names 
 
 ```json
 {
+  "schema": "cpre.preprocess/1",
   "file": "target.c",
   "complete": false,
   "source": null,
@@ -341,7 +344,7 @@ FEAT	definedness	6
 __GNUC__	value	4,12
 ```
 
-`USES` is `definedness`, `value`, or `definedness,value`; `LINES` lists the dependent directive lines. Combine with `--json` for `{"file": ..., "unknown_macros": [{"name", "uses", "lines", "suggestions"}, ...]}`. The listing honors `-D`, `-U`, `--config-from`, `--standard-macro`, and `--unknown-names`, so it shows only what is still missing. Every conditional is inspected, reachable or not, so the list may include names a particular configuration never reaches; supplying them is harmless. Headers are not read. Output is deterministic, so it can build a seed for a later run:
+`USES` is `definedness`, `value`, or `definedness,value`; `LINES` lists the dependent directive lines. Combine with `--json` for `{"schema": "cpre.unknown-macros/1", "file": ..., "unknown_macros": [{"name", "uses", "lines", "suggestions"}, ...]}`. The listing honors `-D`, `-U`, `--config-from`, `--standard-macro`, and `--unknown-names`, so it shows only what is still missing. Every conditional is inspected, reachable or not, so the list may include names a particular configuration never reaches; supplying them is harmless. Headers are not read. Output is deterministic, so it can build a seed for a later run:
 
 ```bash
 cpre preprocess --list-unknown-macros target.c |
@@ -439,7 +442,7 @@ cpre simplify-macros --json source.c
 cpre simplify-macros --rewrite --json source.c
 ```
 
-The output contains `path`, `rewritten`, `applied_count`, `verified`, `semantics`, `symbolic_literals`, and the array of analyzed `macros`. Each macro entry has `rewritable`, which is `false` for a simplification that is reported but not rewritten; its `reason` then starts with `not rewritten:`.
+The output (schema `cpre.simplify-macros/1`) contains `path`, `rewritten`, `applied_count`, `verified`, `semantics`, `symbolic_literals`, and the array of analyzed `macros`. Each macro entry has `rewritable`, which is `false` for a simplification that is reported but not rewritten; its `reason` then starts with `not rewritten:`.
 
 ### Diff and check modes
 
@@ -559,6 +562,7 @@ Output:
 
 ```json
 {
+  "schema": "cpre.expression/1",
   "input": "A && (A || B)",
   "simplified": "A",
   "equivalent": true,
@@ -572,6 +576,7 @@ JSON fields:
 
 | Field | Type | Description |
 | --- | --- | --- |
+| `schema` | string | Always `"cpre.expression/1"`; see [json-contract.md](json-contract.md). |
 | `input` | string | Original input expression text supplied on the command line. |
 | `simplified` | string | Optimized equivalent Boolean expression. |
 | `equivalent` | boolean | `true` when the simplified expression is proven equivalent via ROBDD. |
