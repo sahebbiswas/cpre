@@ -10,6 +10,7 @@ import sys
 import pytest
 
 from cpre.cli import main
+from cpre.cli.preprocess import _escape
 from cpre.configuration import MacroConfiguration
 from cpre.macro_environment import macro_environment
 from cpre.macros import MacroDefinition
@@ -56,12 +57,12 @@ def test_text_records_are_sorted_with_state_origin_and_replacement(capsys, files
     assert code == 0
     first = files["first"]
     assert lines == [
-        f"ADD(a,b)\tdefined\tseed:{first}\t((a)+(b))",
+        f"ADD(a,b)\tdefined\tseed:{_escape(first)}\t((a)+(b))",
         "FLAG\tdefined\tcommand-line\t",
-        f"HELPER_\tdefined\tseed:{first}\t1",
+        f"HELPER_\tdefined\tseed:{_escape(first)}\t1",
         "LEVEL\tdefined\tcommand-line\t2",
         "OFF\tundefined\tcommand-line\t",
-        f"SHARED\tdefined\tseed:{first}\tfirst",
+        f"SHARED\tdefined\tseed:{_escape(first)}\tfirst",
         "__STDC_VERSION__\tdefined\tstandard-macro\t201710L",
     ]
 
