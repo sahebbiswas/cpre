@@ -98,6 +98,7 @@ def test_incomplete_analysis_exits_2_with_null_results(capsys, target):
     assert code == 2 and data["complete"] is False
     assert data["configurations"] is None and data["outcomes"] is None
     assert data["incomplete"]["resource"] == "atoms"
+    assert data["incomplete"]["source_identity"] is None
 
 
 def test_errors_exit_2(capsys, tmp_path):

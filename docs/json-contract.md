@@ -74,7 +74,7 @@ Every top-level document has `schema` as its first key. The value is `cpre.<kind
 
 - `configurations`: `{index, flags, required, dont_care, covers}`. `flags` are the `cpre preprocess` arguments selecting the configuration; `required` is a list of `{kind, symbol, value}` Boolean assignments (`kind` is `macro_value`, `macro_defined` or `predicate`); `dont_care` names macros the required set leaves free; `covers` indexes `outcomes`.
 - `outcomes`: `{index, group_line, branch_line, directive, status, configuration, reason}` in source order. `status` is `covered`, `unsatisfiable` or `not_covered`; `branch_line` and `directive` are `null` for the "no branch selected" outcome; `configuration` indexes `configurations` and is `null` unless covered; `reason` is `null` for covered outcomes.
-- `incomplete`: an analysis diagnostic when `complete` is `false`, else `null`. An incomplete result is atomic, so `configurations` and `outcomes` are then `null` (unknown), not `[]`.
+- `incomplete`: a diagnostic when `complete` is `false`, else `null`: the analysis diagnostic fields plus `source_identity`, which names the included file the limit was hit in and is `null` for the primary source. An incomplete result is atomic, so `configurations` and `outcomes` are then `null` (unknown), not `[]`.
 
 ### `cpre.expression/1`
 

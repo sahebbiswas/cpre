@@ -290,7 +290,9 @@ def cover_document(
             "complete": result.complete,
             "configurations": configurations,
             "outcomes": outcomes,
-            "incomplete": incomplete_to_dict(result.incomplete) if result.incomplete else None,
+            "incomplete": (
+                preprocess_diagnostic_to_dict(result.incomplete) if result.incomplete else None
+            ),
         },
     )
 
