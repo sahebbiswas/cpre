@@ -163,7 +163,7 @@ def test_cookbook_header_recipe_matches_reality(
     cookbook = (DOCS / "cookbook.md").read_text(encoding="utf-8")
     header = re.search(r"```c\n(#pragma once\n#ifndef WIDGET_H.*?)```", cookbook, re.DOTALL)
     assert header is not None
-    (tmp_path / "widget.h").write_text(header.group(1), encoding="utf-8")
+    (tmp_path / "widget.h").write_bytes(header.group(1).encode("utf-8"))
     monkeypatch.chdir(tmp_path)
 
     code, _, err = _run(["preprocess", "widget.h", "-D", "FEATURE"])

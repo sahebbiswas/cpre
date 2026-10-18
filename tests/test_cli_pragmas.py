@@ -13,7 +13,8 @@ HEADER = "#pragma once\n#pragma pack(push, 1)\n#ifdef A\nint a;\n#endif\n#pragma
 
 def _write(tmp_path, text=HEADER, name="h.h"):
     path = tmp_path / name
-    path.write_text(text, encoding="utf-8")
+    # Bytes, so Windows does not translate the line endings the output assertions compare.
+    path.write_bytes(text.encode("utf-8"))
     return str(path)
 
 
@@ -104,7 +105,7 @@ def test_cover_accepts_consumed_pragmas_and_hints_otherwise(tmp_path, capsys):
 def test_included_header_pragmas_use_the_same_policy(tmp_path, capsys):
     inc = tmp_path / "inc"
     inc.mkdir()
-    (inc / "lib.h").write_text("#pragma pack(push, 1)\n#define LIB 1\n", encoding="utf-8")
+    (inc / "lib.h").write_bytes(b"#pragma pack(push, 1)\n#define LIB 1\n")
     main_c = _write(tmp_path, '#include "lib.h"\n#if LIB\nint ok;\n#endif\n', "main.c")
 
     assert main(["preprocess", main_c, "-I", str(inc), "--compact"]) == 2
