@@ -13,6 +13,7 @@ from pathlib import Path
 from . import reporting
 from ._types import AnalysisIncomplete, AnalysisResult, IncompleteComponent
 from .macro_analysis import MacroAnalysisResult, MacroSimplificationResult
+from .macro_environment import MacroEnvironmentEntry
 from .model import ConditionalTree
 from .preprocessing import PreprocessDiagnostic, PreprocessResult
 from .unknown_macros import UnknownMacro
@@ -213,6 +214,32 @@ def build_simplify_macros_preview_json(
         "symbolic_literals": list(symbolic_literals),
     }
     return record, would_change
+
+
+def macro_environment_entry_to_dict(entry: MacroEnvironmentEntry) -> dict[str, object]:
+    return {
+        "name": entry.name,
+        "defined": entry.defined,
+        "replacement": entry.replacement,
+        "parameters": list(entry.parameters) if entry.parameters is not None else None,
+        "variadic": entry.variadic,
+        "origin": entry.origin,
+        "path": entry.path,
+    }
+
+
+def macro_environment_document(
+    path: Path | str, entries: Sequence[MacroEnvironmentEntry], *, unknown_names: str
+) -> dict[str, object]:
+    """The ``--dump-macros --json`` document: cpre's configured macro environment."""
+    return top_level(
+        "macro-environment",
+        {
+            "file": str(path),
+            "unknown_names": unknown_names,
+            "macros": [macro_environment_entry_to_dict(entry) for entry in entries],
+        },
+    )
 
 
 def unknown_macros_document(path: Path | str, unknown: Sequence[UnknownMacro]) -> dict[str, object]:

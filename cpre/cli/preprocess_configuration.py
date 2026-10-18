@@ -170,6 +170,58 @@ def _excluded_names(args: argparse.Namespace) -> list[str]:
     return names
 
 
+def _states(configuration: MacroConfiguration) -> dict[str, tuple[object, ...]]:
+    """Each name the configuration settles, mapped to a comparable description of its state."""
+    states: dict[str, tuple[object, ...]] = {
+        name: ("undefined",) for name in configuration.undefined
+    }
+    for definition in configuration.definitions:
+        states[definition.name] = (
+            "defined",
+            definition.replacement,
+            definition.parameters,
+            definition.variadic,
+        )
+    return states
+
+
+def configuration_with_origins(
+    args: argparse.Namespace,
+) -> tuple[MacroConfiguration, PreprocessingContext | None, dict[str, str | None]] | None:
+    """The run's configuration plus where each name's final state came from.
+
+    ``origins`` maps a name to the ``--config-from`` seed path that last set it, or to
+    ``None`` when ``-D``/``-U`` did. ``None`` is returned after a seed failed.
+    """
+    configuration, context = _explicit_configuration(args)
+    explicit = configuration
+    explicit_names = set(_states(explicit))
+    origins: dict[str, str | None] = dict.fromkeys(explicit_names)
+    if args.config_from:
+        seed_policy = UnknownNamePolicy(args.config_from_unknown_names or args.unknown_names)
+        excluded = frozenset(_excluded_names(args))
+        for seed in args.config_from:
+            before = _states(configuration)
+            seeded = load_seed_configuration(seed, configuration, context, seed_policy, excluded)
+            if seeded is None:
+                return None
+            after = _states(seeded)
+            for name, state in after.items():
+                if before.get(name) != state:
+                    origins[name] = str(seed)
+            for name in before.keys() - after.keys():
+                origins.pop(name, None)
+            # An exclusion strips a name the command line set explicitly too, but later
+            # seeds must still see that setting while their conditions are evaluated.
+            configuration = overlay_configuration(seeded, _restricted(explicit, excluded))
+            for name in explicit_names & excluded:
+                origins[name] = None
+        configuration = overlay_configuration(configuration, explicit)
+        for name in explicit_names:
+            origins[name] = None
+    return configuration, context, origins
+
+
 def configuration_from_arguments(
     args: argparse.Namespace,
 ) -> tuple[MacroConfiguration, PreprocessingContext | None] | None:
@@ -178,17 +230,5 @@ def configuration_from_arguments(
     Raises ``ValueError`` for a malformed ``-D``/``-U``/``--standard-macro``/``--config-exclude``
     value.
     """
-    configuration, context = _explicit_configuration(args)
-    if args.config_from:
-        explicit = configuration
-        seed_policy = UnknownNamePolicy(args.config_from_unknown_names or args.unknown_names)
-        excluded = frozenset(_excluded_names(args))
-        for seed in args.config_from:
-            seeded = load_seed_configuration(seed, configuration, context, seed_policy, excluded)
-            if seeded is None:
-                return None
-            # An exclusion strips a name the command line set explicitly too, but later
-            # seeds must still see that setting while their conditions are evaluated.
-            configuration = overlay_configuration(seeded, _restricted(explicit, excluded))
-        configuration = overlay_configuration(configuration, explicit)
-    return configuration, context
+    built = configuration_with_origins(args)
+    return None if built is None else (built[0], built[1])

@@ -14,6 +14,7 @@ Every top-level document has `schema` as its first key. The value is `cpre.<kind
 | `cpre.simplify-macros/1` | `cpre simplify-macros --json` |
 | `cpre.simplify-macros-preview/1` | `cpre simplify-macros --check --json` and `--diff --json` |
 | `cpre.preprocess/1` | `cpre preprocess --json` |
+| `cpre.macro-environment/1` | `cpre preprocess --dump-macros --json` |
 | `cpre.unknown-macros/1` | `cpre preprocess --list-unknown-macros --json` |
 | `cpre.expression/1` | `cpre test-input --json` |
 
@@ -62,6 +63,10 @@ Every top-level document has `schema` as its first key. The value is `cpre.<kind
 
 `file`, `unknown_macros` (sorted by name; each `{name, uses, lines, suggestions}`).
 
+### `cpre.macro-environment/1`
+
+`file`, `unknown_names` (`open` or `undefined`), `macros`. Each macro is `{name, defined, replacement, parameters, variadic, origin, path}`: `defined` is `false` for an explicitly undefined name (then `replacement` is `null`); `parameters` is `null` for an object-like macro; `origin` is `command-line`, `seed` or `standard-macro`; `path` is the seed file for `seed` and `null` otherwise. `macros` is sorted by name, then origin. It is cpre's configured environment, not a compiler's predefined-macro catalog.
+
 ### `cpre.expression/1`
 
 `input`, `simplified`, `equivalent`, `changed`, `semantics`, `symbolic_literals`.
@@ -81,4 +86,4 @@ Resource telemetry and similar diagnostic extras (see issue #103) are not part o
 
 ## Consumers
 
-New JSON output reuses these conventions and the builders in `cpre.serialization`: `simplify-macros --check`/`--diff` (`cpre.simplify-macros-preview/1`) already does; `--dump-macros` (#101) and `cpre cover` (#126) are planned.
+New JSON output reuses these conventions and the builders in `cpre.serialization`: `simplify-macros --check`/`--diff` (`cpre.simplify-macros-preview/1`) already does; `--dump-macros` (`cpre.macro-environment/1`) too; `cpre cover` (#126) is planned.

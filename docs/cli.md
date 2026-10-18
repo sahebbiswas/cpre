@@ -232,6 +232,7 @@ cpre preprocess src/main.c -I include --iquote src
 cpre preprocess --unknown-names undefined --config-from flags.h target.c
 cpre preprocess --config-from-unknown-names undefined --config-from flags.h target.c
 cpre preprocess --list-unknown-macros target.c
+cpre preprocess --dump-macros --config-from flags.h -D LEVEL=2 target.c
 cpre preprocess --json source.c
 ```
 
@@ -352,6 +353,25 @@ cpre preprocess --list-unknown-macros target.c |
 # edit seed.h, then:
 cpre preprocess --config-from seed.h target.c
 ```
+
+#### Inspecting the configured macro environment
+
+`--dump-macros` prints the macro environment cpre will start preprocessing from, without preprocessing. It answers "what macro state did cpre actually receive?", the complement of `--list-unknown-macros`, which answers "what is still missing?". Use the two together when debugging a configuration: dump to confirm what `-D`/`-U`/`--config-from`/`--standard-macro` produced, list-unknown to see what the source's conditionals still need.
+
+With a seed `env.h` containing `#define LEVEL 1` and `#define ADD(a,b) ((a)+(b))`:
+
+```
+$ cpre preprocess --dump-macros --config-from env.h -D LEVEL=2 -U OFF \
+    --standard-macro __STDC_VERSION__=201710L target.c
+ADD(a,b)	defined	seed:env.h	((a)+(b))
+LEVEL	defined	command-line	2
+OFF	undefined	command-line	
+__STDC_VERSION__	defined	standard-macro	201710L
+```
+
+Each record is tab-separated `NAME`, `STATE` (`defined` or `undefined`), `ORIGIN`, and `REPLACEMENT` (empty for an empty or undefined macro; tab, newline, carriage return and backslash are escaped as `\t`, `\n`, `\r`, `\\`, in the seed path too, so a Windows path appears with doubled backslashes; use `--json` for the exact path). Function-like macros show their parameters in `NAME`. Records are sorted by name (then origin), so the output is identical across runs and hash seeds. `ORIGIN` is `command-line` (`-D`/`-U`), `seed:PATH` (the `--config-from` seed that last changed the final state, so a later seed that redefines the macro differently wins and names itself; a seed that merely repeats the state already in place changes nothing and is not credited), or `standard-macro`. Seed-derived names excluded with `--config-exclude` are absent, and explicit `-D`/`-U` settings always win over seeds (an excluded name you also set with `-D`/`-U` still appears, with origin `command-line`).
+
+This is cpre's *configured* environment only: it is not a compiler's predefined-macro catalog, nothing is inferred from the host, and the `#define` lines of the target source itself are not included (the target is not read). With `--json` the output is a `cpre.macro-environment/1` document (`file`, `unknown_names`, `macros` with `name`, `defined`, `replacement`, `parameters`, `variadic`, `origin`, `path`; see [json-contract.md](json-contract.md)). A `--standard-macro` for a name that `-D`, `-U` or a seed also settles is rejected with the same conflict error preprocessing reports (exit 2). `--dump-macros` cannot be combined with `--compact` or `--list-unknown-macros`.
 
 `--skip-includes` masks reachable `#include`, `#include_next`, and `#import` directives instead of failing, and reports each one on stderr as `PATH: line N: skipped #include <header.h>` while the transformed source goes to stdout. Skipped headers are never read, so macros and declarations they would supply are not assumed; a condition that depends on them still fails as incomplete. This holds with `--unknown-names undefined` too: after a reachable skipped include, only names given with `-D`/`-U` (or a `--config-from` seed) or already defined or undefined in the source resolve, and any other name is unknown rather than undefined. See [Opt-in include skipping](preprocessing.md#opt-in-include-skipping) for the full semantic limitation.
 

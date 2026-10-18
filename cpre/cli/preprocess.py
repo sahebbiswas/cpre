@@ -11,14 +11,19 @@ from pathlib import Path
 from ..configuration import UnknownNamePolicy
 from ..errors import CpreError
 from ..includes import DEFAULT_MAX_INCLUDE_DEPTH, SearchPathResolver
+from ..macro_environment import MacroEnvironmentEntry, macro_environment
 from ..pragmas import preprocess_source
 from ..preprocessing import PreprocessDiagnostic, PreprocessResult, compact
-from ..serialization import preprocess_document, unknown_macros_document
+from ..serialization import (
+    macro_environment_document,
+    preprocess_document,
+    unknown_macros_document,
+)
 from ..text_reports import format_incomplete, unknown_macro_hint
 from ..unknown_macros import UnknownMacro, unknown_macros_in_source
 from ._common import EXIT_ERROR, EXIT_OK
 from .has_include_answers import answer_provider, parse_has_include_answers
-from .preprocess_configuration import configuration_from_arguments
+from .preprocess_configuration import configuration_with_origins
 
 
 def build_parser(prog: str) -> argparse.ArgumentParser:
@@ -64,6 +69,17 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
             "instead of preprocessing, list the macros the source's conditionals need "
             "that the configuration does not fix, one tab-separated NAME, USES, LINES "
             "record per line sorted by name; combine with --json for a JSON document"
+        ),
+    )
+    parser.add_argument(
+        "--dump-macros",
+        action="store_true",
+        help=(
+            "instead of preprocessing, print cpre's configured macro environment (from "
+            "-D/-U, --config-from and --standard-macro) as one tab-separated NAME, STATE, "
+            "ORIGIN, REPLACEMENT record per line sorted by name; combine with --json for a "
+            "JSON document. This is not a compiler's predefined-macro catalog, and the "
+            "source's own #define lines are not included"
         ),
     )
     parser.epilog = (
@@ -220,10 +236,40 @@ def _print_unknown_macros(path: Path, unknown: Sequence[UnknownMacro], *, as_jso
     return EXIT_OK
 
 
+def _escape(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("\t", "\\t").replace("\n", "\\n").replace("\r", "\\r")
+
+
+def _print_macro_environment(
+    path: Path,
+    entries: Sequence[MacroEnvironmentEntry],
+    *,
+    unknown_names: str,
+    as_json: bool,
+) -> int:
+    """Write ``--dump-macros`` output; records are sorted by name."""
+    if as_json:
+        document = macro_environment_document(path, entries, unknown_names=unknown_names)
+        print(json.dumps(document, indent=2))
+        return EXIT_OK
+    for entry in entries:
+        name = entry.name
+        if entry.parameters is not None:
+            parameters = [*entry.parameters, *(["..."] if entry.variadic else [])]
+            name = f"{name}({','.join(parameters)})"
+        origin = f"seed:{_escape(entry.path)}" if entry.path is not None else entry.origin
+        state = "defined" if entry.defined else "undefined"
+        replacement = _escape(entry.replacement) if entry.replacement is not None else ""
+        print(f"{name}\t{state}\t{origin}\t{replacement}")
+    return EXIT_OK
+
+
 def _check_options(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Path:
     """Reject option combinations the command does not support; return the one source."""
     if args.list_unknown_macros and args.compact:
         parser.error("--compact cannot be combined with --list-unknown-macros")
+    if args.dump_macros and (args.compact or args.list_unknown_macros):
+        parser.error("--dump-macros cannot be combined with --compact or --list-unknown-macros")
     if args.has_include_from_search and not (args.include_dirs or args.quote_dirs):
         parser.error("--has-include-from-search requires -I or --iquote")
     if args.config_exclude and not args.config_from:
@@ -292,10 +338,17 @@ def preprocess_main(
     path = _check_options(parser, args)
 
     try:
-        built = configuration_from_arguments(args)
+        built = configuration_with_origins(args)
         if built is None:
             return EXIT_ERROR
-        configuration, context = built
+        configuration, context, origins = built
+        if args.dump_macros:
+            return _print_macro_environment(
+                path,
+                macro_environment(configuration, context, origins),
+                unknown_names=configuration.unknown_names.value,
+                as_json=args.json,
+            )
         # Validated before any early return, so a malformed answer always fails.
         include_query = (
             answer_provider(parse_has_include_answers(args.has_include))
