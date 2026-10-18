@@ -157,3 +157,11 @@ def test_solver_leaves_undefined_macros_alone():
         {Predicate("V > 3"): True, Predicate("V < 2"): True, Variable("W"): True}, set()
     )
     assert values == {} and set(contradictory) == {"V"}
+
+
+def test_over_budget_comparison_names_get_no_invented_integer():
+    lines = [f"#if V == {k}\nint a{k};\n#endif" for k in range(1, 10)]
+    source = "\n".join(lines) + "\n"
+    result = cover_branches(source)
+    for values in _values(result):
+        assert values.get("V") in (None, "1", "0")

@@ -17,8 +17,9 @@ available = {
 def has_include(query: IncludeQuery) -> bool | None:
     return (query.form, query.header) in available
 
+
 result = cpre.preprocess_source(
-    '#if __has_include(<optional.h>)\nint enabled;\n#endif\n',
+    "#if __has_include(<optional.h>)\nint enabled;\n#endif\n",
     filename="feature.c",
     include_query=has_include,
 )

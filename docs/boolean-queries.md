@@ -13,17 +13,21 @@ B = cpre.Variable("B")
 sat = cpre.satisfiable(cpre.conjunction(A, B))
 implication = cpre.implies(cpre.conjunction(A, B), A)
 equivalence = cpre.equivalent(
-    cpre.Disjunction((
-        cpre.Conjunction((A, B)),
-        cpre.Conjunction((A, cpre.Negation(B))),
-    )),
+    cpre.Disjunction(
+        (
+            cpre.Conjunction((A, B)),
+            cpre.Conjunction((A, cpre.Negation(B))),
+        )
+    ),
     A,
 )
 simplified = cpre.exact_simplify(
-    cpre.Disjunction((
-        cpre.Conjunction((A, B)),
-        cpre.Conjunction((A, cpre.Negation(B))),
-    ))
+    cpre.Disjunction(
+        (
+            cpre.Conjunction((A, B)),
+            cpre.Conjunction((A, cpre.Negation(B))),
+        )
+    )
 )
 witness = cpre.witness_assignment(cpre.conjunction(A, B))
 ```

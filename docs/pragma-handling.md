@@ -21,7 +21,7 @@ from cpre import PragmaDisposition, preprocess_source
 
 
 def pragmas(pragma):
-    if pragma.payload == "GCC diagnostic ignored \"-Wunused\"":
+    if pragma.payload == 'GCC diagnostic ignored "-Wunused"':
         # This decision belongs to the integrating analyzer, not cpre core.
         return PragmaDisposition.CONSUME
     return PragmaDisposition.UNSUPPORTED

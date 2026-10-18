@@ -10,7 +10,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from ._coverage_integers import integer_semantics, parse_comparison, solve_integers
+from ._coverage_integers import (
+    integer_semantics,
+    opaque_comparison_names,
+    parse_comparison,
+    solve_integers,
+)
 from ._types import AnalysisIncomplete, AnalysisOptions, _translate_parse_error
 from .analysis import _macro_semantics, tree_expressions
 from .configuration import MacroConfiguration, UnknownNamePolicy
@@ -339,6 +344,8 @@ def cover_branches(
 
     generated: list[tuple[CoverageConfiguration, set[int]]] = []
 
+    opaque_names: set[str] = set()
+
     def attempt(
         choices: list[tuple[BDD, int, int]],
     ) -> tuple[set[int], str | None]:
@@ -349,7 +356,7 @@ def cover_branches(
             part = _cube(bdd, root)
             cube.update(part)
             needed.update(_required(bdd, base, root, part))
-        solved, _ = solve_integers(needed, fixed)
+        solved, _ = solve_integers(needed, fixed | opaque_names)
         configuration, dont_care = _configuration(cube, needed, names, solved)
         selected, failure = run(configuration)
         if selected:
@@ -377,6 +384,7 @@ def cover_branches(
             )
             # Comparisons of one macro with integer literals must agree with some
             # integer; everything else about a comparison stays opaque.
+            opaque_names.update(opaque_comparison_names(local))
             integer_facts = integer_semantics(local, fixed)
             constrained = (
                 conjunction(semantics, integer_facts) if integer_facts is not None else semantics

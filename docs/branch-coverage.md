@@ -49,7 +49,7 @@ Each `BranchOutcome` has a `status`:
 1. Each outcome's path condition is built from the conditional structure, together with the C rule that a true macro value implies the macro is defined.
 2. Top-level groups that share no macro form independent components with separate Boolean managers. As in `analyze_source()`, `max_atoms` and `max_bdd_nodes` apply per component and `max_work` is shared.
 3. Within each component, plans are built greedily in source order. The first unplanned outcome is conjoined with every later unplanned outcome that stays jointly satisfiable. The k-th plans of all components are combined into one configuration.
-4. A deterministic false-first witness of each plan becomes the configuration. Every conditional macro is either defined as `1` (defined and true), defined as `0` (defined and false), or explicitly undefined, under `unknown_names="undefined"`.
+4. A deterministic false-first witness of each plan becomes the configuration. Every conditional macro is either defined as `1` (defined and true), defined as `0` (defined and false), or explicitly undefined, under `unknown_names="undefined"`; a macro compared with integer literals instead receives the integer solved for it (see [Integer comparisons](#integer-comparisons)).
 5. **Every configuration is verified** with `cpre.preprocess_source()`, and credited only with the outcomes preprocessing actually selected, including outcomes it was not generated for.
 6. Each outcome still uncovered gets one more attempt with a configuration that targets it alone.
 7. Configurations whose outcomes are all covered by other configurations are dropped.
@@ -88,4 +88,4 @@ For the same input and options, `cover_branches()` returns the same configuratio
 
 - Only conditionals in the primary source are targets. Included headers are preprocessed during verification but their branches are not counted.
 - There is no CLI command yet ([#126](https://github.com/sahebbiswas/cpre/issues/126)).
-- Macro values are `1`, `0`, undefined, or an integer chosen for simple comparisons (see below). A macro in an opaque expression such as `VERSION % 2 == 1` still gets only `1`, `0` or undefined.
+- Macro values are `1`, `0`, undefined, or an integer chosen for simple comparisons (see [Integer comparisons](#integer-comparisons)). A macro in an opaque expression such as `VERSION % 2 == 1` still gets only `1`, `0` or undefined.

@@ -124,6 +124,15 @@ def comparison_atoms(atoms: list[BooleanAtom]) -> dict[str, list[Predicate]]:
     return grouped
 
 
+def opaque_comparison_names(atoms: list[BooleanAtom]) -> set[str]:
+    """Macros with more comparisons than the integer reasoning is willing to enumerate."""
+    return {
+        name
+        for name, predicates in comparison_atoms(atoms).items()
+        if len(predicates) > _MAX_COMPARISONS_PER_NAME
+    }
+
+
 def integer_semantics(atoms: list[BooleanAtom], excluded: set[str]) -> Expression | None:
     """Constraints that make the comparisons on one macro agree with some integer.
 
@@ -132,9 +141,10 @@ def integer_semantics(atoms: list[BooleanAtom], excluded: set[str]) -> Expressio
     undefined macro, which reads as ``0``. The result forbids every other combination, so
     ``V >= 5`` true with ``V >= 3`` false cannot be proposed. ``None`` when nothing applies.
     """
+    over_budget = opaque_comparison_names(atoms)
     clauses: list[Expression] = []
     for name, predicates in sorted(comparison_atoms(atoms).items()):
-        if name in excluded or len(predicates) > _MAX_COMPARISONS_PER_NAME:
+        if name in excluded or name in over_budget:
             continue
         comparisons: list[tuple[Predicate, str, int]] = []
         for atom in predicates:
