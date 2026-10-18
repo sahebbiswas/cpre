@@ -80,12 +80,38 @@ Path conditions use the Boolean model of `analyze_source()`, which treats each m
 
 If exact analysis, or concrete preprocessing of a generated configuration, exceeds a resource limit, the result is atomic: `complete` is `False`, `configurations` and `outcomes` are `None`, and `incomplete` is an `AnalysisIncomplete` naming the limit. Raise limits with `options=cpre.AnalysisOptions(...)`. The same options are used for verification. Malformed conditionals raise `ParseError`, as in `analyze_source()`.
 
+## Command line
+
+```bash
+cpre cover FILE [--standard-macro NAME=VALUE] [-I DIR] [--iquote DIR] [--skip-includes]
+                [--has-include-from-search] [--has-include SPEC] [--max-include-depth N]
+                [--max-atoms N] [--max-bdd-nodes N] [--max-work N] [--json]
+```
+
+`cpre cover` accepts the include, `__has_include` and `--standard-macro` options of [`cpre preprocess`](cli.md#concrete-preprocessing), plus the resource limits of `AnalysisOptions`. It takes one source file and does not take `-D`/`-U`, because the configurations are what it generates.
+
+Text output is one line per configuration, in order, then one `#` line per outcome that is not covered:
+
+```text
+--unknown-names undefined -D A=1 -U B -U C -D V=3 -D X=1
+--unknown-names undefined -U A -U B -D C=1 -D V=0 -U X
+--unknown-names undefined -U A -U B -U C -D V=3 -D X=1
+# unsatisfiable: line 7: #if: the outcome's path condition is unsatisfiable
+# not covered: line 12: no branch selected: <reason>
+```
+
+Each configuration line is a set of `cpre preprocess` arguments, so it can be passed straight through (`cpre preprocess $(line) FILE`, or `shlex.split` it). Configurations are closed-world, hence `--unknown-names undefined`, and each names every conditional macro as `-D NAME=VALUE` or `-U NAME`, sorted by name. Use the same `-I`/`--standard-macro` options with `cpre preprocess` that you gave `cpre cover`. A source without conditionals prints nothing.
+
+`--json` writes a `cpre.cover/1` document (see [json-contract.md](json-contract.md)): `file`, `complete`, `configurations` (`index`, `flags`, `required`, `dont_care`, `covers`), `outcomes` (`index`, `group_line`, `branch_line`, `directive`, `status`, `configuration`, `reason`) and `incomplete`. `covers` and `configuration` are indices into the other list. When the analysis is incomplete, `configurations` and `outcomes` are `null` and `incomplete` holds the diagnostic, because the result is atomic.
+
+Exit status: `0` when every satisfiable outcome is covered (unsatisfiable outcomes are reported but do not fail the run), `1` when some outcome is `NOT_COVERED`, and `2` on an unreadable or malformed file, invalid options, or an incomplete analysis.
+
 ## Determinism
 
-For the same input and options, `cover_branches()` returns the same configurations, outcomes, and order, regardless of `PYTHONHASHSEED`.
+For the same input and options, `cover_branches()` and `cpre cover` return the same configurations, outcomes, and order, regardless of `PYTHONHASHSEED`.
 
 ## Current boundaries
 
 - Only conditionals in the primary source are targets. Included headers are preprocessed during verification but their branches are not counted.
-- There is no CLI command yet ([#126](https://github.com/sahebbiswas/cpre/issues/126)).
+- The command line is `cpre cover` (see [Command line](#command-line)); it takes one source file.
 - Macro values are `1`, `0`, undefined, or an integer chosen for simple comparisons (see [Integer comparisons](#integer-comparisons)). A macro in an opaque expression such as `VERSION % 2 == 1` still gets only `1`, `0` or undefined.

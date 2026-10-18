@@ -127,6 +127,14 @@ def test_macro_environment_document_fields(source, capsys):
     )
 
 
+def test_cover_document_fields(source, capsys):
+    code = main(["cover", "--json", str(source)])
+    data = json.loads(capsys.readouterr().out)
+    assert code in (0, 1)
+    assert set(data) == {"schema", "file", "complete", "configurations", "outcomes", "incomplete"}
+    assert data["schema"] == "cpre.cover/1"
+
+
 def test_preprocess_document_distinguishes_complete_incomplete_and_empty(source, capsys):
     _, incomplete = _run(capsys, ["preprocess", "--json", str(source)])
     assert set(incomplete) == PREPROCESS_KEYS and incomplete["schema"] == "cpre.preprocess/1"
@@ -175,6 +183,7 @@ def test_documented_contract_names_every_schema_kind():
         "simplify-macros",
         "simplify-macros-preview",
         "macro-environment",
+        "cover",
         "preprocess",
         "unknown-macros",
         "expression",

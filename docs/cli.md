@@ -526,6 +526,15 @@ cpre simplify-macros --check --diff --json source.c
 
 `would_change` reports what `--rewrite` would do (there is no `rewritten` field, since nothing is written), `applied_count` is the number of rewrites it would apply, and `diff` holds the unified diff text when `--diff` is given. With several files the document is `{"schema": ..., "files": [...]}` listing the files that would change (all files with `--verbose`). `--check` still names each such file on stderr.
 
+## Branch-covering configurations with cover
+
+`cpre cover FILE` generates concrete macro configurations that together select every reachable conditional-branch outcome of one file. Each text line is a ready-to-use `cpre preprocess` argument list; `--json` writes a `cpre.cover/1` document. Exit status is `0` when every satisfiable outcome is covered, `1` when some outcome is not covered, and `2` on errors or an incomplete analysis. See [Branch-covering configurations](branch-coverage.md#command-line).
+
+```bash
+cpre cover src/config.c
+cpre cover -I include --standard-macro __STDC_VERSION__=201710L --json src/config.c
+```
+
 ## Arbitrary Boolean expression testing with test-input
 
 The `cpre test-input` subcommand accepts an arbitrary Boolean macro equation or expression, runs it through cpre's Boolean parser and ROBDD simplification machinery, and prints the optimized equivalent expression:
