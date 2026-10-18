@@ -80,7 +80,8 @@ def _run(argv: list[str]) -> tuple[int, str, str]:
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         code = main(argv)
-    return code, out.getvalue(), err.getvalue()
+    # Documentation shows POSIX paths; Windows prints the same paths with backslashes.
+    return code, out.getvalue().replace("\\", "/"), err.getvalue().replace("\\", "/")
 
 
 @pytest.mark.parametrize("guide", GUIDES, ids=lambda path: path.name)
