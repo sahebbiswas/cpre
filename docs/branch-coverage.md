@@ -62,12 +62,17 @@ Each `CoverageConfiguration` also reports:
 - `dont_care`: conditional macros that set leaves free. `configuration` still pins each of them to one concrete choice.
 - `covers`: indices into `result.outcomes` of every outcome preprocessing selected.
 
+## Integer comparisons
+
+A comparison of a macro with an integer literal, `NAME op INT` or `INT op NAME` with `op` one of `==`, `!=`, `<`, `<=`, `>`, `>=` (decimal or hex, optional leading minus), is solved rather than left opaque. For each macro, cpre chooses an integer that satisfies every comparison the plan requires on it together: the candidates are `0`, `1` and each literal with its neighbours (`INT - 1`, `INT`, `INT + 1`), tried in ascending order, so `VERSION >= 3` gets `VERSION=3`, `V >= 3 && V < 5` gets `V=3`, and `V > 3` gets `V=4`. The Boolean model is told which combinations of the comparisons on one macro are possible, so it never proposes `V >= 5` true with `V >= 3` false. Truthiness (`#if V`) and definedness (`defined(V)`) of the same macro are kept consistent with the chosen value. Macros that the preprocessing context fixes are never assigned, and a macro with more than eight distinct comparisons falls back to opaque handling. Every configuration is still verified by concrete preprocessing, so a value is credited only if it really selects the outcome.
+
 ## Why an outcome can be `NOT_COVERED`
 
 Path conditions use the Boolean model of `analyze_source()`, which treats each macro as an independent external input. Concrete preprocessing can disagree, and verification catches that instead of reporting false coverage:
 
 - **Source-order `#define`/`#undef`.** In `#define A 1` / `#if A` / `#else`, the `#else` is unreachable from outside the file. The reason names the overriding macro.
-- **Opaque comparisons.** `#if VERSION >= 3` is a predicate the Boolean model cannot solve, and cpre never invents integer values. The reason names the predicate.
+- **Opaque expressions.** Anything but a comparison of a macro with an integer literal, such as `#if VERSION % 2 == 1`, is a predicate the Boolean model cannot solve, and cpre does not invent integer values for it. The reason names the predicate.
+- **Contradictory comparisons.** `#if V > 3 && V < 2` requires one value of `V` to satisfy both, which none does; the outcome is `NOT_COVERED` with that reason, never reported as covered.
 - **Names fixed by `context`.** Standard macros supplied through `PreprocessingContext` are never configured, so outcomes that need a different value stay uncovered.
 - **Incomplete preprocessing.** An unresolved `#include`, an unsupported directive, or an unanswered `__has_include` yields `preprocessing was incomplete: line N: ...`. Pass `skip_includes`, `include_resolver`, `max_include_depth`, `include_query`, `has_include_from_resolver`, or `pragma_handler` to `cover_branches()`; they are forwarded to each verification run, together with `context`.
 
@@ -83,4 +88,4 @@ For the same input and options, `cover_branches()` returns the same configuratio
 
 - Only conditionals in the primary source are targets. Included headers are preprocessed during verification but their branches are not counted.
 - There is no CLI command yet ([#126](https://github.com/sahebbiswas/cpre/issues/126)).
-- Macro values are limited to `1`, `0`, and undefined, so integer comparisons such as `VERSION >= 3` are not solved ([#125](https://github.com/sahebbiswas/cpre/issues/125)).
+- Macro values are `1`, `0`, undefined, or an integer chosen for simple comparisons (see below). A macro in an opaque expression such as `VERSION % 2 == 1` still gets only `1`, `0` or undefined.

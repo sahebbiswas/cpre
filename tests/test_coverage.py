@@ -162,15 +162,27 @@ def test_source_order_define_is_not_claimed_as_covered():
     assert "the source defines or undefines A" in otherwise.reason
 
 
-def test_opaque_comparison_is_not_given_invented_values():
+def test_comparison_with_an_integer_literal_is_solved():
     source = "#if VERSION >= 3\nint modern;\n#endif\n"
     result = cover_branches(source)
     _assert_verified(source, result)
-    modern, older = result.outcomes
-    assert modern.status is Status.NOT_COVERED
-    assert "`VERSION >= 3`" in modern.reason
-    assert "does not invent integer values" in modern.reason
-    assert older.status is COVERED
+    assert [o.status for o in result.outcomes] == [COVERED, COVERED]
+    values = {
+        d.name: d.replacement
+        for item in result.configurations
+        for d in item.configuration.definitions
+    }
+    assert values == {"VERSION": "0"} or "VERSION" in values
+
+
+def test_opaque_expression_is_not_given_invented_values():
+    source = "#if VERSION % 2 == 1\nint odd;\n#endif\n"
+    result = cover_branches(source)
+    _assert_verified(source, result)
+    odd, _ = result.outcomes
+    assert odd.status is Status.NOT_COVERED
+    assert "`VERSION % 2 == 1`" in odd.reason
+    assert "does not invent integer values" in odd.reason
 
 
 def test_include_guard_and_nested_outcomes():
