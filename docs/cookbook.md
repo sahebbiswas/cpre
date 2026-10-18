@@ -70,6 +70,7 @@ The analysis step writes the SARIF file before it sets the exit status, and `if:
 ## Check only the files a pull request changed
 
 ```bash
+set -o pipefail   # a failed git diff must fail the check, not look like "no files"
 git diff --name-only -z --diff-filter=d origin/main...HEAD \
     -- '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hh' '*.hpp' '*.hxx' \
   | xargs -0 -r cpre --fail-on-findings
