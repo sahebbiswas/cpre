@@ -150,6 +150,15 @@ def _explicit_configuration(
     return configuration, context
 
 
+def _restricted(explicit: MacroConfiguration, names: frozenset[str]) -> MacroConfiguration:
+    """The part of ``explicit`` that settles ``names``."""
+    return MacroConfiguration(
+        definitions=[definition for definition in explicit.definitions if definition.name in names],
+        undefined=explicit.undefined & names,
+        unknown_names=explicit.unknown_names,
+    )
+
+
 def _excluded_names(args: argparse.Namespace) -> list[str]:
     """The validated ``--config-exclude`` names."""
     names = []
@@ -178,6 +187,8 @@ def configuration_from_arguments(
             seeded = load_seed_configuration(seed, configuration, context, seed_policy, excluded)
             if seeded is None:
                 return None
-            configuration = seeded
+            # An exclusion strips a name the command line set explicitly too, but later
+            # seeds must still see that setting while their conditions are evaluated.
+            configuration = overlay_configuration(seeded, _restricted(explicit, excluded))
         configuration = overlay_configuration(configuration, explicit)
     return configuration, context

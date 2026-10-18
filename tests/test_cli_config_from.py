@@ -349,3 +349,18 @@ def test_config_exclude_requires_config_from(tmp_path, capsys):
         main(["preprocess", "--config-exclude", "HELPER", str(target)])
     assert raised.value.code == 2
     assert "--config-exclude requires --config-from" in capsys.readouterr().err
+
+
+def test_excluded_explicit_name_stays_visible_to_later_seeds(tmp_path, capsys):
+    first = _write(tmp_path / "first.h", "#define FIRST 1\n")
+    second = _write(
+        tmp_path / "second.h", "#if HELPER == 3\n#define SAW_HELPER 1\n#endif\n#define HELPER 7\n"
+    )
+    target = _write(tmp_path / "target.c", "int s = SAW_HELPER;\nint h = HELPER;\n")
+    argv = ["preprocess", "--unknown-names", "undefined"]
+    argv += ["--config-from", str(first), "--config-from", str(second)]
+    argv += ["--config-exclude", "HELPER", "-DHELPER=3", str(target)]
+    assert main(argv) == 0
+    out = capsys.readouterr().out
+    assert "int s =  1 ;" in out
+    assert "int h =  3 ;" in out
