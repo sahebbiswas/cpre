@@ -269,8 +269,15 @@ def _assert_components_agree(source: str) -> None:
         groups = parse_source(source).groups
     except DirectiveStructureError:
         groups = []
+    # Groups and branches are reported at the line of the directive's ``#`` (#169), which
+    # differs from the lossless structural range only after a lone splice line (#191).
+    reported = [
+        (line.directive.name, line.directive_line)
+        for line in logical_lines(source)
+        if line.directive is not None and line.directive.name in CONDITIONAL_DIRECTIVES
+    ]
     parsed = [(kind, line) for kind, line in _flatten(groups) if line is not None]
-    assert set(parsed) <= set(expected)
+    assert set(parsed) <= set(reported)
 
     try:
         result = cpre.preprocess_source(source)
@@ -289,6 +296,20 @@ def _assert_components_agree(source: str) -> None:
 @pytest.mark.parametrize("path", CASES, ids=lambda p: p.name)
 def test_components_agree_on_differential_cases(path):
     _assert_components_agree(path.read_text())
+
+
+def test_directive_after_a_lone_splice_line_is_reported_at_its_hash():
+    """#191: the structural range keeps the splice line; groups report the ``#`` line."""
+    source = "#if A\n\\\n#endif\n"
+    assert [
+        (d.kind, d.source_range.start.line) for d in cpre.parse_conditionals(source).directives
+    ] == [
+        ("if", 1),
+        ("endif", 2),
+    ]
+    (group,) = parse_source(source).groups
+    assert (group.line, group.end_line) == (1, 3)
+    _assert_components_agree(source)
 
 
 @given(sources)
