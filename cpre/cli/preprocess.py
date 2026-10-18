@@ -17,6 +17,7 @@ from ..serialization import preprocess_document, unknown_macros_document
 from ..text_reports import format_incomplete, unknown_macro_hint
 from ..unknown_macros import UnknownMacro, unknown_macros_in_source
 from ._common import EXIT_ERROR, EXIT_OK
+from .has_include_answers import answer_provider, parse_has_include_answers
 from .preprocess_configuration import configuration_from_arguments
 
 
@@ -187,6 +188,18 @@ def _add_include_options(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--has-include",
+        dest="has_include",
+        action="append",
+        default=[],
+        metavar="SPEC",
+        help=(
+            "answer one __has_include query explicitly: '<opt.h>=1' (available) or "
+            "'\"local.h\"=0' (unavailable); angle and quoted forms are separate; repeatable; "
+            "explicit answers win over --has-include-from-search, which answers the rest"
+        ),
+    )
+    parser.add_argument(
         "--max-include-depth",
         type=int,
         default=DEFAULT_MAX_INCLUDE_DEPTH,
@@ -290,6 +303,11 @@ def preprocess_main(
                 source, filename=str(path), configuration=configuration, context=context
             )
             return _print_unknown_macros(path, unknown, as_json=args.json)
+        include_query = (
+            answer_provider(parse_has_include_answers(args.has_include))
+            if args.has_include
+            else None
+        )
         resolver = (
             SearchPathResolver(args.include_dirs, quote_paths=args.quote_dirs)
             if args.include_dirs or args.quote_dirs
@@ -303,6 +321,7 @@ def preprocess_main(
             skip_includes=args.skip_includes,
             include_resolver=resolver,
             max_include_depth=args.max_include_depth,
+            include_query=include_query,
             has_include_from_resolver=args.has_include_from_search,
         )
     except (CpreError, ValueError, OSError, UnicodeDecodeError) as error:

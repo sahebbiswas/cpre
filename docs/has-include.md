@@ -70,6 +70,8 @@ result = cpre.preprocess_source(
 assert result.complete
 ```
 
+From the command line, `cpre preprocess --has-include '<opt.h>=1'` gives the same explicit answers as `include_query=`, keyed on form and spelling; see [the CLI guide](cli.md#concrete-preprocessing) for precedence with `--has-include-from-search`.
+
 ## Answers from the include resolver
 
 With `include_resolver=` you can also opt into `has_include_from_resolver=True`. A query that `include_query` does not answer, because there is no callback or because it returned `None`, then goes to the include resolver. The header is available exactly when the resolver returns a `ResolvedInclude` for the equivalent `#include` request, so `__has_include` and `#include` agree:
