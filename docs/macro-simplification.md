@@ -275,3 +275,18 @@ cpre simplify-macros --check src/example.c
 4. **Only substitution-safe definitions are rewritten**: a replacement with `&&` or `||` outside parentheses is reported but never rewritten, because the added parentheses would change what its uses mean (see [Unparenthesized replacements are reported, not rewritten](#unparenthesized-replacements-are-reported-not-rewritten)). A simplified lone identifier stays normalized as `!!X`, so the macro's value is preserved, not just its truth value.
 5. **Reparsing and re-analysis verification**: after applying edits, the resulting source is reparsed and reanalyzed to ensure it remains syntactically valid, reached simplest form, and preserves semantic equivalence.
 6. **Formatting and comment preservation**: rewriting preserves directive indentation, macro names, inline comments, unrelated code, and native line endings (LF, CRLF or lone CR).
+
+### Semantic verification
+
+cpre verifies every macro simplification semantically; there is no separate `--verify` flag because verification is part of every run. What each outcome means:
+
+| Situation | What cpre does | Exit status |
+| --- | --- | --- |
+| Verify without changing anything | `--check`, `--diff` and `--check --json` run the full rewrite and verification in memory and never write a file | `0` unchanged, `1` would change |
+| Equivalent replacement | The original and simplified expressions are compared with a BDD under the active semantic mode; the result is reported with `is_equivalent == True`, applied only with `--rewrite`, then re-parsed and re-analyzed (`verified`) | `0` |
+| Replacement not proven equivalent | Never applied. A rewrite whose re-analysis disagrees aborts with a verification error and no file is written | `2` |
+| Resource limit exceeded (atoms or work) | The macro is incomplete: `is_equivalent` is `None`, `incomplete` carries the diagnostic, `reason` starts with `resource limit exceeded`. It is never rewritten and never counted as clean, and stderr names the limit | `2` |
+| Unsupported definition (function-like, string, non-Boolean literal, unsupported operator) | Not a candidate: `candidate` is false with a `reason`. It is not an error and is never rewritten | unaffected |
+| Proven equivalent but unparenthesized | Reported as `proven equivalent; not rewritten`, never rewritten | unaffected |
+
+An incomplete macro does not stop other macros in the same file from being analyzed: with `--rewrite`, the independently verified macros are still rewritten and the incomplete one is left byte-for-byte as it was, but the run exits `2`. Raise the limits (`AnalysisOptions(max_atoms=..., max_work=...)`) to resolve an incomplete result; see [Exit status contract](cli.md#exit-status-contract).
