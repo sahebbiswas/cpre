@@ -13,7 +13,15 @@ from .robdd import AnalysisBudget
 
 
 class NumericConditionError(ValueError):
-    """A concrete condition uses syntax we intentionally cannot evaluate."""
+    """A concrete condition uses syntax we intentionally cannot evaluate.
+
+    ``offset`` is the offset in the condition text of the token the error concerns,
+    when one is known, so a caller can report its physical position.
+    """
+
+    def __init__(self, message: str, offset: int | None = None) -> None:
+        super().__init__(message)
+        self.offset = offset
 
 
 _INTEGER = re.compile(
@@ -316,12 +324,16 @@ class _Parser:
     def _leave(self) -> None:
         self.depth -= 1
 
+    def here(self) -> int | None:
+        """Offset of the token the parser last consumed (the one most errors concern)."""
+        return self.tokens[self.index - 1].start if self.index else None
+
     def parse(self) -> _Value:
         value = self.conditional(True)
         leftover = self.peek()
         if leftover is not None:
             raise NumericConditionError(
-                f"unsupported token {leftover.text!r} in concrete condition"
+                f"unsupported token {leftover.text!r} in concrete condition", leftover.start
             )
         return value
 
@@ -333,7 +345,11 @@ class _Parser:
             finally:
                 self._leave()
             if self.take(")") is None:
-                raise NumericConditionError("expected ')' in concrete condition")
+                following = self.peek()
+                raise NumericConditionError(
+                    "expected ')' in concrete condition",
+                    following.start if following is not None else self.here(),
+                )
             return value
         token = self.take()
         if token is None:
@@ -348,8 +364,10 @@ class _Parser:
                 # (a self-referential macro). It is a plain identifier from now on, and
                 # every identifier left in a controlling expression is 0 (C11 6.10.1).
                 return _Value(0)
-            raise NumericConditionError(f"unresolved identifier {token.text!r}")
-        raise NumericConditionError(f"unsupported token {token.text!r} in concrete condition")
+            raise NumericConditionError(f"unresolved identifier {token.text!r}", token.start)
+        raise NumericConditionError(
+            f"unsupported token {token.text!r} in concrete condition", token.start
+        )
 
     def unary(self, evaluate: bool) -> _Value:
         head = self.peek()
@@ -564,19 +582,23 @@ def evaluate_numeric_condition(
             and token.text in unsupported_identifiers
             and environment.get(token.text).definition is None
         ):
+            expansion.current_offset = token.start
             raise ExpansionError(
                 f"predefined macro {token.text} is not supported during concrete preprocessing"
             )
     significant = [token for token in expanded if token.kind != "empty"]
+    parser = _Parser(significant, budget)
     try:
-        return _Parser(significant, budget).parse().truth()
+        return parser.parse().truth()
     except RecursionError as error:
         raise NumericConditionError(
-            "expression nesting exceeds concrete-evaluation bound"
+            "expression nesting exceeds concrete-evaluation bound", parser.here()
         ) from error
     except NumericConditionError as error:
         if str(error).startswith("unresolved identifier"):
             return None
+        if error.offset is None:
+            error.offset = parser.here()
         raise
 
 

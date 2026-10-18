@@ -60,6 +60,6 @@ An implementation-defined literal in a syntactically valid unselected expression
 
 ## Deterministic integer boundary
 
-All signed values are modeled within `[-2^63, 2^63 - 1]`; unsigned values use modulo `2^64`. Standard signed/unsigned conversions are applied within that model. Expressions requiring a larger signed range, invalid shift counts, selected division/modulo by zero, or other values outside the deterministic model return structured `unsupported_condition_expression` diagnostics rather than inheriting host-Python or host-compiler behavior.
+All signed values are modeled within `[-2^63, 2^63 - 1]`; unsigned values use modulo `2^64`. Standard signed/unsigned conversions are applied within that model. Expressions requiring a larger signed range, invalid shift counts, selected division/modulo by zero, or other values outside the deterministic model return structured `unsupported_condition_expression` diagnostics rather than inheriting host-Python or host-compiler behavior. The diagnostic's location is the physical line and column of the offending token, including when the directive is continued with a backslash or spread over lines by a comment; a token produced by a macro is located at the macro's invocation.
 
 The evaluator also consumes the normal `AnalysisOptions.max_work` budget and enforces an explicit nesting bound, so deeply nested standard expressions fail atomically with a structured incomplete result rather than exhausting Python recursion.

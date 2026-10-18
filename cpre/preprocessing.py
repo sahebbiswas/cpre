@@ -419,8 +419,8 @@ def _parse_line_directive(
     return line_number, file_literal
 
 
-def _unconfigured_predefined_macro(text: str, environment: MacroLookup) -> str | None:
-    """Return the first predefined macro whose replacement value is required."""
+def _unconfigured_predefined_macro(text: str, environment: MacroLookup) -> tuple[str, int] | None:
+    """Return the first predefined macro whose replacement value is required, with its offset."""
     tokens = [token for token in tokenize(text) if token.kind not in {"space", "comment"}]
     defined_operands: set[int] = set()
     for index, token in enumerate(tokens):
@@ -438,7 +438,7 @@ def _unconfigured_predefined_macro(text: str, environment: MacroLookup) -> str |
         if token.kind != "identifier" or token.text not in _PREDEFINED_MACROS:
             continue
         if environment.get(token.text).definition is None:
-            return token.text
+            return token.text, token.start
     return None
 
 
@@ -827,6 +827,7 @@ class _UnitContext:
         # Masking starts at a logical line's first physical line; diagnostics report the
         # line of the directive's '#', as compilers do.
         self.reported = {line.start_line: line.directive_line for line in self.logical}
+        self.by_directive_line = {line.directive_line: line for line in self.logical}
         self.retained = [True] * len(self.physical)
         self.diagnostics: list[PreprocessDiagnostic | AnalysisIncomplete] = []
         self.insertions: list[tuple[int, int, _UnitOutput]] = []
@@ -854,6 +855,26 @@ class _UnitContext:
     def reported_line(self, line: int) -> int:
         """Line to report for the logical line whose masking starts at ``line``."""
         return self.reported.get(line, line)
+
+    def condition_diagnostic(
+        self, code: ErrorCode, message: str, branch: ConditionalBranch, offset: int | None
+    ) -> PreprocessDiagnostic:
+        """Diagnose a condition at the physical position of the token at ``offset`` in it."""
+        line = self.by_directive_line.get(branch.line)
+        directive = line.directive if line is not None else None
+        if line is None or directive is None or offset is None or offset < 0:
+            return self.located(code, message, branch.line)
+        remainder = line.text[directive.name_end :]
+        index = directive.name_end + len(remainder) - len(remainder.lstrip()) + offset
+        locations = line.locations
+        if index >= len(locations):
+            return self.located(code, message, branch.line)
+        where = locations[index]
+        if where.line is None:
+            return self.located(code, message, branch.line)
+        return PreprocessDiagnostic(
+            code, message, SourceLocation(where.line, where.column), self.identity
+        )
 
     def located(self, code: ErrorCode, message: str, line: int) -> PreprocessDiagnostic:
         return PreprocessDiagnostic(
@@ -1004,10 +1025,11 @@ class _BranchSelector:
         )
         if builtin is not None:
             context.diagnostics.append(
-                context.located(
+                context.condition_diagnostic(
                     ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
-                    f"predefined macro {builtin} is not supported during concrete preprocessing",
-                    branch.line,
+                    f"predefined macro {builtin[0]} is not supported during concrete preprocessing",
+                    branch,
+                    builtin[1],
                 )
             )
             return None
@@ -1083,6 +1105,7 @@ class _BranchSelector:
         """
         context = self.context
         assert branch.expression_text is not None
+        context.expansion.current_offset = -1
         try:
             return evaluate_numeric_condition(
                 branch.expression_text,
@@ -1095,11 +1118,18 @@ class _BranchSelector:
             if query_pending:
                 return None
             context.diagnostics.append(
-                context.located(ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION, str(error), branch.line)
+                context.condition_diagnostic(
+                    ErrorCode.UNSUPPORTED_CONDITION_EXPRESSION, str(error), branch, error.offset
+                )
             )
         except ExpansionError as error:
             context.diagnostics.append(
-                context.located(ErrorCode.UNSUPPORTED_MACRO_EXPANSION, str(error), branch.line)
+                context.condition_diagnostic(
+                    ErrorCode.UNSUPPORTED_MACRO_EXPANSION,
+                    str(error),
+                    branch,
+                    context.expansion.current_offset,
+                )
             )
         raise _Undecidable
 

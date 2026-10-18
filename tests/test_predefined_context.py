@@ -147,7 +147,7 @@ def test_unconfigured_standard_environment_value_remains_atomic_in_condition():
     assert result.source is result.source_map is result.macros is None
     (diagnostic,) = result.incomplete
     assert diagnostic.code is ErrorCode.UNSUPPORTED_MACRO_EXPANSION
-    assert diagnostic.location == SourceLocation(1)
+    assert diagnostic.location == SourceLocation(1, 5)
     assert "__STDC_VERSION__" in diagnostic.message
 
 
