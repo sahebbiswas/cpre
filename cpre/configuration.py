@@ -429,15 +429,15 @@ def _detect_include_guard(text: str) -> str | None:
 
     # Lines before the guard must be empty (comments and whitespace only)
     for line in lines:
-        if line.start_line < group.line and line.text.strip():
+        if line.directive_line < group.line and line.text.strip():
             return None
         # The #endif closes the file: lines after #endif must be empty
-        if line.start_line > group.end_line and line.text.strip():
+        if line.directive_line > group.end_line and line.text.strip():
             return None
 
     first_directive = None
     for line in lines:
-        if branch.line < line.start_line < group.end_line:
+        if branch.line < line.directive_line < group.end_line:
             directive = line.directive
             if directive is not None and directive.name is not None:
                 first_directive = (directive.name, line.text[directive.name_end :])

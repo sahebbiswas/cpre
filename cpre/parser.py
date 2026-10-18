@@ -87,7 +87,7 @@ def parse_source(source: str, *, distinguish_defined: bool = False) -> Condition
     tree = ConditionalTree()
     stack: list[tuple[ConditionalGroup, ConditionalBranch]] = []
     for logical_line in logical_lines(source):
-        line = logical_line.start_line
+        line = logical_line.directive_line
         directive = logical_line.directive
         if (
             directive is None
