@@ -22,7 +22,7 @@ def source_paths(inputs: Sequence[Path], recursive: bool) -> list[Path]:
     seen: set[Path] = set()
     for input_path in inputs:
         if input_path is STDIN_PATH:
-            if STDIN_PATH not in paths:
+            if not any(path is STDIN_PATH for path in paths):
                 paths.append(STDIN_PATH)
             continue
         if input_path.is_file():
