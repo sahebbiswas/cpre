@@ -88,7 +88,7 @@ cpre cover FILE [--standard-macro NAME=VALUE] [-I DIR] [--iquote DIR] [--skip-in
                 [--max-atoms N] [--max-bdd-nodes N] [--max-work N] [--json]
 ```
 
-`cpre cover` accepts the include, `__has_include` and `--standard-macro` options of [`cpre preprocess`](cli.md#concrete-preprocessing), plus the resource limits of `AnalysisOptions`. It takes one source file and does not take `-D`/`-U`, because the configurations are what it generates.
+`cpre cover` accepts the include, `__has_include`, `--consume-pragma` and `--standard-macro` options of [`cpre preprocess`](cli.md#concrete-preprocessing), plus the resource limits of `AnalysisOptions`. It takes one source file and does not take `-D`/`-U`, because the configurations are what it generates.
 
 Text output is one line per configuration, in order, then one `#` line per outcome that is not covered:
 

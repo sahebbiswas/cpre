@@ -30,6 +30,21 @@ def pragmas(pragma):
 result = preprocess_source(source, pragma_handler=pragmas)
 ```
 
+## Command line
+
+`cpre preprocess` and `cpre cover` have no pragma callback, so they take the policy as an option. `--consume-pragma PREFIX` (repeatable) installs a handler that returns `PragmaDisposition.CONSUME` for a pragma whose payload starts with the preprocessing tokens of `PREFIX`, and `PragmaDisposition.UNSUPPORTED` for every other pragma:
+
+```bash
+cpre preprocess header.h -D FEATURE --consume-pragma once --consume-pragma pack
+cpre cover header.h --consume-pragma once
+```
+
+- Matching is by whole tokens after the same normalization the callback sees: `pack` matches `pack(push, 1)` but not `packed`, and `GCC diagnostic` matches `GCC diagnostic ignored "-Wunused"` whatever the spacing. `_Pragma` operators match on their destringized payload.
+- Nothing is consumed unless asked for. Without the option, a reachable pragma is incomplete exactly as before (status `2`, no output), and the text diagnostic is followed by a `hint:` line naming the option. With the option, a pragma that matches no prefix is reported as `reachable pragma is unsupported by the caller's pragma handler: PAYLOAD`, with a hint such as `add --consume-pragma pack to accept this pragma`.
+- Accepting a pragma means only that cpre may drop it from the output. cpre still attaches no meaning to it, so accept the ones that cannot change which conditions are true (`once`, `pack`, diagnostics, `region`) and leave alone any whose effect you need to model.
+- The same policy applies to pragmas in resolved includes. `#pragma once` in an included header is always honored as include management and needs no option.
+- An empty prefix, or one that is only whitespace or a comment, is a usage error (status `2`).
+
 ## `_Pragma` destringization
 
 cpre recognizes `_Pragma(string-literal)` after normal macro expansion. It removes the string-literal encoding prefix when present, removes the surrounding quotes, and destringizes `\"` to `"` and `\\` to `\`. The resulting character sequence is then normalized with the same phase-3 comment/whitespace handling used for source `#pragma`, so the host sees one consistent payload representation. Malformed reachable `_Pragma` syntax returns a structured atomic incomplete result. Because `_Pragma` is a standard phase-4 preprocessing operator, a surviving `_Pragma` token that does not form the required parenthesized string-literal expression is treated as malformed reserved preprocessing syntax rather than passed through as an ordinary identifier.

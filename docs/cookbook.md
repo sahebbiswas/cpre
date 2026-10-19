@@ -11,6 +11,7 @@ Contents:
 - [Clean up macro definitions safely](#clean-up-macro-definitions-safely)
 - [Find which macros a file depends on](#find-which-macros-a-file-depends-on)
 - [Feed one configuration to a downstream parser](#feed-one-configuration-to-a-downstream-parser)
+- [Preprocess a header (`#pragma once` and include guards)](#preprocess-a-header-pragma-once-and-include-guards)
 - [Build a configuration matrix for tests](#build-a-configuration-matrix-for-tests)
 - [Analyze a file from git history or a pipe](#analyze-a-file-from-git-history-or-a-pipe)
 - [Experiment with a Boolean expression](#experiment-with-a-boolean-expression)
@@ -144,6 +145,7 @@ cpre preprocess src/driver.c -I include --config-from include/config.h -D DEBUG 
 - Output keeps one line per input line (removed lines are blanked), so line numbers survive. `--compact` removes the blanks but is for humans; the Python `source_map` describes the canonical form only.
 - An incomplete result never produces partial source. `complete: false` plus exit status `2` means "do not parse this".
 - Includes are resolved only from the directories you pass with `-I`/`--iquote`. Use `--skip-includes` to ignore headers you do not have (their macros are then not assumed), and `-I` together with `--skip-includes` to follow the ones that resolve and skip the rest.
+- Reachable pragmas fail closed. Accept the harmless ones with `--consume-pragma once --consume-pragma pack`; they are removed from the output, and any other pragma still makes the result incomplete.
 - `__has_include` needs an answer: `--has-include '<zlib.h>=1'`, or `--has-include-from-search` to let the `-I` search decide.
 
 The same thing from Python, with includes resolved from a directory and `DEBUG` assumed defined:
@@ -168,6 +170,46 @@ else:
 ```
 
 See [Concrete preprocessing](preprocessing.md#downstream-integration-checklist) and [Include resolution](include-resolution.md).
+
+## Preprocess a header (`#pragma once` and include guards)
+
+Most headers start with `#pragma once`, an include guard, or both. Run directly on such a header, cpre needs two decisions from you, because it never guesses:
+
+```c
+#pragma once
+#ifndef WIDGET_H
+#define WIDGET_H
+#ifdef FEATURE
+int f(void);
+#endif
+#endif
+```
+
+```bash
+cpre preprocess widget.h -D FEATURE
+# widget.h: line 2: condition is not determined by the current macro state: #ifndef WIDGET_H (unresolved: WIDGET_H (definedness))
+# widget.h: hint: supply -D WIDGET_H or -U WIDGET_H
+
+cpre preprocess widget.h -U WIDGET_H -D FEATURE
+# widget.h: line 1: #pragma preprocessing directive is not supported during concrete preprocessing
+# widget.h: hint: pass --consume-pragma PREFIX to accept pragmas you know are harmless ...
+
+cpre preprocess widget.h --consume-pragma once -U WIDGET_H -D FEATURE --compact
+# int f(void);
+```
+
+The two stops come one after the other because conditions are resolved first and pragmas are checked once the rest of the file is understood. Fix both up front:
+
+1. **The guard.** `-U WIDGET_H` says "this is the first time the header is read", which is what a guard assumes. `--unknown-names undefined` does the same for every unset name at once.
+2. **The pragma.** `--consume-pragma once` accepts `#pragma once` (in a file you name directly, it has no effect to model). Add one `--consume-pragma` per other pragma you accept, such as `pack`.
+
+`cpre widget.h` and `cpre simplify-macros widget.h` need neither: they reason symbolically, never read pragmas, and treat the guard like any other condition. `cpre cover` needs the pragma option and finds the guard itself, returning one configuration that skips the body (`-D WIDGET_H=1`) alongside the ones that enter it:
+
+```bash
+cpre cover widget.h --consume-pragma once
+```
+
+When the header is included from a source file instead, none of this applies: with `-I`, `#pragma once` and detected guards in included headers are handled automatically ([Include resolution](include-resolution.md)).
 
 ## Build a configuration matrix for tests
 
