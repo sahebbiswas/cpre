@@ -95,3 +95,13 @@ jobs:
             test_structural_downstream_contract.py \
             test_cgull_symbolic_migration_profile.py
           python -m cpre --help
+      - name: Run the full suite against the installed wheel
+        # The release workflow does this too; running it here catches tests that only pass
+        # from a checkout (paths derived from the package location, say) before a release.
+        env:
+          CPRE_REQUIRE_INSTALLED: "1"
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install "$(ls dist/*.whl)[dev]"
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/venv/bin/pytest" -p no:cacheprovider "$GITHUB_WORKSPACE/tests"

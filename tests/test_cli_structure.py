@@ -13,6 +13,9 @@ from cpre.cli import _common
 
 PACKAGE = Path(cpre.cli.__file__).resolve().parent
 ROOT = PACKAGE.parent.parent
+# The checkout, found from this file: ROOT is only the checkout when cpre is imported from it,
+# and the release workflow runs these tests against an installed package.
+CHECKOUT = Path(__file__).resolve().parents[1]
 MODULES = sorted(PACKAGE.glob("*.py"))
 
 
@@ -52,7 +55,7 @@ def test_builders_import_without_any_command_module(module):
 
 
 def test_mypy_no_longer_ignores_the_cli():
-    text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    text = (CHECKOUT / "pyproject.toml").read_text(encoding="utf-8")
     assert '"cpre.cli",' not in text
 
 
