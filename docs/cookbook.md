@@ -106,7 +106,7 @@ cpre simplify-macros --rewrite src/driver.c  # apply it
 git diff                                      # review like any other change
 ```
 
-`--rewrite` applies only edits cpre proved equivalent and then re-parses and re-analyzes the result; if that verification fails nothing is written and the exit status is `2`. Macros it reports but will not rewrite are listed with a reason, for example an unparenthesized `a && b` replacement, whose uses could change meaning once parenthesized. Simplified lone identifiers keep the `!!X` normalization so the macro's numeric value is preserved. Line endings, indentation, comments and unrelated code are left byte-for-byte alone. If your project uses `0` as a deliberately disabled switch (`(0 && FEATURE) || OTHER`), add `--symbolic-zero` so the disabled term is preserved. See [Macro Boolean simplification](macro-simplification.md).
+`--rewrite` applies only edits cpre proved equivalent and then re-parses and re-analyzes the result; if that verification fails nothing is written and the exit status is `2`. Macros it reports but will not rewrite are listed with a reason, for example an unparenthesized `a && b` replacement, whose uses could change meaning once parenthesized. Simplified lone identifiers keep the `!!X` normalization so the macro's numeric value is preserved. Line endings, indentation, comments and unrelated code are left byte-for-byte alone. If your project uses `0` as a deliberately disabled switch (`(0 && FEATURE) || OTHER`), add `--symbolic-literal 0` so the disabled term is preserved. See [Macro Boolean simplification](macro-simplification.md).
 
 ## Find which macros a file depends on
 

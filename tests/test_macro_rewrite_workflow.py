@@ -80,14 +80,14 @@ def test_simplify_macros_cli_in_place_flag_alias(tmp_path, capsys):
     assert source.read_text(encoding="utf-8") == "#define M (!!A)\n"
 
 
-def test_simplify_macros_cli_symbolic_zero_report_and_rewrite(tmp_path, capsys):
+def test_simplify_macros_cli_symbolic_literal_report_and_rewrite(tmp_path, capsys):
     source = tmp_path / "test.c"
     content = "#define FEAT_1 ((0 && A) || B)\n#define FEAT_2 ((0 && A) || (0 && B))\n"
     source.write_text(content, encoding="utf-8")
 
-    # In report mode with --symbolic-zero:
-    # FEAT_1 is already simplest under symbolic-zero; only FEAT_2 simplifies to (0 && (A || B))
-    code = main(["simplify-macros", "--symbolic-zero", str(source)])
+    # In report mode with --symbolic-literal 0:
+    # FEAT_1 is already simplest under symbolic literal 0; only FEAT_2 simplifies to (0 && (A || B))
+    code = main(["simplify-macros", "--symbolic-literal", "0", str(source)])
     assert code == 0
     captured = capsys.readouterr()
     assert "FEAT_1" not in captured.out
@@ -97,8 +97,8 @@ def test_simplify_macros_cli_symbolic_zero_report_and_rewrite(tmp_path, capsys):
     )
     assert source.read_text(encoding="utf-8") == content
 
-    # Now rewrite with --symbolic-zero
-    code = main(["simplify-macros", "--rewrite", "--symbolic-zero", str(source)])
+    # Now rewrite with --symbolic-literal 0
+    code = main(["simplify-macros", "--rewrite", "--symbolic-literal", "0", str(source)])
     assert code == 0
     rewritten = source.read_text(encoding="utf-8")
     assert "#define FEAT_1 ((0 && A) || B)\n" in rewritten
@@ -677,9 +677,9 @@ def test_simplify_macros_check_respects_symbolic_literals(tmp_path, capsys):
     source = tmp_path / "switch.c"
     source.write_bytes(b"#define FEAT ((0 && A) || B)\n")
 
-    # Ordinary semantics fold the disabled switch away; symbolic-zero keeps it.
+    # Ordinary semantics fold the disabled switch away; symbolic literal 0 keeps it.
     assert main(["simplify-macros", "--check", str(source)]) == 1
-    assert main(["simplify-macros", "--check", "--symbolic-zero", str(source)]) == 0
+    assert main(["simplify-macros", "--check", "--symbolic-literal", "0", str(source)]) == 0
     capsys.readouterr()
 
 

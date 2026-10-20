@@ -75,7 +75,7 @@ In C, `!`, `&&` and `||` always yield 0 or 1, so every candidate macro has the v
 - `(A || (A && B))` -> `(!!A)`
 - `(!!A)` and `!(!A)` are already in simplest form
 
-Without this, `#define HAS_X (X && X)` simplified to `(X)` would change `#if HAS_X == 1`, `HAS_A + HAS_B`, or `table[HAS_X]` when `X` is defined as 2. A symbolic literal (`symbolic_literals=(0,)`) stands for the literal itself and is emitted as is.
+Without this, `#define HAS_X (X && X)` simplified to `(X)` would change `#if HAS_X == 1`, `HAS_A + HAS_B`, or `table[HAS_X]` when `X` is defined as 2. A symbolic literal (`symbolic_literals=(0,)`, `(1,)` or `(0, 1)`) stands for the literal itself and is emitted as is.
 
 ## Semantic limits
 
@@ -88,16 +88,21 @@ The analyzer maintains clear semantic boundaries:
 
 ## Symbolic-literal mode (opt-in)
 
-Some codebases use a literal `0` as a temporarily disabled feature switch:
+Some codebases use a literal `0` as a temporarily disabled feature switch, or a literal `1` as a temporarily forced-on one:
 
 ```c
 #define FEAT_1 (0 && A) || B          /* A-path disabled until A is ready */
 #define FEAT_2 (0 && A) || (0 && B)   /* both experimental paths switched off */
 ```
 
-Under ordinary semantics `0 && A` is just false, so the analyzer reports `FEAT_1 -> (!!B)` and `FEAT_2 -> (0)`. Accepting those rewrites deletes the control point the author left in place on purpose.
+```c
+#define FEAT_3 (1 || A) && B          /* A-path forced on until A is ready */
+#define FEAT_4 (1 || A) && (1 || B)   /* both experimental paths forced on */
+```
 
-Passing `symbolic_literals=(0,)` opts in to **symbolic-literal semantics**: every occurrence of the selected literal is treated as one free Boolean atom instead of a fixed truth value. The ROBDD then reasons about its relationship with the other atoms:
+Under ordinary semantics `0 && A` is just false, so the analyzer reports `FEAT_1 -> (!!B)` and `FEAT_2 -> (0)`; likewise `1 || A` is just true, so `FEAT_3 -> (!!B)` and `FEAT_4 -> (1)`. Accepting those rewrites deletes the control point the author left in place on purpose.
+
+Passing `symbolic_literals=(0,)` (or `(1,)`, or `(0, 1)`) opts in to **symbolic-literal semantics**: every occurrence of a selected literal is treated as one free Boolean atom instead of a fixed truth value. The ROBDD then reasons about its relationship with the other atoms:
 
 | Replacement | Ordinary (default) | `symbolic_literals=(0,)` |
 |---|---|---|
@@ -106,6 +111,16 @@ Passing `symbolic_literals=(0,)` opts in to **symbolic-literal semantics**: ever
 | `(0 && A) \|\| (!0 && A)` | `(!!A)` | `(!!A)` |
 | `0 \|\| !0` | `(1)` | `(1)` |
 | `(A \|\| (!A && B))` | `(A \|\| B)` | `(A \|\| B)` |
+
+The same holds for `1` with `symbolic_literals=(1,)`:
+
+| Replacement | Ordinary (default) | `symbolic_literals=(1,)` |
+|---|---|---|
+| `(1 \|\| A) && B` | `(!!B)` | unchanged (already simplest) |
+| `(1 \|\| A) && (1 \|\| B)` | `(1)` | `(1 \|\| A && B)` |
+| `(1 && A) \|\| (!1 && A)` | `(!!A)` | `(!!A)` |
+| `1 && !1` | `(0)` | `(0)` |
+| `(0 && A) \|\| (1 && B)` | `(!!B)` | `(1 && B)` |
 
 ```python
 import cpre
@@ -130,25 +145,27 @@ cpre source.c
 # Analyze with symbolic-literal zero semantics
 cpre --symbolic-literal 0 source.c
 
-# Shorthand for --symbolic-literal 0
-cpre --symbolic-zero source.c
+# The same for literal 1, and both at once (the option is repeatable)
+cpre --symbolic-literal 1 source.c
+cpre --symbolic-literal 0 --symbolic-literal 1 source.c
 ```
 
 ### Semantic rules
 
 - **Opt-in only**: the default (`symbolic_literals=None` or `()`) keeps ordinary C semantics and is byte-for-byte identical to earlier behavior.
-- **Supported literals**: currently only `0` may be selected. Any other value, a bare integer instead of an iterable, or a non-integer element raises `AnalysisError` with `ErrorCode.INVALID_CONFIGURATION`. The policy is a set of integer values so more literals can be supported later without an API change.
-- **One atom per value**: all spellings of the selected value (`0`, `00`, `0x0`, `0u`, ...) are the *same* atom. It is named and emitted by its canonical decimal spelling, `0`, so simplified replacements remain valid C.
-- **No aliasing with identifiers**: the literal atom is distinct from every identifier atom (`0` can never collide with a macro named `ZERO`, for example).
-- **Unselected literals stay constant**: in `symbolic_literals=(0,)` mode, `1` keeps its ordinary truth value.
-- **Candidate classification is unchanged**: the mode never makes a non-candidate macro eligible; it only changes how `0` is interpreted inside an already-supported Boolean expression.
+- **Supported literals**: `0` and `1` may be selected, separately or together. Any other value, a bare integer instead of an iterable, or a non-integer element raises `AnalysisError` with `ErrorCode.INVALID_CONFIGURATION`. The policy is a set of integer values, normalized to a sorted tuple without duplicates (`[1, 0, 1]` becomes `(0, 1)`).
+- **One atom per value**: all spellings of a selected value (`0`, `00`, `0x0`, `0u`, ... or `1`, `01`, `0x1`, `1u`, ...) are the *same* atom. It is named and emitted by its canonical decimal spelling, `0` or `1`, so simplified replacements remain valid C.
+- **Distinct atoms for distinct literals**: when both are selected, `0` and `1` are two independent atoms; neither is treated as the negation of the other.
+- **No aliasing with identifiers**: a literal atom is distinct from every identifier atom (`0` can never collide with a macro named `ZERO`, nor `1` with `ONE`, for example).
+- **Unselected literals stay constant**: in `symbolic_literals=(0,)` mode, `1` keeps its ordinary truth value, and in `symbolic_literals=(1,)` mode `0` keeps its ordinary truth value.
+- **Candidate classification is unchanged**: the mode never makes a non-candidate macro eligible; it only changes how the selected literals (`0` and/or `1`) are interpreted inside an already-supported Boolean expression.
 - **Visible mode**: every `MacroAnalysisResult` records `symbolic_literals` and exposes `semantics` (`"ordinary"` or `"symbolic-literal"`), including skipped and resource-limited results.
 
 ### Soundness guarantee
 
 A rewrite proven in symbolic-literal mode holds for *every* value of the symbolic atom, so it also holds when the literal takes its real C value. Rewrites emitted in this mode therefore never change the meaning of the macro under ordinary C semantics; they are only *less aggressive* than ordinary-mode rewrites.
 
-> **Warning**: equivalence in symbolic-literal mode is equivalence *within that interpretation*. A result such as "already simplest" for `(0 && A) || B` does not mean the expression is irreducible in C — it means the disabled control point was preserved on request. Use ordinary mode when you want to know what the macro actually evaluates to.
+> **Warning**: equivalence in symbolic-literal mode is equivalence *within that interpretation*. A result such as "already simplest" for `(0 && A) || B` does not mean the expression is irreducible in C — it means the disabled control point was preserved on request. The same applies to `(1 || A) && B` with the literal `1` selected. Use ordinary mode when you want to know what the macro actually evaluates to.
 
 ## Python API
 
@@ -253,7 +270,11 @@ cpre simplify-macros --rewrite src/example.c
 cpre simplify-macros --in-place src/example.c
 
 # Symbolic-literal mode
-cpre simplify-macros --rewrite --symbolic-zero src/example.c
+cpre simplify-macros --rewrite --symbolic-literal 0 src/example.c
+
+# Likewise for literal 1, or both
+cpre simplify-macros --rewrite --symbolic-literal 1 src/example.c
+cpre simplify-macros --rewrite --symbolic-literal 0 --symbolic-literal 1 src/example.c
 
 # Machine-readable JSON output
 cpre simplify-macros --json src/example.c

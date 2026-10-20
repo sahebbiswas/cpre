@@ -54,7 +54,7 @@ Status `2` outranks `1`. With several inputs, one failure makes the whole run `2
 | `division by zero in concrete condition` | A reachable condition divides by zero | [Input](#input-and-platform-issues) |
 | `proven equivalent; not rewritten: parenthesize the original first` | Simplifiable, but rewriting could change meaning | [Macro simplification](#macro-simplification) |
 | `would rewrite PATH` (stderr, `--check`) | A verified rewrite is pending | [Macro simplification](#macro-simplification) |
-| `error: unsupported symbolic literal 5; supported literals: 0` | Only `0` can be symbolic | [Macro simplification](#macro-simplification) |
+| `error: unsupported symbolic literal 5; supported literals: 0, 1` | Only `0` and `1` can be symbolic | [Macro simplification](#macro-simplification) |
 
 ## Preprocessing: includes, unknown macros, pragmas
 
@@ -192,7 +192,7 @@ What to do, in order:
 | `proven equivalent; not rewritten: parenthesize the original first` | The replacement list is a bare `a && b` / `a \|\| b`. Parenthesizing it would change how its uses parse, so cpre reports without rewriting. Wrap the definition in parentheses yourself and rerun; it becomes rewritable. |
 | `--check` exits `1` and prints `would rewrite PATH` | Expected: a verified rewrite is pending. `--diff` shows it; `--rewrite` applies it. |
 | `--diff` exits `0` though it prints a diff | By design; add `--check` to gate on it. |
-| A macro using `0` as a disabled switch simplifies away a term you wanted | Use `--symbolic-zero` so `0` stays a symbolic atom. Only `0` can be symbolic. |
+| A macro using `0` as a disabled switch, or `1` as an always-on one, simplifies away a term you wanted | Use `--symbolic-literal 0` (or `1`, or both by repeating the option) so the literal stays a symbolic atom. Only `0` and `1` can be symbolic. |
 | `error: --rewrite cannot be combined with --diff or --check` | These modes are mutually exclusive; pick one. |
 | `standard input cannot be rewritten in place` | Use `--diff` or `--check` with `-`, or name a real file. |
 | Exit `2` after `--rewrite` with a verification message | cpre re-parses and re-analyzes every rewrite and aborts, writing nothing, if the result is not equivalent. Please report it ([below](#reporting-a-problem)). |

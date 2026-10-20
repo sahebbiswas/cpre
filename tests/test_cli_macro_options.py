@@ -66,15 +66,54 @@ def test_cli_symbolic_literal_zero(tmp_path, capsys):
     assert "#define FEAT_1 (0 && A) || (0 && B) -> (0 && (A || B))" in captured.out
 
 
-def test_cli_symbolic_zero_flag(tmp_path, capsys):
+def test_cli_symbolic_literal_zero_preserves_disabled_switch(tmp_path, capsys):
     source = tmp_path / "test.c"
-    # (0 && A) || B is already simplest under symbolic-zero semantics
+    # (0 && A) || B is already simplest under symbolic-literal 0 semantics
     source.write_text("#define FEAT_1 (0 && A) || B\n")
 
-    code = main([str(source), "--symbolic-zero"])
+    code = main([str(source), "--symbolic-literal", "0"])
     assert code == 0
     captured = capsys.readouterr()
     assert "No notable conditional directives or simplifiable macros found." in captured.out
+
+
+def test_cli_symbolic_literal_one(tmp_path, capsys):
+    source = tmp_path / "test.c"
+    source.write_text("#define FEAT_1 (1 || A) && (1 || B)\n")
+
+    code = main([str(source), "--macros", "--symbolic-literal", "1"])
+    assert code == 0
+    assert "-> (1 || A && B)" in capsys.readouterr().out
+
+
+def test_cli_symbolic_literal_one_preserves_enabled_switch(tmp_path, capsys):
+    source = tmp_path / "test.c"
+    # (1 || A) && B is already simplest under symbolic-literal 1 semantics
+    source.write_text("#define FEAT_1 (1 || A) && B\n")
+
+    code = main([str(source), "--symbolic-literal", "1"])
+    assert code == 0
+    captured = capsys.readouterr()
+    assert "No notable conditional directives or simplifiable macros found." in captured.out
+
+    # Ordinary semantics fold the always-on switch away.
+    assert main([str(source)]) == 0
+    assert "-> (!!B)" in capsys.readouterr().out
+
+
+def test_cli_symbolic_literal_repeated_for_zero_and_one_json(tmp_path, capsys):
+    source = tmp_path / "test.c"
+    source.write_text("#define FEAT_1 (0 && A) || (1 && B)\n")
+
+    code = main([str(source), "--symbolic-literal", "0", "--symbolic-literal", "1", "--json"])
+    assert code == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["semantics"] == "symbolic-literal"
+    assert data["symbolic_literals"] == [0, 1]
+
+    code = main([str(source), "--symbolic-literal", "1", "--symbolic-literal", "0", "--json"])
+    assert code == 0
+    assert json.loads(capsys.readouterr().out)["symbolic_literals"] == [0, 1]
 
 
 def test_cli_symbolic_literal_json(tmp_path, capsys):
@@ -89,15 +128,26 @@ def test_cli_symbolic_literal_json(tmp_path, capsys):
     assert data["macros"][0]["replacement"] == "(0 && (A || B))"
 
 
+@pytest.mark.parametrize("removed", ["--symbolic-zero", "--symbolic-one"])
+def test_cli_symbolic_shorthand_flags_are_removed(tmp_path, capsys, removed):
+    source = tmp_path / "test.c"
+    source.write_text("#define FEAT 0 && A\n")
+
+    with pytest.raises(SystemExit) as excinfo:
+        main([str(source), removed])
+    assert excinfo.value.code == 2
+    assert "unrecognized arguments" in capsys.readouterr().err
+
+
 def test_cli_symbolic_literal_unsupported_rejected(tmp_path, capsys):
     source = tmp_path / "test.c"
     source.write_text("#define FEAT 0 && A\n")
 
     with pytest.raises(SystemExit) as excinfo:
-        main([str(source), "--symbolic-literal", "1"])
+        main([str(source), "--symbolic-literal", "2"])
     assert excinfo.value.code == 2
     captured = capsys.readouterr()
-    assert "unsupported symbolic literal 1" in captured.err
+    assert "unsupported symbolic literal 2" in captured.err
 
 
 def test_cli_unified_both_conditionals_and_macros(tmp_path, capsys):
@@ -133,7 +183,7 @@ def test_cli_sarif_with_symbolic_options(tmp_path, capsys):
     source = tmp_path / "test.c"
     source.write_text("#if A\n#elif A\n#endif\n#define FEAT 0 && A\n")
 
-    code = main([str(source), "--sarif", "--symbolic-zero"])
+    code = main([str(source), "--sarif", "--symbolic-literal", "0"])
     assert code == 0
     document = json.loads(capsys.readouterr().out)
     assert document["version"] == "2.1.0"
@@ -149,7 +199,7 @@ def test_cli_macros_fail_on_findings(tmp_path):
     assert code == 1
 
     # In symbolic zero mode, (0 && A) || B has no findings: status 0
-    code_sym = main([str(source), "--symbolic-zero", "--fail-on-findings"])
+    code_sym = main([str(source), "--symbolic-literal", "0", "--fail-on-findings"])
     assert code_sym == 0
 
 

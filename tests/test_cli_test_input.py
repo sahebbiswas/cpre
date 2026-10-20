@@ -98,19 +98,32 @@ def test_cli_test_input_nested_and_multiple_atoms(capsys):
     assert captured.out == "Input:      !(!A && !B)\nSimplified: A || B\n"
 
 
+def test_cli_test_input_symbolic_one_semantics(capsys):
+    """Support --symbolic-literal 1."""
+    # Under ordinary semantics, A || 1 reduces to 1
+    assert main(["test-input", "A || 1"]) == 0
+    assert "Simplified: 1\n" in capsys.readouterr().out
+
+    # Under symbolic-literal 1 semantics, 1 is treated as a free Boolean atom
+    assert main(["test-input", "--symbolic-literal", "1", "(A || 1) && (A || !1)"]) == 0
+    assert "Simplified: A\n" in capsys.readouterr().out
+
+    assert main(["test-input", "--json", "--symbolic-literal", "1", "A || 1"]) == 0
+    document = json.loads(capsys.readouterr().out)
+    assert document["semantics"] == "symbolic-literal"
+    assert document["symbolic_literals"] == [1]
+
+
 def test_cli_test_input_symbolic_literal_semantics(capsys):
-    """Support --symbolic-zero and --symbolic-literal 0 options."""
+    """Support --symbolic-literal 0."""
     # Under ordinary semantics, A && 0 reduces to 0
     assert main(["test-input", "A && 0"]) == 0
     assert "Simplified: 0\n" in capsys.readouterr().out
 
-    # Under symbolic-zero semantics, 0 is treated as a free Boolean atom
-    assert main(["test-input", "--symbolic-zero", "(A && 0) || (A && !0)"]) == 0
+    # Under symbolic-literal 0 semantics, 0 is treated as a free Boolean atom
+    assert main(["test-input", "--symbolic-literal", "0", "(A && 0) || (A && !0)"]) == 0
     captured = capsys.readouterr()
     assert captured.out == "Input:      (A && 0) || (A && !0)\nSimplified: A\n"
-
-    assert main(["test-input", "--symbolic-literal", "0", "(A && 0) || (A && !0)"]) == 0
-    assert "Simplified: A\n" in capsys.readouterr().out
 
 
 def test_cli_test_input_json_output(capsys):
@@ -141,7 +154,7 @@ def test_cli_test_input_json_output(capsys):
     }
 
     # JSON with symbolic zero
-    assert main(["test-input", "--json", "--symbolic-zero", "(A && 0) || (A && !0)"]) == 0
+    assert main(["test-input", "--json", "--symbolic-literal", "0", "(A && 0) || (A && !0)"]) == 0
     data_symbolic = json.loads(capsys.readouterr().out)
     assert data_symbolic == {
         "schema": "cpre.expression/1",
@@ -245,9 +258,9 @@ def test_cli_test_input_option_validation(capsys):
     assert "max_work must be a positive integer" in capsys.readouterr().err
 
     with pytest.raises(SystemExit) as exc:
-        main(["test-input", "--symbolic-literal", "1", "A"])
+        main(["test-input", "--symbolic-literal", "2", "A"])
     assert exc.value.code == 2
-    assert "unsupported symbolic literal 1" in capsys.readouterr().err
+    assert "unsupported symbolic literal 2" in capsys.readouterr().err
 
 
 def test_cli_test_input_missing_expression_argument(capsys):
@@ -266,7 +279,9 @@ def test_cli_test_input_help(capsys):
     captured = capsys.readouterr()
     assert "Parse and simplify an arbitrary Boolean expression using ROBDD." in captured.out
     assert "--json" in captured.out
-    assert "--symbolic-zero" in captured.out
+    assert "--symbolic-literal" in captured.out
+    assert "--symbolic-zero" not in captured.out
+    assert "--symbolic-one" not in captured.out
 
 
 def test_cli_test_input_module_entrypoint():

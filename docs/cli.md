@@ -232,13 +232,15 @@ By default, integer constants `0` and `1` retain ordinary C truth values (`0` = 
 cpre --symbolic-literal 0 source.c
 ```
 
-`--symbolic-zero` is a convenient shorthand for `--symbolic-literal 0`:
+Literal `1` can be selected the same way, to preserve always-on switches such as `(1 || A) && B`:
 
 ```bash
-cpre --symbolic-zero source.c
+cpre --symbolic-literal 1 source.c
 ```
 
-Currently only `0` is supported as a symbolic literal. Passing an unsupported value terminates with an error and status `2`.
+The option is repeatable: select both literals with `--symbolic-literal 0 --symbolic-literal 1`. They are then two independent atoms. Order and duplicates do not matter.
+
+Only `0` and `1` are supported as symbolic literals. Passing any other value terminates with an error and status `2`.
 
 See [Macro Boolean simplification](macro-simplification.md) for full semantic details and warnings.
 
@@ -509,8 +511,12 @@ Symbolic-literal options are supported in both report and rewrite modes:
 
 ```bash
 # Preserve disabled switches such as (0 && A) || B
-cpre simplify-macros --symbolic-zero source.c
-cpre simplify-macros --rewrite --symbolic-zero source.c
+cpre simplify-macros --symbolic-literal 0 source.c
+cpre simplify-macros --rewrite --symbolic-literal 0 source.c
+
+# Preserve always-on switches such as (1 || A) && B
+cpre simplify-macros --symbolic-literal 1 source.c
+cpre simplify-macros --rewrite --symbolic-literal 1 source.c
 ```
 
 ### JSON output for macro workflows
@@ -550,7 +556,7 @@ cpre simplify-macros --check --diff --recursive src
  int x;
 ```
 
-`--check` prints `would rewrite PATH` on stderr for each file that would change, and nothing on stdout unless `--diff` is also given. `--symbolic-literal` and `--symbolic-zero` apply as in the other modes.
+`--check` prints `would rewrite PATH` on stderr for each file that would change, and nothing on stdout unless `--diff` is also given. `--symbolic-literal` applies as in the other modes.
 
 Exit status with `--diff` or `--check`:
 
@@ -650,17 +656,26 @@ It does not read or preprocess C/C++ source files, nor evaluate arbitrary C expr
 
 ### Symbolic-literal mode
 
-By default, integer literals like `0` are evaluated as fixed C truth values (e.g. `A && 0` reduces to `0`). Use `--symbolic-zero` or `--symbolic-literal 0` to treat `0` as a free Boolean atom:
+By default, integer literals like `0` and `1` are evaluated as fixed C truth values (e.g. `A && 0` reduces to `0`, `A || 1` to `1`). Use `--symbolic-literal 0` to treat `0` as a free Boolean atom, and `--symbolic-literal 1` to do the same for `1`:
 
 ```bash
 # Ordinary semantics: reduces to 0
 cpre test-input 'A && 0'
 
 # Symbolic-zero semantics: preserves the atom
-cpre test-input --symbolic-zero 'A && 0'
+cpre test-input --symbolic-literal 0 'A && 0'
 
 # Symbolic-zero simplification
-cpre test-input --symbolic-zero '(A && 0) || (A && !0)'
+cpre test-input --symbolic-literal 0 '(A && 0) || (A && !0)'
+
+# Ordinary semantics: reduces to 1
+cpre test-input 'A || 1'
+
+# Symbolic-one semantics: preserves the atom
+cpre test-input --symbolic-literal 1 'A || 1'
+
+# Symbolic-one simplification
+cpre test-input --symbolic-literal 1 '(A || 1) && (A || !1)'
 ```
 
 ### Machine-readable JSON output
@@ -737,10 +752,8 @@ An incomplete ROBDD computation is never reported as a successful simplification
     provided no status-2 error occurred.
 
 --symbolic-literal N
-    Treat integer literal N as a symbolic Boolean atom in macro analysis (e.g. 0).
-
---symbolic-zero
-    Convenience shorthand for --symbolic-literal 0.
+    Treat integer literal N (0 or 1) as a symbolic Boolean atom in macro analysis.
+    May be repeated.
 
 --no-macros
     Disable macro Boolean simplification analysis.
