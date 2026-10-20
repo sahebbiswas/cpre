@@ -158,7 +158,7 @@ cpre --symbolic-literal 0 --symbolic-literal 1 source.c
 - **Distinct atoms for distinct literals**: when both are selected, `0` and `1` are two independent atoms; neither is treated as the negation of the other.
 - **No aliasing with identifiers**: a literal atom is distinct from every identifier atom (`0` can never collide with a macro named `ZERO`, nor `1` with `ONE`, for example).
 - **Unselected literals stay constant**: in `symbolic_literals=(0,)` mode, `1` keeps its ordinary truth value, and in `symbolic_literals=(1,)` mode `0` keeps its ordinary truth value.
-- **Candidate classification is unchanged**: the mode never makes a non-candidate macro eligible; it only changes how `0` is interpreted inside an already-supported Boolean expression.
+- **Candidate classification is unchanged**: the mode never makes a non-candidate macro eligible; it only changes how the selected literals (`0` and/or `1`) are interpreted inside an already-supported Boolean expression.
 - **Visible mode**: every `MacroAnalysisResult` records `symbolic_literals` and exposes `semantics` (`"ordinary"` or `"symbolic-literal"`), including skipped and resource-limited results.
 
 ### Soundness guarantee
