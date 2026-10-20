@@ -102,20 +102,28 @@ def _parser():
 
 def test_symbolic_literals_are_collected_and_validated():
     parser = _parser()
-    args = parser.parse_args(["--symbolic-zero", "--symbolic-literal", "0"])
+    args = parser.parse_args(["--symbolic-literal", "0", "--symbolic-literal", "0"])
     assert _common.symbolic_literals_from(parser, args) == (0,)
     assert _common.symbolic_literals_from(parser, parser.parse_args([])) == ()
 
 
-def test_symbolic_one_and_literal_options_combine_sorted_and_deduplicated():
+def test_repeated_symbolic_literal_options_are_sorted_and_deduplicated():
     parser = _parser()
-    assert _common.symbolic_literals_from(parser, parser.parse_args(["--symbolic-one"])) == (1,)
+    one = parser.parse_args(["--symbolic-literal", "1"])
+    assert _common.symbolic_literals_from(parser, one) == (1,)
     args = parser.parse_args(
-        ["--symbolic-one", "--symbolic-literal", "1", "--symbolic-literal", "0"]
+        ["--symbolic-literal", "1", "--symbolic-literal", "1", "--symbolic-literal", "0"]
     )
     assert _common.symbolic_literals_from(parser, args) == (0, 1)
-    args = parser.parse_args(["--symbolic-zero", "--symbolic-one"])
-    assert _common.symbolic_literals_from(parser, args) == (0, 1)
+
+
+def test_symbolic_shorthand_options_are_gone(capsys):
+    parser = _parser()
+    for removed in ("--symbolic-zero", "--symbolic-one"):
+        with pytest.raises(SystemExit) as raised:
+            parser.parse_args([removed])
+        assert raised.value.code == 2
+        assert "unrecognized arguments" in capsys.readouterr().err
 
 
 def test_invalid_symbolic_literal_is_a_usage_error(capsys):

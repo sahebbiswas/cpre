@@ -145,13 +145,9 @@ cpre source.c
 # Analyze with symbolic-literal zero semantics
 cpre --symbolic-literal 0 source.c
 
-# Shorthand for --symbolic-literal 0
-cpre --symbolic-zero source.c
-
-# The same for literal 1, and both at once
+# The same for literal 1, and both at once (the option is repeatable)
 cpre --symbolic-literal 1 source.c
-cpre --symbolic-one source.c
-cpre --symbolic-zero --symbolic-one source.c
+cpre --symbolic-literal 0 --symbolic-literal 1 source.c
 ```
 
 ### Semantic rules
@@ -274,11 +270,11 @@ cpre simplify-macros --rewrite src/example.c
 cpre simplify-macros --in-place src/example.c
 
 # Symbolic-literal mode
-cpre simplify-macros --rewrite --symbolic-zero src/example.c
+cpre simplify-macros --rewrite --symbolic-literal 0 src/example.c
 
 # Likewise for literal 1, or both
-cpre simplify-macros --rewrite --symbolic-one src/example.c
-cpre simplify-macros --rewrite --symbolic-zero --symbolic-one src/example.c
+cpre simplify-macros --rewrite --symbolic-literal 1 src/example.c
+cpre simplify-macros --rewrite --symbolic-literal 0 --symbolic-literal 1 src/example.c
 
 # Machine-readable JSON output
 cpre simplify-macros --json src/example.c

@@ -19,10 +19,7 @@ EXIT_ERROR = 2
 
 
 def add_symbolic_literal_options(parser: argparse.ArgumentParser, analysis: str) -> None:
-    """The ``--symbolic-literal`` option and its ``--symbolic-zero`` / ``--symbolic-one`` shorthands.
-
-    ``analysis`` names what the options affect.
-    """
+    """The repeatable ``--symbolic-literal`` option; ``analysis`` names what it affects."""
     parser.add_argument(
         "--symbolic-literal",
         dest="symbolic_literals",
@@ -34,33 +31,16 @@ def add_symbolic_literal_options(parser: argparse.ArgumentParser, analysis: str)
             "analysis; may be repeated"
         ),
     )
-    parser.add_argument(
-        "--symbolic-zero",
-        action="store_true",
-        help="convenience shorthand for --symbolic-literal 0",
-    )
-    parser.add_argument(
-        "--symbolic-one",
-        action="store_true",
-        help="convenience shorthand for --symbolic-literal 1",
-    )
 
 
 def symbolic_literals_from(
     parser: argparse.ArgumentParser, args: argparse.Namespace
 ) -> tuple[int, ...]:
-    """The validated literal list from the options above; a bad one is a usage error."""
-    if not (args.symbolic_zero or args.symbolic_one or args.symbolic_literals):
+    """The validated literal list from the option above; a bad one is a usage error."""
+    if not args.symbolic_literals:
         return ()
-    raw_literals: list[int] = []
-    if args.symbolic_zero:
-        raw_literals.append(0)
-    if args.symbolic_one:
-        raw_literals.append(1)
-    if args.symbolic_literals:
-        raw_literals.extend(args.symbolic_literals)
     try:
-        return _resolve_symbolic_literals(raw_literals)
+        return _resolve_symbolic_literals(args.symbolic_literals)
     except CpreError as error:
         parser.error(error.message)
 

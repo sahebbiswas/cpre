@@ -13,7 +13,7 @@ cpre has grown beyond a conditional-linting CLI into a set of focused, integrati
 - **Symbolic conditional analysis** — finds dead and redundant branches and distinguishes exact from contextual simplifications using bounded, deterministic ROBDD-backed reasoning. Known macro assumptions can constrain proofs without silently turning unknown macros into false.
 - **Exact Boolean proofs and witnesses** — public APIs support satisfiability, implication, equivalence, exact simplification, and deterministic witness assignments, with explicit incomplete results when proof budgets are exhausted.
 - **Lossless conditional structure** — `parse_conditionals()` exposes source-preserving blocks, directives, tokens, physical ranges, recovery diagnostics, and C23 `#elifdef`/`#elifndef` structure for refactoring and source-aware tools.
-- **Macro Boolean simplification and rewriting** — analyzes object-like `#define` replacements with bounded ROBDD proofs, supporting both ordinary C truth semantics and opt-in symbolic-literal mode for the literals `0` and `1` (`--symbolic-literal N` / `--symbolic-zero` / `--symbolic-one`). Dedicated `simplify-macros` / `analyze-macros` CLI commands and Python APIs (`simplify_macros()`, `rewrite_macros()`) report and safely apply proven-equivalent simplifications in-place.
+- **Macro Boolean simplification and rewriting** — analyzes object-like `#define` replacements with bounded ROBDD proofs, supporting both ordinary C truth semantics and opt-in symbolic-literal mode for the literals `0` and `1` (`--symbolic-literal N`, repeatable). Dedicated `simplify-macros` / `analyze-macros` CLI commands and Python APIs (`simplify_macros()`, `rewrite_macros()`) report and safely apply proven-equivalent simplifications in-place.
 - **Concrete preprocessing** — `preprocess_source()` selects one configuration, tracks source-order macro state, performs bounded macro expansion (including variadics, stringification, token pasting, and `__VA_OPT__`), and preserves physical provenance through source mappings. External state is explicit through `MacroConfiguration`, deterministic preprocessing context, `__has_include` queries, and host-owned pragma handling.
 - **Branch-covering configurations** — `cover_branches()` (and `cpre cover` on the command line) generates a small, deterministic set of concrete macro configurations that together select every reachable conditional-branch outcome, verifies each one with concrete preprocessing, and reports unreachable or uncovered outcomes with reasons.
 - **Conservative integration contracts** — structured errors and diagnostics, deterministic ordering, explicit complete, partial and incomplete results, SARIF 2.1.0 findings, and downstream compatibility tests make it practical to embed cpre in analyzers and CI without parsing human-readable output or guessing about partial results.
@@ -50,11 +50,11 @@ Analyze one source file (evaluates both conditional directives and macro simplif
 cpre source.c
 ```
 
-Preserve transient disabled controls with symbolic-zero semantics (or always-on ones with `--symbolic-one`):
+Preserve transient disabled controls (literal `0`) or always-on ones (literal `1`) as symbolic atoms:
 
 ```bash
-cpre --symbolic-zero source.c
-cpre --symbolic-one source.c
+cpre --symbolic-literal 0 source.c
+cpre --symbolic-literal 1 source.c
 ```
 
 Scan a directory recursively and emit SARIF:
