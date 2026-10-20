@@ -19,19 +19,30 @@ EXIT_ERROR = 2
 
 
 def add_symbolic_literal_options(parser: argparse.ArgumentParser, analysis: str) -> None:
-    """The ``--symbolic-literal`` / ``--symbolic-zero`` pair; ``analysis`` names what it affects."""
+    """The ``--symbolic-literal`` option and its ``--symbolic-zero`` / ``--symbolic-one`` shorthands.
+
+    ``analysis`` names what the options affect.
+    """
     parser.add_argument(
         "--symbolic-literal",
         dest="symbolic_literals",
         type=int,
         action="append",
         metavar="N",
-        help=f"treat integer literal N as a symbolic Boolean atom in {analysis} analysis (e.g. 0)",
+        help=(
+            f"treat integer literal N (0 or 1) as a symbolic Boolean atom in {analysis} "
+            "analysis; may be repeated"
+        ),
     )
     parser.add_argument(
         "--symbolic-zero",
         action="store_true",
         help="convenience shorthand for --symbolic-literal 0",
+    )
+    parser.add_argument(
+        "--symbolic-one",
+        action="store_true",
+        help="convenience shorthand for --symbolic-literal 1",
     )
 
 
@@ -39,11 +50,13 @@ def symbolic_literals_from(
     parser: argparse.ArgumentParser, args: argparse.Namespace
 ) -> tuple[int, ...]:
     """The validated literal list from the options above; a bad one is a usage error."""
-    if not (args.symbolic_zero or args.symbolic_literals):
+    if not (args.symbolic_zero or args.symbolic_one or args.symbolic_literals):
         return ()
     raw_literals: list[int] = []
     if args.symbolic_zero:
         raw_literals.append(0)
+    if args.symbolic_one:
+        raw_literals.append(1)
     if args.symbolic_literals:
         raw_literals.extend(args.symbolic_literals)
     try:

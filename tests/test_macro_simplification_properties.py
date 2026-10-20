@@ -80,7 +80,7 @@ def _binary(draw, children):
 
 
 # Every spelling of 0 and 1 is a Boolean literal, and in symbolic-literal mode all
-# spellings of 0 are the same atom.
+# spellings of a selected value (0 or 1) are the same atom.
 LITERALS = ("0", "1", "0x0", "00", "0L", "1u", "0x1", "1UL")
 
 
@@ -139,7 +139,7 @@ DECORATIONS = ("", " /* note */", " // note", "continuation")
 @given(
     replacement=_replacements(),
     wrapped=st.booleans(),
-    symbolic=st.sampled_from(((), (0,))),
+    symbolic=st.sampled_from(((), (0,), (1,), (0, 1))),
     decoration=st.sampled_from(DECORATIONS),
     newline=st.sampled_from(("\n", "\r\n")),
 )
@@ -156,6 +156,10 @@ DECORATIONS = ("", " /* note */", " // note", "continuation")
 @example(
     replacement="(0x0 && A) || (00 && B)", wrapped=False, symbolic=(0,), decoration="", newline="\n"
 )
+@example(
+    replacement="(0x1 && A) || (01 && B)", wrapped=False, symbolic=(1,), decoration="", newline="\n"
+)
+@example(replacement="(1 || A) && B", wrapped=False, symbolic=(0, 1), decoration="", newline="\n")
 @example(replacement="A || (A && B)", wrapped=True, symbolic=(), decoration="", newline="\n")
 @example(replacement="!!A && A", wrapped=True, symbolic=(), decoration="", newline="\n")
 def test_rewrite_preserves_preprocessing_for_every_use(
@@ -187,7 +191,7 @@ def test_rewrite_preserves_preprocessing_for_every_use(
 
 
 @SETTINGS
-@given(replacement=_replacements(), symbolic=st.sampled_from(((), (0,))))
+@given(replacement=_replacements(), symbolic=st.sampled_from(((), (0,), (1,), (0, 1))))
 @example(replacement="A || (!A && B)", symbolic=())
 def test_rewrite_is_idempotent_and_matches_the_report(replacement, symbolic):
     source = f"#define M {replacement}\n"
@@ -225,7 +229,7 @@ UNSUPPORTED = st.sampled_from(
 
 
 @SETTINGS
-@given(construct=UNSUPPORTED, symbolic=st.sampled_from(((), (0,))))
+@given(construct=UNSUPPORTED, symbolic=st.sampled_from(((), (0,), (1,), (0, 1))))
 def test_unsupported_constructs_are_never_rewritten(construct, symbolic):
     # Constructs outside the documented grammar are skipped, not simplified.
     source = f"#define M ({construct}) || ({construct})\nint x;\n"

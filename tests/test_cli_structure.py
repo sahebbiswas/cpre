@@ -107,9 +107,20 @@ def test_symbolic_literals_are_collected_and_validated():
     assert _common.symbolic_literals_from(parser, parser.parse_args([])) == ()
 
 
+def test_symbolic_one_and_literal_options_combine_sorted_and_deduplicated():
+    parser = _parser()
+    assert _common.symbolic_literals_from(parser, parser.parse_args(["--symbolic-one"])) == (1,)
+    args = parser.parse_args(
+        ["--symbolic-one", "--symbolic-literal", "1", "--symbolic-literal", "0"]
+    )
+    assert _common.symbolic_literals_from(parser, args) == (0, 1)
+    args = parser.parse_args(["--symbolic-zero", "--symbolic-one"])
+    assert _common.symbolic_literals_from(parser, args) == (0, 1)
+
+
 def test_invalid_symbolic_literal_is_a_usage_error(capsys):
     parser = _parser()
-    args = parser.parse_args(["--symbolic-literal", "1"])
+    args = parser.parse_args(["--symbolic-literal", "2"])
     with pytest.raises(SystemExit) as raised:
         _common.symbolic_literals_from(parser, args)
     assert raised.value.code == 2

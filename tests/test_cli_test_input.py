@@ -98,6 +98,25 @@ def test_cli_test_input_nested_and_multiple_atoms(capsys):
     assert captured.out == "Input:      !(!A && !B)\nSimplified: A || B\n"
 
 
+def test_cli_test_input_symbolic_one_semantics(capsys):
+    """Support --symbolic-one and --symbolic-literal 1 options."""
+    # Under ordinary semantics, A || 1 reduces to 1
+    assert main(["test-input", "A || 1"]) == 0
+    assert "Simplified: 1\n" in capsys.readouterr().out
+
+    # Under symbolic-one semantics, 1 is treated as a free Boolean atom
+    assert main(["test-input", "--symbolic-one", "(A || 1) && (A || !1)"]) == 0
+    assert "Simplified: A\n" in capsys.readouterr().out
+
+    assert main(["test-input", "--symbolic-literal", "1", "(A || 1) && (A || !1)"]) == 0
+    assert "Simplified: A\n" in capsys.readouterr().out
+
+    assert main(["test-input", "--json", "--symbolic-one", "A || 1"]) == 0
+    document = json.loads(capsys.readouterr().out)
+    assert document["semantics"] == "symbolic-literal"
+    assert document["symbolic_literals"] == [1]
+
+
 def test_cli_test_input_symbolic_literal_semantics(capsys):
     """Support --symbolic-zero and --symbolic-literal 0 options."""
     # Under ordinary semantics, A && 0 reduces to 0
@@ -245,9 +264,9 @@ def test_cli_test_input_option_validation(capsys):
     assert "max_work must be a positive integer" in capsys.readouterr().err
 
     with pytest.raises(SystemExit) as exc:
-        main(["test-input", "--symbolic-literal", "1", "A"])
+        main(["test-input", "--symbolic-literal", "2", "A"])
     assert exc.value.code == 2
-    assert "unsupported symbolic literal 1" in capsys.readouterr().err
+    assert "unsupported symbolic literal 2" in capsys.readouterr().err
 
 
 def test_cli_test_input_missing_expression_argument(capsys):
@@ -267,6 +286,7 @@ def test_cli_test_input_help(capsys):
     assert "Parse and simplify an arbitrary Boolean expression using ROBDD." in captured.out
     assert "--json" in captured.out
     assert "--symbolic-zero" in captured.out
+    assert "--symbolic-one" in captured.out
 
 
 def test_cli_test_input_module_entrypoint():

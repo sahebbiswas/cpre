@@ -48,7 +48,7 @@ SYMBOLIC_LITERAL_SEMANTICS = "symbolic-literal"
 
 # Literals that may currently be selected for symbolic treatment. The policy is
 # expressed as a set of integer values so it can grow without an API change.
-_SUPPORTED_SYMBOLIC_LITERALS = frozenset({0})
+_SUPPORTED_SYMBOLIC_LITERALS = frozenset({0, 1})
 
 
 @dataclass(frozen=True)
@@ -288,8 +288,9 @@ def analyze_macro(
     """Analyze one macro definition for Boolean simplification.
 
     ``symbolic_literals`` opts in to symbolic-literal semantics: each selected
-    integer literal (currently only ``0``) is treated as a single free Boolean
-    atom instead of a fixed truth value. The default keeps ordinary C semantics.
+    integer literal (currently ``0`` and ``1``) is treated as a single free
+    Boolean atom instead of a fixed truth value. The default keeps ordinary C
+    semantics.
     """
     resolved_options = options or AnalysisOptions()
     if not isinstance(resolved_options, AnalysisOptions):

@@ -77,6 +77,45 @@ def test_cli_symbolic_zero_flag(tmp_path, capsys):
     assert "No notable conditional directives or simplifiable macros found." in captured.out
 
 
+def test_cli_symbolic_literal_one(tmp_path, capsys):
+    source = tmp_path / "test.c"
+    source.write_text("#define FEAT_1 (1 || A) && (1 || B)\n")
+
+    code = main([str(source), "--macros", "--symbolic-literal", "1"])
+    assert code == 0
+    assert "-> (1 || A && B)" in capsys.readouterr().out
+
+
+def test_cli_symbolic_one_flag(tmp_path, capsys):
+    source = tmp_path / "test.c"
+    # (1 || A) && B is already simplest under symbolic-one semantics
+    source.write_text("#define FEAT_1 (1 || A) && B\n")
+
+    code = main([str(source), "--symbolic-one"])
+    assert code == 0
+    captured = capsys.readouterr()
+    assert "No notable conditional directives or simplifiable macros found." in captured.out
+
+    # Ordinary semantics fold the always-on switch away.
+    assert main([str(source)]) == 0
+    assert "-> (!!B)" in capsys.readouterr().out
+
+
+def test_cli_symbolic_zero_and_one_together_json(tmp_path, capsys):
+    source = tmp_path / "test.c"
+    source.write_text("#define FEAT_1 (0 && A) || (1 && B)\n")
+
+    code = main([str(source), "--symbolic-zero", "--symbolic-one", "--json"])
+    assert code == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["semantics"] == "symbolic-literal"
+    assert data["symbolic_literals"] == [0, 1]
+
+    code = main([str(source), "--symbolic-literal", "1", "--symbolic-literal", "0", "--json"])
+    assert code == 0
+    assert json.loads(capsys.readouterr().out)["symbolic_literals"] == [0, 1]
+
+
 def test_cli_symbolic_literal_json(tmp_path, capsys):
     source = tmp_path / "test.c"
     source.write_text("#define FEAT_1 (0 && A) || (0 && B)\n")
@@ -94,10 +133,10 @@ def test_cli_symbolic_literal_unsupported_rejected(tmp_path, capsys):
     source.write_text("#define FEAT 0 && A\n")
 
     with pytest.raises(SystemExit) as excinfo:
-        main([str(source), "--symbolic-literal", "1"])
+        main([str(source), "--symbolic-literal", "2"])
     assert excinfo.value.code == 2
     captured = capsys.readouterr()
-    assert "unsupported symbolic literal 1" in captured.err
+    assert "unsupported symbolic literal 2" in captured.err
 
 
 def test_cli_unified_both_conditionals_and_macros(tmp_path, capsys):
