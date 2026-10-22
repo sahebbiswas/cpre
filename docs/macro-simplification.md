@@ -62,7 +62,10 @@ Every emitted replacement is enclosed in outer parentheses, so it expands as a s
 A replacement with `&&` or `||` outside every pair of parentheses is not substitution-safe. The preprocessor pastes it into each use, where it binds with the surrounding operators: with `#define FEAT A || (A && B)`, `#if !FEAT` means `!A || (A && B)`, not `!(A || (A && B))`. Any rewrite adds outer parentheses, which would change the meaning of such uses, so cpre never rewrites these definitions. It still reports the simplification, with `rewritable` set to `False`, a `reason` starting with `not rewritten:`, and no `edit`:
 
 ```text
-line 1: #define FEAT A || (A && B) -> (!!A) [proven equivalent; not rewritten: parenthesize the original first]
+L1 SIMPLIFY   #define FEAT
+   - A || (A && B)
+   + (!!A)  (proven equivalent)
+   hint  not rewritten: parenthesize the original first
 ```
 
 Parenthesizing the original (`#define FEAT (A || (A && B))`) states that every use means the whole expression. After that change, the rewrite is applied. A replacement whose top level is a `!` (`!(A && A)`) is substitution-safe, because `!` binds tighter than every binary operator.
@@ -308,6 +311,6 @@ cpre verifies every macro simplification semantically; there is no separate `--v
 | Replacement not proven equivalent | Never applied. A rewrite whose re-analysis disagrees aborts with a verification error and no file is written | `2` |
 | Resource limit exceeded (atoms, BDD nodes or work) | The macro is incomplete: `is_equivalent` is `None`, `incomplete` carries the diagnostic, `reason` starts with `resource limit exceeded`. It is never rewritten and never counted as clean, and stderr names the limit | `2` |
 | Unsupported definition (function-like, string, non-Boolean literal, unsupported operator) | Not a candidate: `candidate` is false with a `reason`. It is not an error and is never rewritten | unaffected |
-| Proven equivalent but unparenthesized | Reported as `proven equivalent; not rewritten`, never rewritten | unaffected |
+| Proven equivalent but unparenthesized | Reported with a `not rewritten` hint, never rewritten | unaffected |
 
 An incomplete macro does not stop other macros in the same file from being analyzed: with `--rewrite`, the independently verified macros are still rewritten and the incomplete one is left byte-for-byte as it was, but the run exits `2`. Raise the limits (`AnalysisOptions(max_atoms=..., max_bdd_nodes=..., max_work=...)`; the diagnostic names the limit that was hit) to resolve an incomplete result; see [Exit status contract](cli.md#exit-status-contract).

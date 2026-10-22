@@ -110,7 +110,7 @@ def test_issue_examples_report_and_rewrite(tmp_path, capsys, name, content, expe
     path.write_bytes(content.encode())
 
     assert main(["simplify-macros", str(path)]) == 0
-    assert "line 2: #define W (X || X)" in capsys.readouterr().out
+    assert "L2 SIMPLIFY   #define W\n   - (X || X)\n   + (!!X)" in capsys.readouterr().out
 
     assert main(["simplify-macros", "--check", str(path)]) == 1
     assert main(["simplify-macros", "--diff", str(path)]) == 0

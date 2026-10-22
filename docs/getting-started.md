@@ -75,30 +75,40 @@ cpre src/driver.c
 ```
 
 ```text
-5: #if defined(TURBO) || defined(TURBO) [reachable]
-  simplified: TURBO
-  effective: TURBO
-7: #elif defined(TURBO) && defined(SLOW) [dead]
-  reason: condition contradicts its parent or earlier branches
-  simplified: SLOW && TURBO
-  in context: 0
-  effective: 0
-13: #ifdef DEBUG [reachable]
-  14: #ifdef DEBUG [redundant]
-    reason: condition is always true in this branch context
-    simplified: DEBUG
-    in context: 1
-    effective: DEBUG
-line 3: #define FEATURE_FAST (0 && LEGACY) || TURBO -> (!!TURBO) [proven equivalent; not rewritten: parenthesize the original first]
+Conditionals
+L5  SIMPLIFY   #if defined(TURBO) || defined(TURBO)
+  - TURBO || TURBO
+  + TURBO
+L7  DEAD       #elif defined(TURBO) && defined(SLOW)
+  why  condition contradicts its parent or earlier branches
+  - TURBO && SLOW
+  + 0  (always false in context)
+L13 ok         #ifdef DEBUG
+│ L14 REDUNDANT  #ifdef DEBUG
+│   why  condition is always true in this branch context
+│   - DEBUG
+│   + 1  (always true in context)
+
+Macros
+L3 SIMPLIFY   #define FEATURE_FAST
+   - (0 && LEGACY) || TURBO
+   + (!!TURBO)  (proven equivalent)
+   hint  not rewritten: parenthesize the original first
+
+Summary  1 dead · 1 redundant · 1 simplifiable condition · 1 simplifiable macro
 ```
 
 How to read it:
 
-- **`[reachable]`** with a `simplified:` line means the branch can be taken and its condition has a shorter equivalent (`defined(TURBO) || defined(TURBO)` is just `TURBO`).
-- **`[dead]`** means the branch can never be selected. The `#elif` on line 7 is dead because an earlier branch already covers every case where `TURBO` is defined.
-- **`[redundant]`** means the condition is always true where it sits. The inner `#ifdef DEBUG` is already guaranteed by the outer one.
-- The last line is a macro finding: the replacement list can be simplified, but cpre will not rewrite it because the added parentheses could change what its uses mean.
+- Every entry shows the line, a badge, and the directive. A `-` line is the condition (as cpre normalizes it, so `defined(TURBO)` is written `TURBO`) and the `+` line under it is what it reduces to.
+- **`SIMPLIFY`** means the branch can be taken and its condition has a shorter equivalent: `TURBO || TURBO` is just `TURBO`.
+- **`DEAD`** means the branch can never be selected. The `#elif` on line 7 is dead because an earlier branch already covers every case where `TURBO` is defined, so its condition is `+ 0`.
+- **`REDUNDANT`** means the condition is always true where it sits (`+ 1`). The inner `#ifdef DEBUG` is already guaranteed by the outer one. The `ok` line and the `│` guide show that it is nested inside line 13, which is listed only to give that context.
+- The `Macros` entry is a macro finding: the replacement list can be simplified, but cpre will not rewrite it because the added parentheses could change what its uses mean (the `hint` line says so).
+- The `Summary` line totals the findings.
 - `#if LEVEL >= 2` is not reported. cpre treats comparisons it cannot decide symbolically as opaque predicates; `--verbose` shows them.
+
+On a terminal the report is colored: red for what is dead or removed, yellow for redundant, and green only for the result of a transformation. The layout is the same without color. See [Default text reporting](cli.md#default-text-reporting) for the full legend, `--color`, and the progress line that appears on large recursive runs.
 
 By default only notable branches are listed. `--verbose` lists every branch and macro. The exit status is `0` here even though there are findings: cpre only fails the process on findings when you ask it to.
 

@@ -6,16 +6,54 @@ import argparse
 import sys
 from pathlib import Path
 
+from .._style import COLOR_CHOICES, Style, detect_style
 from .._types import AnalysisOptions
 from ..discovery import STDIN_PATH, source_paths
 from ..errors import CpreError
 from ..macro_analysis import _resolve_symbolic_literals
 from ..model import ConditionError
+from ._progress import PROGRESS_CHOICES, Progress, paused
 
 # Exit statuses documented in docs/cli.md.
 EXIT_OK = 0
 EXIT_FINDINGS = 1
 EXIT_ERROR = 2
+EXIT_INTERRUPTED = 130  # the shell's convention for a run ended by Ctrl-C (128 + SIGINT)
+
+
+def add_presentation_options(parser: argparse.ArgumentParser) -> None:
+    """The ``--color`` and ``--progress`` options of the commands that report on many files."""
+    parser.add_argument(
+        "--color",
+        choices=COLOR_CHOICES,
+        default="auto",
+        metavar="WHEN",
+        help=(
+            "color the text report: auto (the default: on a terminal, honoring NO_COLOR and "
+            "FORCE_COLOR), always, or never"
+        ),
+    )
+    parser.add_argument(
+        "--progress",
+        choices=PROGRESS_CHOICES,
+        default="auto",
+        metavar="WHEN",
+        help=(
+            "show progress on standard error for several files or a directory: auto (the "
+            "default: a status line on a terminal), always (also plain lines when standard "
+            "error is not a terminal), or never"
+        ),
+    )
+
+
+def output_style(args: argparse.Namespace) -> Style:
+    """The :class:`Style` for the text a command writes to standard output."""
+    return detect_style(sys.stdout, args.color)
+
+
+def progress_for(args: argparse.Namespace, *, batch: bool) -> Progress:
+    """The progress reporter selected by ``--progress`` (inert for a single file)."""
+    return Progress.create(args.progress, batch=batch)
 
 
 def add_symbolic_literal_options(parser: argparse.ArgumentParser, analysis: str) -> None:
@@ -117,12 +155,20 @@ def read_source(path: Path, *, newline: str | None) -> str:
         return handle.read()
 
 
-def input_paths(parser: argparse.ArgumentParser, args: argparse.Namespace) -> list[Path]:
+def input_paths(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    progress: Progress | None = None,
+) -> list[Path]:
     """The source files named by ``args.sources``, expanding directories when recursive."""
     if sum(1 for path in args.sources if is_stdin(path)) > 1:
         parser.error("standard input ('-') can be read only once")
     try:
-        return source_paths(args.sources, args.recursive)
+        return source_paths(
+            args.sources,
+            args.recursive,
+            on_found=progress.scanning if progress is not None else None,
+        )
     except ConditionError as error:
         parser.error(str(error))
 
@@ -145,4 +191,5 @@ def write_exact(text: str) -> None:
 
 def report_failure(path: Path | str, message: str) -> None:
     """The ``PATH: message`` line every command prints on stderr for a failed input."""
-    print(f"{path}: {message}", file=sys.stderr)
+    with paused():
+        print(f"{path}: {message}", file=sys.stderr)

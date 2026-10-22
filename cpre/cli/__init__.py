@@ -18,6 +18,7 @@ import sys
 from collections.abc import Sequence
 
 from ..text_reports import unified_diff as _unified_diff
+from ._common import EXIT_INTERRUPTED
 from .analyze import analyze_main
 from .boolean_expression import test_input_main
 from .cover import cover_main
@@ -35,10 +36,14 @@ __all__ = [
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the cpre command-line interface."""
-    if argv is None:
-        argv = sys.argv[1:]
+    """Run the cpre command-line interface; Ctrl-C ends the run with status 130."""
+    try:
+        return _dispatch(sys.argv[1:] if argv is None else argv)
+    except KeyboardInterrupt:
+        return EXIT_INTERRUPTED
 
+
+def _dispatch(argv: Sequence[str]) -> int:
     if argv and argv[0] in ("simplify-macros", "analyze-macros"):
         return simplify_macros_main(argv[1:], prog=f"cpre {argv[0]}")
     if argv and argv[0] == "preprocess":

@@ -76,8 +76,14 @@ def sample_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
+class _Utf8Text(io.StringIO):
+    """A captured stream that, like a UTF-8 terminal, accepts the report's Unicode glyphs."""
+
+    encoding = "utf-8"  # type: ignore[assignment]
+
+
 def _run(argv: list[str]) -> tuple[int, str, str]:
-    out, err = io.StringIO(), io.StringIO()
+    out, err = _Utf8Text(), _Utf8Text()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         code = main(argv)
     # Documentation shows POSIX paths; Windows prints the same paths with backslashes.

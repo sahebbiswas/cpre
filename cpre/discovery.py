@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from .model import ConditionError
@@ -17,9 +17,19 @@ field and ``__FILE__`` uses; the command line spells it ``-``. It is recognized 
 named ``<stdin>`` stays an ordinary file."""
 
 
-def source_paths(inputs: Sequence[Path], recursive: bool) -> list[Path]:
+def source_paths(
+    inputs: Sequence[Path],
+    recursive: bool,
+    on_found: Callable[[int], None] | None = None,
+) -> list[Path]:
+    """The source files named by ``inputs``, directories expanded when ``recursive``.
+
+    ``on_found`` is called with the running number of source files found, while a
+    directory is still being walked, so a caller can show that a large scan is moving.
+    """
     paths: list[Path] = []
     seen: set[Path] = set()
+    found = 0
     for input_path in inputs:
         if input_path is STDIN_PATH:
             if not any(path is STDIN_PATH for path in paths):
@@ -30,11 +40,16 @@ def source_paths(inputs: Sequence[Path], recursive: bool) -> list[Path]:
         elif input_path.is_dir():
             if not recursive:
                 raise ConditionError(f"{input_path}: is a directory; use --recursive to scan it")
-            candidates = sorted(
-                path
-                for path in input_path.rglob("*")
-                if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES
-            )
+            matched: list[Path] = []
+            for entries, path in enumerate(input_path.rglob("*"), 1):
+                if path.is_file() and path.suffix.lower() in SOURCE_SUFFIXES:
+                    matched.append(path)
+                    found += 1
+                if on_found is not None and entries % 256 == 0:
+                    on_found(found)
+            if on_found is not None:
+                on_found(found)
+            candidates = sorted(matched)
             if not candidates:
                 raise ConditionError(f"{input_path}: no C/C++ source files found recursively")
         else:

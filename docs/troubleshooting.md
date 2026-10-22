@@ -52,7 +52,7 @@ Status `2` outranks `1`. With several inputs, one failure makes the whole run `2
 | `expected a Boolean expression at line N, column M` | Malformed `#if` | [Input](#input-and-platform-issues) |
 | `#if has no matching #endif at line N`, `duplicate #else`, … | Malformed conditional structure | [Input](#input-and-platform-issues) |
 | `division by zero in concrete condition` | A reachable condition divides by zero | [Input](#input-and-platform-issues) |
-| `proven equivalent; not rewritten: parenthesize the original first` | Simplifiable, but rewriting could change meaning | [Macro simplification](#macro-simplification) |
+| `hint  not rewritten: parenthesize the original first` | Simplifiable, but rewriting could change meaning | [Macro simplification](#macro-simplification) |
 | `would rewrite PATH` (stderr, `--check`) | A verified rewrite is pending | [Macro simplification](#macro-simplification) |
 | `error: unsupported symbolic literal 5; supported literals: 0, 1` | Only `0` and `1` can be symbolic | [Macro simplification](#macro-simplification) |
 
@@ -177,7 +177,7 @@ What to do, in order:
 
 **"Why is `#if LEVEL >= 2` not dead or redundant?"** Comparisons and arithmetic that cpre cannot decide symbolically are *opaque predicates*: they are carried through the logic as unknown facts. The repeated `#elif LEVEL >= 2` after `#if LEVEL >= 2` is reported dead, but `LEVEL >= 3` after `LEVEL >= 2` is not, because cpre does not claim integer reasoning in the symbolic report. (For concrete values, `preprocess` evaluates the full integer expression grammar. `cover` solves simple integer comparisons.)
 
-**"Why is this branch `[reachable]` when I know `DEBUG` is off in production?"** Symbolic analysis is configuration-independent: an unmentioned macro could be either. If you know the build state, say so in Python with `assumptions={"DEBUG": False}` and read `Finding.depends_on_assumptions`; or choose the configuration with `cpre preprocess -U DEBUG`. cpre never silently assumes an unknown macro is false.
+**"Why is this branch not `DEAD` when I know `DEBUG` is off in production?"** Symbolic analysis is configuration-independent: an unmentioned macro could be either. If you know the build state, say so in Python with `assumptions={"DEBUG": False}` and read `Finding.depends_on_assumptions`; or choose the configuration with `cpre preprocess -U DEBUG`. cpre never silently assumes an unknown macro is false.
 
 **"Why is a branch reported dead when I defined the macro on the command line?"** The default `cpre FILE` ignores your build flags and `#include`d headers. A branch is dead only if no configuration at all selects it. If you want the answer for your configuration, use `preprocess`.
 
@@ -189,7 +189,7 @@ What to do, in order:
 
 | Symptom | Cause and fix |
 | --- | --- |
-| `proven equivalent; not rewritten: parenthesize the original first` | The replacement list is a bare `a && b` / `a \|\| b`. Parenthesizing it would change how its uses parse, so cpre reports without rewriting. Wrap the definition in parentheses yourself and rerun; it becomes rewritable. |
+| `hint  not rewritten: parenthesize the original first` | The replacement list is a bare `a && b` / `a \|\| b`. Parenthesizing it would change how its uses parse, so cpre reports without rewriting. Wrap the definition in parentheses yourself and rerun; it becomes rewritable. |
 | `--check` exits `1` and prints `would rewrite PATH` | Expected: a verified rewrite is pending. `--diff` shows it; `--rewrite` applies it. |
 | `--diff` exits `0` though it prints a diff | By design; add `--check` to gate on it. |
 | A macro using `0` as a disabled switch, or `1` as an always-on one, simplifies away a term you wanted | Use `--symbolic-literal 0` (or `1`, or both by repeating the option) so the literal stays a symbolic atom. Only `0` and `1` can be symbolic. |

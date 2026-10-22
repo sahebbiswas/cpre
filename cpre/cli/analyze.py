@@ -5,11 +5,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import __version__, reporting
+from .._style import Style
 from .._types import AnalysisOptions, AnalysisResult
 from ..api import analyze_source
 from ..errors import CpreError, ErrorCode
@@ -18,10 +19,12 @@ from ..model import ConditionalTree
 from ..sarif import ToolNotification, sarif_log
 from ..serialization import batch_document, build_file_json, top_level
 from ..text_reports import (
+    file_findings,
     format_error,
     format_incomplete,
     format_incomplete_component,
     render_combined_report,
+    summary_line,
     telemetry_lines,
 )
 from ._common import (
@@ -29,15 +32,19 @@ from ._common import (
     EXIT_FINDINGS,
     EXIT_OK,
     add_limit_options,
+    add_presentation_options,
     add_symbolic_literal_options,
     analysis_options_from,
     input_paths,
     is_batch,
+    output_style,
+    progress_for,
     read_source,
     report_failure,
     source_argument,
     symbolic_literals_from,
 )
+from ._progress import Progress, paused
 
 
 @dataclass
@@ -115,6 +122,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     add_limit_options(parser)
+    add_presentation_options(parser)
     parser.add_argument(
         "--macros",
         action="store_true",
@@ -136,7 +144,8 @@ def _analyze_conditionals(
     run.analyses.append(result)
     if echo_telemetry and result.telemetry is not None:
         for line in telemetry_lines(result.telemetry):
-            print(f"{path}: telemetry: {line}", file=sys.stderr)
+            with paused():
+                print(f"{path}: telemetry: {line}", file=sys.stderr)
     if not result.complete:
         for diagnostic in result.incomplete:
             if diagnostic.component is None:
@@ -201,9 +210,21 @@ def _analyze_files(
     options: AnalysisOptions,
     telemetry: bool = False,
     echo_telemetry: bool = False,
+    progress: Progress | None = None,
+    on_file: Callable[[_FileResult], None] | None = None,
 ) -> _Run:
+    """Analyze each path in order.
+
+    ``on_file`` receives every successfully analyzed file as soon as it is done, which is
+    how the text report is written while later files are still being analyzed.
+    """
     run = _Run()
     for path in paths:
+        if progress is not None:
+            progress.file_started(path)
+        had_errors, run.had_errors = run.had_errors, False
+        findings = 0
+        result: _FileResult | None = None
         try:
             source = read_source(path, newline=None)
             tree: ConditionalTree | None = None
@@ -220,11 +241,17 @@ def _analyze_files(
             m_results: tuple[MacroAnalysisResult, ...] = ()
             if enable_macros:
                 m_results = _analyze_macros(path, source, symbolic_literals, run, options)
-            run.files.append(_FileResult(path, tree, m_results, c_result))
-        except CpreError as error:
+            result = _FileResult(path, tree, m_results, c_result)
+            run.files.append(result)
+            findings = file_findings(tree, m_results).total
+        except (CpreError, OSError, UnicodeDecodeError) as error:
             _record_failure(path, error, run)
-        except (OSError, UnicodeDecodeError) as error:
-            _record_failure(path, error, run)
+        failed = run.had_errors
+        if result is not None and on_file is not None:
+            on_file(result)
+        run.had_errors = had_errors or failed
+        if progress is not None:
+            progress.file_done(findings, failed=failed)
     return run
 
 
@@ -242,14 +269,48 @@ def _file_json(
     )
 
 
-def _combined_report(file: _FileResult, *, verbose: bool, color: bool) -> tuple[str, bool]:
+def _combined_report(file: _FileResult, *, verbose: bool, style: Style) -> tuple[str, bool]:
     return render_combined_report(
         file.tree,
         file.macros,
         verbose=verbose,
-        color=color,
+        style=style,
         incomplete_components=file.analysis.incomplete_components if file.analysis else (),
     )
+
+
+class _TextStreamer:
+    """Writes each file's text report as the file finishes, then the closing summary.
+
+    The first report needs no separator; every later one is preceded by a blank line, so
+    the output equals the reports joined by blank lines, whenever they are written.
+    """
+
+    def __init__(self, args: argparse.Namespace, style: Style, *, batch: bool) -> None:
+        self._verbose = args.verbose
+        self._style = style
+        self._batch = batch
+        self._written = False
+        self.counts = reporting.FindingCounts()
+
+    def __call__(self, file: _FileResult) -> None:
+        self.counts += file_findings(file.tree, file.macros)
+        report, has_entries = _combined_report(file, verbose=self._verbose, style=self._style)
+        if self._batch and not (self._verbose or has_entries):
+            return
+        heading = f"{self._style.paint(f'== {file.path} ==', 'heading')}\n" if self._batch else ""
+        with paused():
+            if self._written and self._batch:
+                print()
+            print(f"{heading}{report}")
+        self._written = True
+
+    def finish(self) -> None:
+        summary = summary_line(self.counts, self._style)
+        if summary:
+            with paused():
+                print()
+                print(summary)
 
 
 def _write_results(
@@ -260,6 +321,7 @@ def _write_results(
     enable_macros: bool,
     symbolic_literals: tuple[int, ...],
 ) -> None:
+    """Write everything that is not streamed: SARIF and JSON documents."""
     files = run.files
     if args.sarif:
         log = sarif_log(run.analyses, tool_version=__version__, notifications=run.notifications)
@@ -275,19 +337,6 @@ def _write_results(
         elif files:
             f_data, _ = _file_json(files[0], args, enable_macros, symbolic_literals)
             print(json.dumps(top_level("analysis", f_data), indent=2))
-    elif batch:
-        color = sys.stdout.isatty()
-        reports = []
-        for file in files:
-            report, has_entries = _combined_report(file, verbose=args.verbose, color=color)
-            if args.verbose or has_entries:
-                heading = reporting.colored(f"== {file.path} ==", "cyan", color)
-                reports.append("\n".join((heading, report)))
-        if reports:
-            print("\n\n".join(reports))
-    elif files:
-        report, _ = _combined_report(files[0], verbose=args.verbose, color=sys.stdout.isatty())
-        print(report)
 
 
 def _has_findings(files: Sequence[_FileResult]) -> bool:
@@ -305,7 +354,6 @@ def analyze_main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     symbolic_literals = symbolic_literals_from(parser, args)
     options = analysis_options_from(parser, args)
-    paths = input_paths(parser, args)
     enable_macros = not args.no_macros
     if args.telemetry and args.no_conditionals:
         parser.error(
@@ -313,22 +361,33 @@ def analyze_main(argv: Sequence[str] | None = None) -> int:
         )
     if args.telemetry and args.sarif:
         parser.error("--telemetry cannot be combined with --sarif")
-    run = _analyze_files(
-        paths,
-        enable_conditionals=not args.no_conditionals,
-        enable_macros=enable_macros,
-        symbolic_literals=symbolic_literals,
-        options=options,
-        telemetry=args.telemetry,
-        echo_telemetry=args.telemetry and not args.json,
-    )
-    _write_results(
-        run,
-        args,
-        batch=is_batch(args),
-        enable_macros=enable_macros,
-        symbolic_literals=symbolic_literals,
-    )
+    batch = is_batch(args)
+    text = not (args.json or args.sarif)
+    streamer = _TextStreamer(args, output_style(args), batch=batch) if text else None
+    with progress_for(args, batch=batch) as progress:
+        paths = input_paths(parser, args, progress)
+        progress.begin(paths)
+        run = _analyze_files(
+            paths,
+            enable_conditionals=not args.no_conditionals,
+            enable_macros=enable_macros,
+            symbolic_literals=symbolic_literals,
+            options=options,
+            telemetry=args.telemetry,
+            echo_telemetry=args.telemetry and not args.json,
+            progress=progress,
+            on_file=streamer,
+        )
+    if streamer is not None:
+        streamer.finish()
+    else:
+        _write_results(
+            run,
+            args,
+            batch=batch,
+            enable_macros=enable_macros,
+            symbolic_literals=symbolic_literals,
+        )
     if run.had_errors:
         return EXIT_ERROR
     if args.fail_on_findings and _has_findings(run.files):
