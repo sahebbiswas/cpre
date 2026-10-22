@@ -187,7 +187,7 @@ releases are cut from `main` whenever it is stable enough (see
   |------|------|---------|
   | Patch (`0.20.0` → `0.20.1`) | Bug fixes, docs, tests, internal refactors, tooling and CI | Fix a wrong simplification of a nested conditional |
   | Minor (`0.20.1` → `0.21.0`) | A new feature or capability: a new public function, field or CLI option, newly supported preprocessor construct | Add a new CLI subcommand |
-  | Major (`0.x` → `1.0.0`, `1.x` → `2.0.0`) | An incompatible change to the public API contract | Rename or remove a public function or CLI option |
+  | Major (`1.x` → `2.0.0`) | An incompatible change to the public API contract | Rename or remove a public function or CLI option |
 
 - Get the maintainer's agreement before a major bump.
 - Supported Python versions follow CPython's lifecycle: a version is supported until
@@ -196,10 +196,12 @@ releases are cut from `main` whenever it is stable enough (see
   major one, because the dropped interpreter is already unsupported upstream.
   Python 3.10 reaches end of life on 2026-10-31 (PEP 619), so it stays the floor until
   then and is dropped in the first minor release after that date.
-- While the major version is `0`, a change that breaks compatibility is a minor
-  bump, as SemVer allows, and must be announced as a **Behaviour change:** in
-  the pull request. One example is rejecting input that used to be accepted.
-  See [Downstream compatibility](docs/downstream-compatibility.md#compatibility-and-versioning).
+- A change that breaks the documented contract is a major bump, and is announced as
+  a **Behaviour change:** in the pull request and the changelog. One example is
+  rejecting input that used to be accepted. What the contract covers is listed in
+  [What 1.0 promises](docs/downstream-compatibility.md#what-10-promises); anything
+  outside it (text output, telemetry, internal modules) can change in a minor or
+  patch release. See [Downstream compatibility](docs/downstream-compatibility.md#compatibility-and-versioning).
 - The public API is the documented top-level `cpre` package (see
   [Downstream compatibility](docs/downstream-compatibility.md)) and the `cpre`
   CLI. Submodules such as `cpre.model` or `cpre.expressions`, and modules whose

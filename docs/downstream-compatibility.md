@@ -83,14 +83,44 @@ A new mismatch must either be fixed or deliberately added to `EXPLICIT_NONCOMPLE
 
 `pcpp` is a development/test dependency used only as the differential oracle. It is not part of cpre's runtime dependency surface.
 
+## What 1.0 promises
+
+From 1.0 the surface below follows [Semantic Versioning](https://semver.org/). Within a major version it only grows compatibly; removing or renaming anything listed, or changing its meaning, waits for the next major version and is announced in the [changelog](../CHANGELOG.md).
+
+Covered:
+
+- **Python API:** every name in `cpre.__all__`, documented in the [API guide](api.md) and exercised by the downstream contract suites. Type annotations are part of it (the package ships `py.typed`).
+- **JSON documents:** every `cpre.<kind>/<major>` document, under the rules in the [JSON contract](json-contract.md). New fields and new enumerated values are compatible changes; consumers must ignore fields they do not know.
+- **SARIF 2.1.0 output:** the rules, results and fixes it documents in [SARIF output](sarif.md).
+- **CLI:** documented commands and options, and the exit statuses `0`, `1`, `2` and `130` ([exit status contract](cli.md#exit-status-contract)).
+- **Behaviour:** deterministic ordering, the complete / partial / incomplete result semantics, and the documented analysis and preprocessing semantics. A bug fix that corrects a wrong result is a patch release, even though a result changes.
+
+Not covered (can change in any release):
+
+- human-readable text reports, progress output and stderr diagnostic wording;
+- the `telemetry` key of `--json --telemetry`;
+- internal modules (everything but the top-level `cpre` package) and names that start with `_`;
+- the default resource limits (`--max-atoms` and the like): changing one can turn an incomplete result into a complete one, and is called out in the changelog;
+- supported Python versions: they follow CPython's lifecycle, and dropping an end-of-life version is a minor release.
+
+### Checking the contract
+
+The covered Python names are exactly `cpre.__all__`. These tests keep the promise honest, and CI runs them against the built and installed wheel, not only the source tree (see [Installed-package validation](#installed-package-validation)):
+
+- `tests/test_documentation.py`: every name in `cpre.__all__` is in the [API index](api.md#public-api-index), and every CLI option is documented
+- `tests/test_downstream_contract.py` and `tests/test_structural_downstream_contract.py`: the symbolic, analysis and structural API
+- `tests/test_json_contract.py`: the `cpre.<kind>/<major>` documents
+- `tests/test_sarif.py`: the SARIF output
+- `tests/test_py_typed.py`: the shipped type information
+
+A change that makes one of these fail is a contract change: it needs a major version, or it is a bug.
+
 ## Compatibility and versioning
 
-During the current `0.x` phase, `cpre` treats the documented public API as compatibility-sensitive even though semantic versioning traditionally permits breaking changes before `1.0`.
-
-- Patch versions must preserve documented imports and established result semantics. They fix incorrect behavior without adding public surface area or deliberately reshaping existing contracts.
+- Patch versions preserve documented imports and established result semantics. They fix incorrect behavior without adding public surface area or deliberately reshaping existing contracts.
 - Minor versions add backward-compatible public fields, types, finding categories, options, or capabilities. Downstream consumers should still review new finding kinds if they use exhaustive matching.
-- Any deliberate incompatible change to the documented downstream contract requires an explicitly announced compatibility break and a minor-version boundary while `cpre` remains `0.x`.
-- After `1.0`, intentionally breaking public API changes require a major version bump.
+- Major versions may make intentionally incompatible changes to the documented contract. Each is announced in the changelog under **Behaviour change:**, and a JSON document's schema major version is raised when that document changes incompatibly.
+- Before 1.0 (versions `0.x`) the same surface was treated as compatibility-sensitive, with deliberate breaks announced and limited to minor-version boundaries.
 
 Every pull request merged to `main` bumps the version by one of these steps; see [CONTRIBUTING](../CONTRIBUTING.md#versioning) for how the bump is chosen and checked.
 

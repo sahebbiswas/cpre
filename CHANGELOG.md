@@ -14,6 +14,15 @@ raise that document's schema major version and are listed here (see the
 
 ## [Unreleased]
 
+### Stability
+- **cpre is 1.0.** The development status is Production/Stable and the documented
+  surface now follows Semantic Versioning: the top-level Python API, the JSON
+  documents, SARIF output, documented CLI options and exit statuses. The new
+  [What 1.0 promises](docs/downstream-compatibility.md#what-10-promises) section lists
+  what is covered and what is not (text output, `--telemetry`, internal modules,
+  default resource limits). Nothing in the documented surface changed for 1.0
+  itself.
+
 ### Added
 - `cpre/py.typed` and the `Typing :: Typed` classifier: mypy and pyright now use
   cpre's annotations instead of treating the package as untyped.
