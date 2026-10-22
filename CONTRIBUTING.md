@@ -4,7 +4,7 @@ Thank you for contributing! Here are some instructions to get your local develop
 
 ## Prerequisites
 
-- **Python 3.9+**
+- **Python 3.10+**
 - Git
 
 ## Setup
@@ -190,6 +190,12 @@ releases are cut from `main` whenever it is stable enough (see
   | Major (`0.x` → `1.0.0`, `1.x` → `2.0.0`) | An incompatible change to the public API contract | Rename or remove a public function or CLI option |
 
 - Get the maintainer's agreement before a major bump.
+- Supported Python versions follow CPython's lifecycle: a version is supported until
+  it reaches end of life, and the release after that drops it. Dropping a Python
+  version is announced as a **Behaviour change:** and is a minor bump (`1.x`), not a
+  major one, because the dropped interpreter is already unsupported upstream.
+  Python 3.10 reaches end of life on 2026-10-31 (PEP 619), so it stays the floor until
+  then and is dropped in the first minor release after that date.
 - While the major version is `0`, a change that breaks compatibility is a minor
   bump, as SemVer allows, and must be announced as a **Behaviour change:** in
   the pull request. One example is rejecting input that used to be accepted.

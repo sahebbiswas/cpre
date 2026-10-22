@@ -8,7 +8,7 @@ and prescanned arguments as inputs and never looks at the macro environment.
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Literal, Union
+from typing import Literal
 
 from ._replacement import (
     VA_OPT_KIND,
@@ -20,7 +20,7 @@ from .lexer import Token, tokenize
 from .macros import MacroDefinition
 
 _PASTE: Literal["##"] = "##"
-Element = Union[list[Token], Literal["##"]]
+Element = list[Token] | Literal["##"]
 Bindings = dict[str, list[Token]]
 
 

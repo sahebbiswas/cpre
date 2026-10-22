@@ -57,8 +57,10 @@ class Disjunction:
     operands: tuple[Expression, ...]
 
 
-BooleanAtom = typing.Union[Variable, DefinedVariable, SymbolicLiteral, Predicate]
-Expression = typing.Union[
+# The public aliases stay typing.Union (not ``X | Y``) so their repr and typing.get_args()
+# results are unchanged for downstream code.
+BooleanAtom = typing.Union[Variable, DefinedVariable, SymbolicLiteral, Predicate]  # noqa: UP007
+Expression = typing.Union[  # noqa: UP007
     Constant,
     Variable,
     DefinedVariable,

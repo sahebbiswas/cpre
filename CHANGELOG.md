@@ -21,6 +21,10 @@ raise that document's schema major version and are listed here (see the
   privately, and this changelog.
 
 ### Changed
+- **Behaviour change:** the minimum supported Python is now 3.10. CPython 3.9 reached
+  end of life in October 2025; cpre drops it and follows CPython's lifecycle from
+  here on (see [Versioning](CONTRIBUTING.md#versioning)). Installing on 3.9 is
+  refused by `requires-python`; earlier releases keep working there.
 - Dependabot keeps the GitHub Actions and development dependencies current, and
   `.github/scripts/configure_repository.sh` applies the branch protection and
   security settings CONTRIBUTING describes.

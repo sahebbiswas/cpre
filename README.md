@@ -34,7 +34,7 @@ python -m pip install cpre
 cpre --version
 ```
 
-cpre needs Python 3.9 or later and has no runtime dependencies. For development:
+cpre needs Python 3.10 or later and has no runtime dependencies. Supported Python versions follow CPython's lifecycle. For development:
 
 ```bash
 git clone https://github.com/sahebbiswas/cpre.git

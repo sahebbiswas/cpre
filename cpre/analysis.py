@@ -184,7 +184,7 @@ def _clauses_satisfiable(
     for members in clause_atoms:
         partition.union_all(members)
     parts: dict[BooleanAtom, list[Expression]] = {}
-    for clause, members in zip(clauses, clause_atoms):
+    for clause, members in zip(clauses, clause_atoms, strict=True):
         if not members:
             if clause == FALSE:
                 return False
@@ -297,7 +297,7 @@ def _analyze(
             for root, component in components.items()
         ]
     context_satisfiable = True
-    for clause, members in zip(clauses, clause_atoms):
+    for clause, members in zip(clauses, clause_atoms, strict=True):
         if members:
             components[partition.find(members[0])].clauses.append(clause)
         elif clause == FALSE:

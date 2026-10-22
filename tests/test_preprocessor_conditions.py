@@ -51,7 +51,7 @@ def test_first_appearance_order_limits_synthetic_bdd_size():
     # and produced 3,069 reachable nodes for ten pairs.
     clauses = [
         f"(({upper} && {lower}) || (!{upper} && !{lower}))"
-        for upper, lower in zip("ABCDEFGHIJ", "abcdefghij")
+        for upper, lower in zip("ABCDEFGHIJ", "abcdefghij", strict=False)
     ]
     expression = conditions.parse_expression(" && ".join(clauses))
     bdd = conditions._BDD(conditions._expression_atoms_in_order(expression))

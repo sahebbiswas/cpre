@@ -160,7 +160,11 @@ class Reference:
                 timeout=TIMEOUT,
             )
         values = completed.stdout.decode("utf-8").split()
-        return {name: value for name, value in zip(STANDARD_MACROS, values) if value != name}
+        return {
+            name: value
+            for name, value in zip(STANDARD_MACROS, values, strict=False)
+            if value != name
+        }
 
 
 def _compiler_flags(case: Case) -> list[str]:
