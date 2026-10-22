@@ -157,6 +157,23 @@ jobs:
           print("cpre", cpre.__version__, "OK")
           PY
 
+      - name: Type check a consumer against the installed package
+        # py.typed makes mypy use cpre's annotations. Without it mypy reports the import as
+        # missing its marker, or (with ignore_missing_imports) treats every name as Any.
+        working-directory: ${{ runner.temp }}
+        run: |
+          set -o pipefail  # a failing mypy must fail the step even though its output goes through tee
+          mkdir consumer
+          cat > consumer/use_cpre.py <<'PY'
+          import cpre
+
+          a = cpre.Variable("A")
+          reveal_type(cpre.conjunction(a, a))
+          reveal_type(cpre.analyze_source("#if A\n#endif\n"))
+          PY
+          "$RUNNER_TEMP/venv/bin/mypy" --strict consumer/use_cpre.py | tee mypy.out
+          ! grep -q 'Any' mypy.out
+
       - name: Run the test suite against the installed package
         # Run from outside the checkout with the venv's pytest script (not
         # python -m pytest), so neither pytest nor the tests' own subprocesses

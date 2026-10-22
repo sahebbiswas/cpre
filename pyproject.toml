@@ -24,6 +24,7 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
   "Topic :: Software Development :: Quality Assurance",
   "Topic :: Software Development :: Testing",
+  "Typing :: Typed",
 ]
 
 [project.urls]
@@ -55,6 +56,9 @@ version = {attr = "cpre.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["cpre*"]
+
+[tool.setuptools.package-data]
+cpre = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
