@@ -26,8 +26,10 @@ def test_simplify_macros_cli_report_only_does_not_modify_source(tmp_path, capsys
     # Report distinguishes original, simplified, proof/equivalence status, and location
     # FEAT_1 is unparenthesized, so it is reported but never rewritten (#143).
     assert (
-        "line 1: #define FEAT_1 (0 && A) || B -> (!!B) "
-        "[proven equivalent; not rewritten: parenthesize the original first]" in captured.out
+        "L1 SIMPLIFY   #define FEAT_1\n"
+        "   - (0 && A) || B\n"
+        "   + (!!B)  (proven equivalent)\n"
+        "   hint  not rewritten: parenthesize the original first" in captured.out
     )
     assert "BUFFER_SIZE" not in captured.out
 
@@ -41,7 +43,10 @@ def test_analyze_macros_cli_alias_behavior(tmp_path, capsys):
     assert code == 0
     captured = capsys.readouterr()
     assert source.read_text(encoding="utf-8") == original
-    assert "line 1: #define FEAT_1 (A && A) -> (!!A) [proven equivalent]" in captured.out
+    assert (
+        "L1 SIMPLIFY   #define FEAT_1\n   - (A && A)\n   + (!!A)  (proven equivalent)"
+        in captured.out
+    )
 
 
 def test_simplify_macros_cli_rewrite_in_place(tmp_path, capsys):
@@ -56,8 +61,9 @@ def test_simplify_macros_cli_rewrite_in_place(tmp_path, capsys):
 
     # Reporting output reflects rewrite status
     assert (
-        "line 1: #define FEAT_1 ((0 && A) || B) -> (!!B) [rewritten, proven equivalent]"
-        in captured.out
+        "L1 REWRITTEN  #define FEAT_1\n"
+        "   - ((0 && A) || B)\n"
+        "   + (!!B)  (rewritten, proven equivalent)" in captured.out
     )
 
     # Source was rewritten in-place
@@ -92,7 +98,7 @@ def test_simplify_macros_cli_symbolic_literal_report_and_rewrite(tmp_path, capsy
     captured = capsys.readouterr()
     assert "FEAT_1" not in captured.out
     assert (
-        "#define FEAT_2 ((0 && A) || (0 && B)) -> (0 && (A || B)) [proven equivalent]"
+        "#define FEAT_2\n   - ((0 && A) || (0 && B))\n   + (0 && (A || B))  (proven equivalent)"
         in captured.out
     )
     assert source.read_text(encoding="utf-8") == content
@@ -230,9 +236,9 @@ def test_simplify_macros_cli_batch_text(tmp_path, capsys):
     assert code == 0
     captured = capsys.readouterr()
     assert "f1.c" in captured.out
-    assert "#define M1 (A && A) -> (!!A) [proven equivalent]" in captured.out
+    assert "#define M1\n   - (A && A)\n   + (!!A)  (proven equivalent)" in captured.out
     assert "f2.h" in captured.out
-    assert "#define M2 (B || 0) -> (!!B) [proven equivalent]" in captured.out
+    assert "#define M2\n   - (B || 0)\n   + (!!B)  (proven equivalent)" in captured.out
 
 
 def test_simplify_macros_cli_fail_on_findings(tmp_path):
@@ -258,12 +264,12 @@ def test_simplify_macros_cli_verbose_shows_skipped_and_unchanged(tmp_path, capsy
     code = main(["simplify-macros", "--verbose", str(source)])
     assert code == 0
     captured = capsys.readouterr()
-    assert "#define SIMPLIFIABLE (A && A) -> (!!A) [proven equivalent]" in captured.out
+    assert "#define SIMPLIFIABLE\n   - (A && A)\n   + (!!A)  (proven equivalent)" in captured.out
     assert (
-        "#define UNCHANGED (A || B) (expression is already in simplest equivalent form)"
+        "#define UNCHANGED (A || B)  (expression is already in simplest equivalent form)"
         in captured.out
     )
-    assert "#define SKIPPED skipped: non-Boolean integer literal: '1024'" in captured.out
+    assert "#define SKIPPED  non-Boolean integer literal: '1024'" in captured.out
 
 
 def test_python_api_simplify_macros_report_and_rewrite():
@@ -335,10 +341,10 @@ def test_backward_compatibility_unified_cpre_cli(tmp_path, capsys):
     code = main([str(source)])
     assert code == 0
     captured = capsys.readouterr()
-    assert "#elif A [dead]" in captured.out
+    assert "DEAD       #elif A" in captured.out
     assert (
-        "#define FEAT_1 (0 && A) || B -> (!!B) [proven equivalent; not rewritten: parenthesize the original first]"
-        in captured.out
+        "#define FEAT_1\n   - (0 && A) || B\n   + (!!B)  (proven equivalent)\n"
+        "   hint  not rewritten: parenthesize the original first" in captured.out
     )
 
 
@@ -728,8 +734,11 @@ def test_unparenthesized_replacement_is_reported_but_never_rewritten(tmp_path, c
 
     assert main(["simplify-macros", str(source)]) == 0
     report = capsys.readouterr().out
-    assert "#define FEAT A || (A && B) -> (!!A) [proven equivalent; not rewritten:" in report
-    assert "#define SAFE (A && A) -> (!!A) [proven equivalent]" in report
+    assert (
+        "#define FEAT\n   - A || (A && B)\n   + (!!A)  (proven equivalent)\n   hint  not rewritten:"
+        in report
+    )
+    assert "#define SAFE\n   - (A && A)\n   + (!!A)  (proven equivalent)" in report
 
     assert main(["simplify-macros", "--diff", str(source)]) == 0
     diff = capsys.readouterr().out
@@ -744,8 +753,11 @@ def test_unparenthesized_replacement_is_reported_but_never_rewritten(tmp_path, c
     assert main(["simplify-macros", "--rewrite", str(source)]) == 0
     assert source.read_bytes() == b"#define FEAT A || (A && B)\n#define SAFE (!!A)\n"
     report = capsys.readouterr().out
-    assert "#define FEAT A || (A && B) -> (!!A) [proven equivalent; not rewritten:" in report
-    assert "#define SAFE (A && A) -> (!!A) [rewritten, proven equivalent]" in report
+    assert (
+        "#define FEAT\n   - A || (A && B)\n   + (!!A)  (proven equivalent)\n   hint  not rewritten:"
+        in report
+    )
+    assert "#define SAFE\n   - (A && A)\n   + (!!A)  (rewritten, proven equivalent)" in report
 
     # Nothing left that --rewrite would change.
     assert main(["simplify-macros", "--check", str(source)]) == 0

@@ -110,6 +110,72 @@ With multiple inputs or a directory input, the CLI uses batch presentation and p
 
 Human-readable text is intended for people, not as a stable machine interface. Do not parse it in downstream tooling.
 
+### Reading the report
+
+Each entry is one line with its source line, a status badge and the directive, followed by the detail that explains it. A transformation is shown as a `-` line (the condition as cpre normalized it) and a `+` line (the result), so what changed is visible at a glance:
+
+```text
+Conditionals
+L7  DEAD       #elif defined(TURBO) && defined(SLOW)
+  why  condition contradicts its parent or earlier branches
+  - TURBO && SLOW
+  + 0  (always false in context)
+L13 ok         #ifdef DEBUG
+│ L14 REDUNDANT  #ifdef DEBUG
+│   why  condition is always true in this branch context
+│   - DEBUG
+│   + 1  (always true in context)
+
+Macros
+L3 SIMPLIFY   #define FEATURE_FAST
+   - (0 && LEGACY) || TURBO
+   + (!!TURBO)  (proven equivalent)
+
+Summary  1 dead · 1 redundant · 1 simplifiable macro
+```
+
+| Badge | Meaning |
+| --- | --- |
+| `DEAD` | The branch can never be selected. |
+| `REDUNDANT` | The condition is always true where it sits. |
+| `SIMPLIFY` | The branch (or macro) can be taken or used as is, and its condition has a shorter equivalent form. |
+| `REWRITTEN` | A macro that `simplify-macros --rewrite` rewrote. |
+| `INCOMPLETE` | A conditional that was not analyzed because a [resource limit](#resource-limits) was reached. |
+| `ok`, `skip` | Shown only with `--verbose`: an unchanged branch or macro, and a definition that is not a candidate for simplification. |
+
+The `│` guides show nesting: an entry indented under one belongs to the conditional above it, and an `ok` entry is listed only because a finding is nested inside it. Conditions in the `-` and `+` lines use cpre's normalized notation, in which `defined(X)` is written `X`. A `why` line gives the reason for a `DEAD` or `REDUNDANT` verdict, `opaque` lists comparisons cpre treats as opaque predicates, and with `--verbose` an `effective` line gives the condition together with everything that enclosing branches already imply. The closing `Summary` line totals the findings and is omitted when there are none. `--fail-on-findings` acts on dead and redundant branches and on simplifiable macros; a `SIMPLIFY` condition is reported but never fails the run.
+
+When both conditionals and macros are reported, they are listed under `Conditionals` and `Macros` headings.
+
+### Color
+
+On a terminal the report is colored, with one meaning per color:
+
+| Color | Meaning |
+| --- | --- |
+| red | `DEAD`, and the "before" (`-`) side of a transformation |
+| yellow | `REDUNDANT` and `INCOMPLETE` |
+| green | `SIMPLIFY`, `REWRITTEN`, and the "after" (`+`) side of a transformation; green is used for nothing else |
+| bold | the tokens that actually changed between the `-` and `+` lines |
+| cyan | headings and opaque predicates |
+| dim | `ok` and `skip` entries, labels and notes |
+
+Color is only ever added to text that already reads correctly without it: the badges and the `-`/`+` markers carry the meaning in plain output, so a report piped to a file or a log is the same layout.
+
+`--color WHEN` chooses when to color: `auto` (the default) colors a terminal, `always` and `never` are absolute. In `auto`, the `NO_COLOR` environment variable turns color off, `FORCE_COLOR` turns it on for pipes, and `TERM=dumb` turns it off. The `│` guides and other glyphs fall back to ASCII (`|`) when standard output cannot encode them or `TERM=dumb`.
+
+### Progress and streaming for many files
+
+With several inputs or a directory, text results are written as each file finishes, in the same order and with the same separators as before, so output starts at once and survives an interrupted run. `--json` and `--sarif` are single documents and are written at the end.
+
+Progress is written to standard error, never standard output, so reports, JSON, SARIF and diffs are identical with progress on or off. `--progress WHEN` chooses when to show it:
+
+- `auto` (the default): on a terminal, a status line appears after about half a second and is redrawn in place, with the file count, a bar, the percentage, an estimated time remaining, the number of findings and failures so far, and the file being analyzed. A scan of a large directory first shows `scanning…` with the number of files found. Reports and errors printed meanwhile do not garble the line. When standard error is not a terminal, nothing is shown. With `TERM=dumb`, plain lines are printed about every ten seconds instead.
+- `always`: show progress even for a quick run, and print plain `cpre: 100/318 files (31%), 5 findings, 4s elapsed` lines (and a closing summary) when standard error is a log or a pipe.
+- `never`: no progress.
+
+A single file never shows progress. The estimated time remaining is weighted by file size and shown only once enough work is done to make it meaningful. If one file takes more than a couple of seconds, its elapsed time is shown next to its name. Pressing Ctrl-C stops the run, reports how far it got, and exits with status `130`; text results already written stay written.
+
 ## JSON output
 
 `--json` writes the unified analysis report (both conditional directives and macro simplifications) as JSON:
@@ -176,6 +242,7 @@ The CLI uses these process statuses:
 | `0` | Normal completion. Findings may exist unless `--fail-on-findings` was requested. |
 | `1` | Normal completion with `--fail-on-findings`, and at least one dead or redundant branch was found. |
 | `2` | Source ingestion failed, analysis/preprocessing reasoning was incomplete for a source, or command-line/path validation failed. |
+| `130` | The run was interrupted with Ctrl-C. |
 
 Status `2` takes precedence over status `1`. If any input cannot be processed completely, the overall run is an error even if other inputs also contain findings.
 
@@ -192,11 +259,15 @@ ROBDD/resource-limit exhaustion (the atom limit applies per independent conditio
 When only some independent components exceed a limit, the result is partial (see [Partial results and incomplete components](api.md#partial-results-and-incomplete-components)). The report still shows the proven findings for the rest of the file, followed by a separate section that lists each unanalyzed conditional:
 
 ```text
-2: #if A [redundant]
-  reason: condition is always true in this branch context
-  ...
+L1 ok         #if A
+| L2 REDUNDANT  #if A
+|   why  condition is always true in this branch context
+|   - A
+|   + 1  (always true in context)
+
 Incomplete analysis (no findings are reported for these conditionals):
-  6-8: #if W_0 || W_1 || ... [incomplete: analysis limit exceeded for atoms: 70 > 64]
+L6-8 INCOMPLETE #if W_0 || W_1 || ...
+       why  analysis limit exceeded for atoms: 70 > 64
 ```
 
 stderr names the same conditionals (`source.c: line 6: conditional at lines 6-8 not analyzed (analysis limit exceeded for atoms: 70 > 64); findings cover only the rest of the file`), and the exit status is still `2`.
@@ -217,9 +288,13 @@ cpre --json source.c
 In default mode, notable conditional branches (dead, redundant, simplifiable) and simplified macro definitions are reported:
 
 ```text
-line 12: #elif A [dead]
-  reason: condition contradicts its parent or earlier branches
-line 45: #define FEAT_1 ((0 && A) || B) -> (!!B) [proven equivalent]
+L12 DEAD       #elif A
+  why  condition contradicts its parent or earlier branches
+  - A
+  + 0  (always false in context)
+L45 SIMPLIFY   #define FEAT_1
+   - ((0 && A) || B)
+   + (!!B)  (proven equivalent)
 ```
 
 Use `--verbose` to include unchanged branches, unsimplified macros, and skipped non-candidate definitions.
@@ -475,27 +550,36 @@ cpre simplify-macros --in-place source.c
 In report mode, each simplified definition distinguishes the original replacement list, simplified replacement list, proof/equivalence status, and source location:
 
 ```text
-line 12: #define FEAT_1 ((0 && A) || B) -> (!!B) [proven equivalent]
+L12 SIMPLIFY   #define FEAT_1
+   - ((0 && A) || B)
+   + (!!B)  (proven equivalent)
 ```
 
-A definition whose replacement has `&&` or `||` outside parentheses is reported but never rewritten, because the parentheses a rewrite adds would change what its uses mean (see [Unparenthesized replacements](macro-simplification.md#unparenthesized-replacements-are-reported-not-rewritten)). Parenthesize the original to allow the rewrite:
+A definition whose replacement has `&&` or `||` outside parentheses is reported but never rewritten, because the parentheses a rewrite adds would change what its uses mean (see [Unparenthesized replacements](macro-simplification.md#unparenthesized-replacements-are-reported-not-rewritten)). A `hint` line says so; parenthesize the original to allow the rewrite:
 
 ```text
-line 13: #define FEAT_2 (0 && A) || B -> (!!B) [proven equivalent; not rewritten: parenthesize the original first]
+L13 SIMPLIFY   #define FEAT_2
+   - (0 && A) || B
+   + (!!B)  (proven equivalent)
+   hint  not rewritten: parenthesize the original first
 ```
 
 With `--verbose`, unsimplified candidates and skipped non-candidate definitions are also displayed with diagnostic reasons:
 
 ```text
-line 4: #define BUFFER_SIZE 1024 skipped: non-Boolean integer literal: '1024'
-line 8: #define FEAT_2 (A || B) (expression is already in simplest equivalent form)
+L4 skip       #define BUFFER_SIZE  non-Boolean integer literal: '1024'
+L8 ok         #define FEAT_2 (A || B)  (expression is already in simplest equivalent form)
 ```
 
-In rewrite mode (`--rewrite`), successfully applied transformations are indicated:
+In rewrite mode (`--rewrite`), successfully applied transformations are marked `REWRITTEN`:
 
 ```text
-line 12: #define FEAT_1 ((0 && A) || B) -> (!!B) [rewritten, proven equivalent]
+L12 REWRITTEN  #define FEAT_1
+   - ((0 && A) || B)
+   + (!!B)  (rewritten, proven equivalent)
 ```
+
+`simplify-macros` accepts `--color` and `--progress` and writes its report (or, with `--diff`, its diffs) file by file as they finish, exactly like the default command; see [Color](#color) and [Progress and streaming for many files](#progress-and-streaming-for-many-files). It prints a closing `Summary` line in report mode only, since a rewrite already reports what it did.
 
 ### Safety and verification guarantees
 
@@ -764,6 +848,15 @@ An incomplete ROBDD computation is never reported as a successful simplification
 --telemetry
     Diagnostic only: report atoms, components, nodes and work used by conditional
     analysis (a `telemetry` object with --json, otherwise lines on stderr).
+
+--color WHEN
+    Color the text report: auto (the default: on a terminal, honoring NO_COLOR and
+    FORCE_COLOR), always, or never. Also accepted by simplify-macros and analyze-macros.
+
+--progress WHEN
+    Progress on standard error for several files or a directory: auto (the default: a
+    status line on a terminal), always (also plain lines when standard error is not a
+    terminal), or never. Also accepted by simplify-macros and analyze-macros.
 
 --max-atoms N / --max-bdd-nodes N / --max-work N
     Resource limits (defaults 64 / 100000 / 500000); see "Resource limits". Also accepted by

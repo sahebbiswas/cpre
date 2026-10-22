@@ -13,11 +13,13 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from . import reporting
+from ._style import PLAIN, Style, style_for
 from ._types import AnalysisIncomplete, AnalysisTelemetry, IncompleteComponent
 from .errors import CpreError
 from .macro_analysis import MacroAnalysisResult
 from .model import ConditionalTree
 from .preprocessing import PreprocessDiagnostic
+from .reporting import FindingCounts, label_width, line_label
 from .unknown_macros import MacroUse, UnknownMacro
 
 
@@ -56,33 +58,39 @@ def format_incomplete_component(component: IncompleteComponent) -> str:
 
 
 def incomplete_lines(
-    components: Sequence[IncompleteComponent], *, color: bool = False
+    components: Sequence[IncompleteComponent],
+    *,
+    color: bool = False,
+    style: Style | None = None,
 ) -> list[str]:
     if not components:
         return []
+    style = style_for(style, color)
+    spans = [
+        (
+            f"L{group.location.line}-{group.end_line}"
+            if group.end_line is not None
+            else f"L{group.location.line}",
+            group,
+            "; ".join(diagnostic.message for diagnostic in component.diagnostics),
+        )
+        for component in components
+        for group in component.groups
+    ]
+    width = max(len(span) for span, _, _ in spans)
     lines = [
-        reporting.colored(
+        style.paint(
             "Incomplete analysis (no findings are reported for these conditionals):",
-            "yellow",
-            color,
+            "incomplete",
         )
     ]
-    for component in components:
-        reasons = "; ".join(diagnostic.message for diagnostic in component.diagnostics)
-        for group in component.groups:
-            span = (
-                f"{group.location.line}-{group.end_line}"
-                if group.end_line is not None
-                else str(group.location.line)
-            )
-            condition = f" {group.condition}" if group.condition else ""
-            lines.append(
-                reporting.colored(
-                    f"  {span}: #{group.directive}{condition} [incomplete: {reasons}]",
-                    "yellow",
-                    color,
-                )
-            )
+    for span, group, reasons in spans:
+        condition = f" {group.condition}" if group.condition else ""
+        lines.append(
+            f"{span.ljust(width)} {reporting.badge(style, 'INCOMPLETE', 'incomplete')} "
+            f"{style.paint('#' + group.directive, 'bold')}{condition}"
+        )
+        lines.append(f"{' ' * width}   {style.paint('why', 'dim')}  {reasons}")
     return lines
 
 
@@ -122,43 +130,96 @@ def pragma_hint(message: str) -> str | None:
     return None
 
 
+def _macro_header(
+    style: Style, label: str, role: str, width: int, result: MacroAnalysisResult
+) -> str:
+    line = result.location.line if result.location and result.location.line else None
+    where = line_label(line, width) if line else " " * width
+    return f"{where} {reporting.badge(style, label, role)} {style.paint('#define', 'bold')} {result.name}"
+
+
 def render_macro_report(
     results: Sequence[MacroAnalysisResult],
     *,
     verbose: bool = True,
     color: bool = False,
     rewritten: bool = False,
+    style: Style | None = None,
 ) -> tuple[str, bool]:
+    style = style_for(style, color)
+    shown = [r for r in results if r.simplified or verbose]
+    width = label_width(
+        r.location.line for r in shown if r.location is not None and r.location.line is not None
+    )
     lines: list[str] = []
     has_entries = False
-    for r in results:
-        loc = f"line {r.location.line}: " if r.location and r.location.line else ""
+    for r in shown:
         if r.simplified:
             has_entries = True
-            if not r.rewritable:
-                tag = "proven equivalent; not rewritten: parenthesize the original first"
-            elif rewritten:
-                tag = "rewritten, proven equivalent"
-            else:
-                tag = "proven equivalent"
-            line = (
-                f"{loc}#define {r.name} {r.original_replacement} -> "
-                f"{r.simplified_replacement} [{tag}]"
+            label = "REWRITTEN" if r.rewritable and rewritten else "SIMPLIFY"
+            lines.append(_macro_header(style, label, "simplify", width, r))
+            note = "rewritten, proven equivalent" if label == "REWRITTEN" else "proven equivalent"
+            lines.extend(
+                reporting.transformation_lines(
+                    style,
+                    "   ",
+                    r.original_replacement,
+                    [(r.simplified_replacement or "", note)],
+                )
             )
-            lines.append(reporting.colored(line, "green", color))
-        elif verbose:
-            if r.candidate:
-                reason = r.reason or "simplest equivalent form"
-                line = f"{loc}#define {r.name} {r.original_replacement} ({reason})"
-                lines.append(reporting.colored(line, "gray", color))
-            else:
-                line = f"{loc}#define {r.name} skipped: {r.reason}"
-                lines.append(reporting.colored(line, "gray", color))
+            if not r.rewritable:
+                lines.append(
+                    f"   {style.paint('hint', 'dim')}  "
+                    "not rewritten: parenthesize the original first"
+                )
+        elif r.candidate:
+            reason = r.reason or "simplest equivalent form"
+            header = _macro_header(style, "ok", "ok", width, r)
+            lines.append(f"{header} {r.original_replacement}  {style.paint(f'({reason})', 'dim')}")
+        else:
+            header = _macro_header(style, "skip", "skip", width, r)
+            lines.append(f"{header}  {style.paint(str(r.reason), 'dim')}")
     if lines:
         return "\n".join(lines), has_entries
     if results:
         return "No simplifiable macro definitions found.", False
     return "No macro definitions found.", False
+
+
+def count_macro_findings(results: Sequence[MacroAnalysisResult]) -> FindingCounts:
+    """The simplifiable macro definitions among ``results``."""
+    return FindingCounts(macros=sum(1 for r in results if r.simplified))
+
+
+def file_findings(
+    tree: ConditionalTree | None, macros: Sequence[MacroAnalysisResult]
+) -> FindingCounts:
+    """Every dead, redundant and simplifiable entry one source produced."""
+    counts = count_macro_findings(macros)
+    if tree is not None:
+        counts += reporting.count_findings(tree)
+    return counts
+
+
+def summary_line(counts: FindingCounts, style: Style | None = None) -> str:
+    """One line totalling findings by kind, or ``""`` when there are none."""
+    style = style or PLAIN
+
+    def plural(count: int, noun: str) -> str:
+        return f"{count:,} {noun}{'' if count == 1 else 's'}"
+
+    parts = []
+    if counts.dead:
+        parts.append(style.paint(f"{counts.dead:,} dead", "dead"))
+    if counts.redundant:
+        parts.append(style.paint(f"{counts.redundant:,} redundant", "redundant"))
+    if counts.simplifiable:
+        parts.append(style.paint(plural(counts.simplifiable, "simplifiable condition"), "simplify"))
+    if counts.macros:
+        parts.append(style.paint(plural(counts.macros, "simplifiable macro"), "simplify"))
+    if not parts:
+        return ""
+    return f"{style.paint('Summary', 'bold')}  {style.paint(style.separator, 'dim').join(parts)}"
 
 
 def render_combined_report(
@@ -168,26 +229,35 @@ def render_combined_report(
     verbose: bool = True,
     color: bool = False,
     incomplete_components: Sequence[IncompleteComponent] = (),
+    style: Style | None = None,
 ) -> tuple[str, bool]:
-    sections: list[str] = []
+    style = style_for(style, color)
+    sections: list[tuple[str | None, str]] = []
     has_any = False
     if tree is not None:
-        c_report, c_has = reporting.render_report(tree, verbose=verbose, color=color)
+        c_report, c_has = reporting.render_report(tree, verbose=verbose, style=style)
         if c_has or (verbose and c_report):
-            sections.append(c_report)
+            sections.append(("Conditionals", c_report))
             if c_has:
                 has_any = True
     if incomplete_components:
-        sections.append("\n".join(incomplete_lines(incomplete_components, color=color)))
+        incomplete = "\n".join(incomplete_lines(incomplete_components, style=style))
+        sections.append((None, incomplete))
         has_any = True
     if macros:
-        m_report, m_has = render_macro_report(macros, verbose=verbose, color=color)
+        m_report, m_has = render_macro_report(macros, verbose=verbose, style=style)
         if m_has or (verbose and m_report):
-            sections.append(m_report)
+            sections.append(("Macros", m_report))
             if m_has:
                 has_any = True
+    if len(sections) == 1:
+        return sections[0][1], has_any
     if sections:
-        return "\n".join(sections), has_any
+        blocks = [
+            text if title is None else f"{style.paint(title, 'heading')}\n{text}"
+            for title, text in sections
+        ]
+        return "\n\n".join(blocks), has_any
     if tree is not None and tree.groups:
         return "No notable conditional directives or simplifiable macros found.", False
     if macros:

@@ -296,10 +296,10 @@ def test_cli_text_separates_findings_from_incomplete_analysis(tmp_path, capsys):
 
     captured = capsys.readouterr()
     assert exit_code == 2
-    assert "2: #if A [redundant]" in captured.out
+    assert "L2 REDUNDANT  #if A" in captured.out
     assert "Incomplete analysis (no findings are reported for these conditionals):" in captured.out
-    assert "6-8: #if W_0 ||" in captured.out
-    assert "[incomplete: analysis limit exceeded for atoms: 70 > 64]" in captured.out
+    assert "L6-8 INCOMPLETE #if W_0 ||" in captured.out
+    assert "why  analysis limit exceeded for atoms: 70 > 64" in captured.out
     assert (
         f"{path}: line 6: conditional at lines 6-8 not analyzed "
         "(analysis limit exceeded for atoms: 70 > 64); findings cover only the rest of the file"

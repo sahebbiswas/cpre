@@ -5,10 +5,11 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from .. import reporting
+from .._style import Style
 from .._types import AnalysisOptions
 from ..errors import CpreError
 from ..macro_analysis import MacroSimplificationResult, simplify_macros
@@ -19,9 +20,11 @@ from ..serialization import (
     top_level,
 )
 from ..text_reports import (
+    count_macro_findings,
     format_error,
     format_incomplete,
     render_macro_report,
+    summary_line,
     unified_diff,
 )
 from ._common import (
@@ -29,17 +32,21 @@ from ._common import (
     EXIT_FINDINGS,
     EXIT_OK,
     add_limit_options,
+    add_presentation_options,
     add_symbolic_literal_options,
     analysis_options_from,
     input_paths,
     is_batch,
     is_stdin,
+    output_style,
+    progress_for,
     read_source,
     report_failure,
     source_argument,
     symbolic_literals_from,
     write_exact,
 )
+from ._progress import Progress, paused
 
 _FileResults = list[tuple[Path, MacroSimplificationResult]]
 
@@ -97,6 +104,7 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
     )
     add_symbolic_literal_options(parser, "macro")
     add_limit_options(parser)
+    add_presentation_options(parser)
     return parser
 
 
@@ -105,12 +113,22 @@ def _simplify_files(
     args: argparse.Namespace,
     symbolic_literals: tuple[int, ...],
     options: AnalysisOptions,
+    progress: Progress | None = None,
+    on_file: Callable[[Path, MacroSimplificationResult], None] | None = None,
 ) -> tuple[_FileResults, bool]:
-    """Simplify (and with ``--rewrite`` write) each file; also whether any failed."""
+    """Simplify (and with ``--rewrite`` write) each file; also whether any failed.
+
+    ``on_file`` receives every successfully processed file as soon as it is done.
+    """
     preview = args.diff or args.check
     file_results: _FileResults = []
     had_errors = False
     for path in paths:
+        if progress is not None:
+            progress.file_started(path)
+        failed = False
+        findings = 0
+        finished: MacroSimplificationResult | None = None  # set only once the file is fully handled
         try:
             source = read_source(path, newline="")
             res = simplify_macros(
@@ -125,17 +143,24 @@ def _simplify_files(
             for r in res.results:
                 if not r.complete and r.incomplete:
                     report_failure(path, format_incomplete(r.incomplete))
-                    had_errors = True
+                    failed = True
             if args.rewrite and res.rewritten:
                 with open(path, "w", encoding="utf-8", newline="") as f:
                     f.write(res.rewritten_source)
             file_results.append((path, res))
+            finished = res
+            findings = count_macro_findings(res.results).total
         except CpreError as error:
             report_failure(path, format_error(error))
-            had_errors = True
+            failed = True
         except (OSError, UnicodeDecodeError) as error:
             report_failure(path, str(error))
-            had_errors = True
+            failed = True
+        had_errors = had_errors or failed
+        if finished is not None and on_file is not None:
+            on_file(path, finished)
+        if progress is not None:
+            progress.file_done(findings, failed=failed)
     return file_results, had_errors
 
 
@@ -187,30 +212,49 @@ def _write_preview_json(
         print(json.dumps(top_level("simplify-macros-preview", records[0]), indent=2))
 
 
-def _write_reports(file_results: _FileResults, args: argparse.Namespace, *, batch: bool) -> None:
-    if batch:
-        color = sys.stdout.isatty()
-        reports = []
-        for path, res in file_results:
-            report, has_entries = render_macro_report(
-                res.results,
-                verbose=args.verbose,
-                color=color,
-                rewritten=args.rewrite,
-            )
-            if args.verbose or has_entries:
-                heading = reporting.colored(f"== {path} ==", "cyan", color)
-                reports.append("\n".join((heading, report)))
-        if reports:
-            print("\n\n".join(reports))
-    elif file_results:
-        report, _ = render_macro_report(
-            file_results[0][1].results,
-            verbose=args.verbose,
-            color=sys.stdout.isatty(),
-            rewritten=args.rewrite,
+class _ResultStreamer:
+    """Writes each file's report (or, with ``--diff``, its diff) as the file finishes."""
+
+    def __init__(self, args: argparse.Namespace, style: Style, *, batch: bool) -> None:
+        self._args = args
+        self._style = style
+        self._batch = batch
+        self._written = False
+        self.simplifiable = 0
+
+    def __call__(self, path: Path, res: MacroSimplificationResult) -> None:
+        if self._args.diff:
+            if res.rewritten_source != res.source:
+                with paused():
+                    write_exact(unified_diff(path, res.source, res.rewritten_source))
+            return
+        if self._args.check:
+            return
+        self.simplifiable += count_macro_findings(res.results).macros
+        report, has_entries = render_macro_report(
+            res.results,
+            verbose=self._args.verbose,
+            style=self._style,
+            rewritten=self._args.rewrite,
         )
-        print(report)
+        if self._batch and not (self._args.verbose or has_entries):
+            return
+        heading = f"{self._style.paint(f'== {path} ==', 'heading')}\n" if self._batch else ""
+        with paused():
+            if self._written and self._batch:
+                print()
+            print(f"{heading}{report}")
+        self._written = True
+
+    def finish(self) -> None:
+        """The closing summary; a rewrite reports what it did, so it adds none."""
+        if self._args.rewrite or self._args.diff or self._args.check:
+            return
+        summary = summary_line(reporting.FindingCounts(macros=self.simplifiable), self._style)
+        if summary:
+            with paused():
+                print()
+                print(summary)
 
 
 def simplify_macros_main(
@@ -228,27 +272,29 @@ def simplify_macros_main(
         )
     symbolic_literals = symbolic_literals_from(parser, args)
     options = analysis_options_from(parser, args)
-    paths = input_paths(parser, args)
     batch = is_batch(args)
+    streamer = None if args.json else _ResultStreamer(args, output_style(args), batch=batch)
 
-    file_results, had_errors = _simplify_files(paths, args, symbolic_literals, options)
+    with progress_for(args, batch=batch) as progress:
+        paths = input_paths(parser, args, progress)
+        progress.begin(paths)
+        file_results, had_errors = _simplify_files(
+            paths, args, symbolic_literals, options, progress=progress, on_file=streamer
+        )
 
     changed = [(path, res) for path, res in file_results if res.rewritten_source != res.source]
+    if streamer is not None:
+        streamer.finish()
     if preview:
         if args.json:
             _write_preview_json(
                 file_results, args, batch=batch, symbolic_literals=symbolic_literals
             )
-        elif args.diff:
-            for path, res in changed:
-                write_exact(unified_diff(path, res.source, res.rewritten_source))
         if args.check:
             for path, _ in changed:
                 print(f"would rewrite {path}", file=sys.stderr)
     elif args.json:
         _write_json(file_results, args, batch=batch, symbolic_literals=symbolic_literals)
-    else:
-        _write_reports(file_results, args, batch=batch)
 
     if had_errors:
         return EXIT_ERROR

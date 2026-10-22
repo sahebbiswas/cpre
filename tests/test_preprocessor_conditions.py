@@ -303,7 +303,7 @@ def test_json_identifies_opaque_predicates():
 def test_text_report_labels_opaque_predicates():
     tree = conditions.analyze_source("#if VERSION >= 4 && FOO\n#endif\n")
 
-    assert "opaque: VERSION >= 4" in conditions.format_report(tree)
+    assert "opaque  VERSION >= 4" in conditions.format_report(tree)
 
 
 def test_default_report_filters_unchanged_branches():
@@ -322,9 +322,9 @@ def test_default_report_filters_unchanged_branches():
     report = conditions.format_report(tree, verbose=False)
 
     assert "#if UNCHANGED" not in report
-    assert "#if DUP && DUP [reachable]" in report
-    assert "#if 0 [dead]" in report
-    assert "#if FLAG || !FLAG [redundant]" in report
+    assert "SIMPLIFY   #if DUP && DUP" in report
+    assert "DEAD       #if 0" in report
+    assert "REDUNDANT  #if FLAG || !FLAG" in report
 
 
 def test_filtered_json_retains_unchanged_ancestor_of_changed_branch():
@@ -359,8 +359,8 @@ def test_filtered_text_uses_header_only_for_unchanged_ancestor():
 
     lines = conditions.format_report(tree, verbose=False).splitlines()
 
-    assert lines[0] == "1: #if PARENT [reachable]"
-    assert lines[1] == "  2: #if CHILD && CHILD [reachable]"
+    assert lines[0] == "L1 ok         #if PARENT"
+    assert lines[1] == "| L2 SIMPLIFY   #if CHILD && CHILD"
 
 
 def test_verbose_json_keeps_details_for_unchanged_ancestor():
@@ -390,8 +390,9 @@ def test_default_report_includes_context_only_simplification():
 
     report = conditions.format_report(tree, verbose=False)
 
-    assert "#if PARENT && CHILD [reachable]" in report
-    assert "in context: CHILD" in report
+    assert "SIMPLIFY   #if PARENT && CHILD" in report
+    assert "- PARENT && CHILD" in report
+    assert "+ CHILD" in report
 
 
 def test_formatting_only_normalization_is_not_reported_as_changed():
@@ -465,10 +466,13 @@ def test_colored_report_marks_branch_categories():
 
     report = conditions.format_report(tree, verbose=True, color=True)
 
-    assert "\033[90m1: #if UNCHANGED [reachable]\033[0m" in report
-    assert "\033[32m3: #if DUP && DUP [reachable]\033[0m" in report
-    assert "\033[31m5: #if 0 [dead]\033[0m" in report
-    assert "\033[33m7: #if FLAG || !FLAG [redundant]\033[0m" in report
+    assert "\033[2mok\033[0m" in report
+    assert "\033[1;32mSIMPLIFY\033[0m" in report
+    assert "\033[1;31mDEAD\033[0m" in report
+    assert "\033[1;33mREDUNDANT\033[0m" in report
+    # The "before" of a transformation is red and its "after" green; nothing else is.
+    assert "\033[31m-\033[0m" in report
+    assert "\033[32m+\033[0m" in report
 
 
 def test_cli_json_and_fail_on_findings(tmp_path):

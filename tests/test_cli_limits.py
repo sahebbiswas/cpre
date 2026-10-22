@@ -32,7 +32,7 @@ def test_default_limit_is_exceeded_and_raising_it_completes(tmp_path, capsys):
     assert main(["--max-atoms", "80", path]) == 0
     captured = capsys.readouterr()
     assert captured.err == ""
-    assert "#ifdef OK [redundant]" in captured.out
+    assert "REDUNDANT  #ifdef OK" in captured.out
 
 
 def test_lowering_a_limit_makes_analysis_incomplete(tmp_path, capsys):

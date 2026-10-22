@@ -17,7 +17,7 @@ def test_cli_macros_text_output(tmp_path, capsys):
     code = main([str(source), "--macros"])
     assert code == 0
     captured = capsys.readouterr()
-    assert "#define FEAT_1 (0 && A) || B -> (!!B)" in captured.out
+    assert "#define FEAT_1\n   - (0 && A) || B\n   + (!!B)" in captured.out
     assert "BUFFER_SIZE" not in captured.out
 
 
@@ -30,8 +30,8 @@ def test_cli_macros_verbose_includes_all_macros(tmp_path, capsys):
     code = main([str(source), "--macros", "--verbose"])
     assert code == 0
     captured = capsys.readouterr()
-    assert "#define FEAT_1 (0 && A) || B -> (!!B)" in captured.out
-    assert "BUFFER_SIZE skipped: non-Boolean integer literal" in captured.out
+    assert "#define FEAT_1\n   - (0 && A) || B\n   + (!!B)" in captured.out
+    assert "#define BUFFER_SIZE  non-Boolean integer literal" in captured.out
     assert "#define FEAT_2 (A || B)" in captured.out
 
 
@@ -63,7 +63,7 @@ def test_cli_symbolic_literal_zero(tmp_path, capsys):
     code = main([str(source), "--macros", "--symbolic-literal", "0"])
     assert code == 0
     captured = capsys.readouterr()
-    assert "#define FEAT_1 (0 && A) || (0 && B) -> (0 && (A || B))" in captured.out
+    assert "#define FEAT_1\n   - (0 && A) || (0 && B)\n   + (0 && (A || B))" in captured.out
 
 
 def test_cli_symbolic_literal_zero_preserves_disabled_switch(tmp_path, capsys):
@@ -83,7 +83,7 @@ def test_cli_symbolic_literal_one(tmp_path, capsys):
 
     code = main([str(source), "--macros", "--symbolic-literal", "1"])
     assert code == 0
-    assert "-> (1 || A && B)" in capsys.readouterr().out
+    assert "+ (1 || A && B)" in capsys.readouterr().out
 
 
 def test_cli_symbolic_literal_one_preserves_enabled_switch(tmp_path, capsys):
@@ -98,7 +98,7 @@ def test_cli_symbolic_literal_one_preserves_enabled_switch(tmp_path, capsys):
 
     # Ordinary semantics fold the always-on switch away.
     assert main([str(source)]) == 0
-    assert "-> (!!B)" in capsys.readouterr().out
+    assert "+ (!!B)" in capsys.readouterr().out
 
 
 def test_cli_symbolic_literal_repeated_for_zero_and_one_json(tmp_path, capsys):
@@ -158,8 +158,8 @@ def test_cli_unified_both_conditionals_and_macros(tmp_path, capsys):
     assert code == 0
     captured = capsys.readouterr()
     # Both conditional findings and macro simplification findings are present
-    assert "#elif A [dead]" in captured.out
-    assert "#define FEAT_1 (0 && A) || B -> (!!B)" in captured.out
+    assert "DEAD       #elif A" in captured.out
+    assert "#define FEAT_1\n   - (0 && A) || B\n   + (!!B)" in captured.out
 
 
 def test_cli_disable_flags(tmp_path, capsys):
@@ -169,14 +169,14 @@ def test_cli_disable_flags(tmp_path, capsys):
     # --no-macros: only conditionals
     main([str(source), "--no-macros"])
     out1 = capsys.readouterr().out
-    assert "#elif A [dead]" in out1
+    assert "DEAD       #elif A" in out1
     assert "FEAT_1" not in out1
 
     # --no-conditionals: only macros
     main([str(source), "--no-conditionals"])
     out2 = capsys.readouterr().out
     assert "#elif A" not in out2
-    assert "#define FEAT_1 (0 && A) || B -> (!!B)" in out2
+    assert "#define FEAT_1\n   - (0 && A) || B\n   + (!!B)" in out2
 
 
 def test_cli_sarif_with_symbolic_options(tmp_path, capsys):
@@ -215,9 +215,9 @@ def test_cli_macros_batch_recursive(tmp_path, capsys):
     assert code == 0
     captured = capsys.readouterr()
     assert "f1.c" in captured.out
-    assert "#define M1 (A && A) -> (!!A)" in captured.out
+    assert "#define M1\n   - (A && A)\n   + (!!A)" in captured.out
     assert "f2.h" in captured.out
-    assert "#define M2 (B || 0) -> (!!B)" in captured.out
+    assert "#define M2\n   - (B || 0)\n   + (!!B)" in captured.out
 
 
 def test_cli_json_disabled_conditionals_emits_empty_groups(tmp_path, capsys):

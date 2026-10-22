@@ -131,14 +131,15 @@ def test_incomplete_text_names_each_conditional():
     assert text_reports.format_incomplete_component(component).startswith("line 1: conditional at")
     lines = text_reports.incomplete_lines([component])
     assert lines[0].startswith("Incomplete analysis")
-    assert lines[1].startswith("  1-2: #if A && B [incomplete:")
+    assert lines[1].startswith("L1-2 INCOMPLETE #if A && B")
+    assert lines[2].lstrip().startswith("why  ")
     assert text_reports.incomplete_lines([]) == []
 
 
 def test_macro_and_combined_reports():
     macros = analyze_macros(SOURCE)
     report, has_entries = text_reports.render_macro_report(macros)
-    assert has_entries and "#define A (X || X) -> (!!X) [proven equivalent]" in report
+    assert has_entries and "#define A\n   - (X || X)\n   + (!!X)  (proven equivalent)" in report
     assert text_reports.render_macro_report([]) == ("No macro definitions found.", False)
     plain = text_reports.render_macro_report(macros, color=True)[0]
     assert "\x1b[" in plain
