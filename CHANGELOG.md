@@ -21,6 +21,9 @@ raise that document's schema major version and are listed here (see the
   privately, and this changelog.
 
 ### Changed
+- Dependabot keeps the GitHub Actions and development dependencies current, and
+  `.github/scripts/configure_repository.sh` applies the branch protection and
+  security settings CONTRIBUTING describes.
 - Package metadata uses a PEP 639 license expression (`Apache-2.0`) and requires
   `setuptools>=77` to build; the deprecated license table and classifier are gone.
 

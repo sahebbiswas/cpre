@@ -1,0 +1,20 @@
+# Keep the GitHub Actions used by CI and the release workflow, and the development
+# dependencies, current. cpre has no runtime dependencies, so nothing here changes
+# what users install. Security updates for vulnerable dependencies are switched on
+# in the repository settings (CONTRIBUTING.md, "Repository settings").
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      development-dependencies:
+        patterns: ["*"]
