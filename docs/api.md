@@ -2,6 +2,8 @@
 
 Use the top-level `cpre` package as the supported Python compatibility boundary. This guide covers symbolic conditional analysis and the general integration contract. Concrete configuration selection and macro expansion live in the separate [preprocessing guide](preprocessing.md).
 
+The package is fully typed and ships a `py.typed` marker ([PEP 561](https://peps.python.org/pep-0561/)), so mypy and pyright check your calls against cpre's annotations without extra stubs.
+
 For command-line workflows, see the [CLI guide](cli.md). For process-to-process findings interchange, see [SARIF output](sarif.md).
 
 ## Supported import boundary
