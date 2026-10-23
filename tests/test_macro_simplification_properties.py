@@ -99,8 +99,10 @@ def _replacements(literals=LITERALS):
 
 def _configuration(values):
     return MacroConfiguration(
-        integers={name: value for name, value in zip(NAMES, values) if value is not None},
-        undefined={name for name, value in zip(NAMES, values) if value is None},
+        integers={
+            name: value for name, value in zip(NAMES, values, strict=False) if value is not None
+        },
+        undefined={name for name, value in zip(NAMES, values, strict=False) if value is None},
         unknown_names=UnknownNamePolicy.UNDEFINED,
     )
 
@@ -121,9 +123,9 @@ def _selected(source, values):
 def _assert_same_branches(original, rewritten):
     for values in itertools.product(ATOM_VALUES, repeat=len(NAMES)):
         # Output lines: "int before;", then one branch body per context.
-        before = dict(zip(CONTEXTS, _selected(original, values)[1:]))
-        after = dict(zip(CONTEXTS, _selected(rewritten, values)[1:]))
-        assert before == after, f"configuration {dict(zip(NAMES, values))}"
+        before = dict(zip(CONTEXTS, _selected(original, values)[1:], strict=False))
+        after = dict(zip(CONTEXTS, _selected(rewritten, values)[1:], strict=False))
+        assert before == after, f"configuration {dict(zip(NAMES, values, strict=False))}"
 
 
 def _definition(replacement, decoration):

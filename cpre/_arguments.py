@@ -69,4 +69,4 @@ def bind_arguments(
         raise ExpansionError(
             f"{definition.name} expects {len(parameters)} arguments, got {len(arguments)}"
         )
-    return dict(zip(parameters, arguments))
+    return dict(zip(parameters, arguments, strict=True))

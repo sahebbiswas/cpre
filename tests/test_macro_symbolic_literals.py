@@ -212,7 +212,7 @@ def test_symbolic_rewrite_is_equivalent_under_ordinary_c_semantics(text, policy)
     result = _symbolic(text, policy)
     rewritten = result.simplified_replacement or result.original_replacement
     for values in itertools.product((False, True), repeat=3):
-        env = dict(zip(("A", "B", "C"), values))
+        env = dict(zip(("A", "B", "C"), values, strict=False))
         assert _evaluate(rewritten, env) == _evaluate(text, env), (text, rewritten, env)
 
 
@@ -224,7 +224,7 @@ def test_symbolic_rewrite_is_never_more_aggressive_than_ordinary(text, policy):
     plain_text = plain.simplified_replacement or plain.original_replacement
     sym_text = sym.simplified_replacement or sym.original_replacement
     for values in itertools.product((False, True), repeat=3):
-        env = dict(zip(("A", "B", "C"), values))
+        env = dict(zip(("A", "B", "C"), values, strict=False))
         assert _evaluate(plain_text, env) == _evaluate(sym_text, env)
 
 

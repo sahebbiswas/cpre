@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_license_is_an_spdx_expression_with_a_license_file(pyproject: dict[str, Any]):
@@ -24,3 +27,28 @@ def test_the_build_backend_understands_pep_639(pyproject: dict[str, Any]):
     ]
     match = re.fullmatch(r"setuptools>=(\d+)(\.\d+)*", requirement)
     assert match is not None and int(match.group(1)) >= 77
+
+
+def test_the_python_floor_matches_classifiers_ci_and_tox(pyproject: dict[str, Any]):
+    floor = re.fullmatch(r">=(3\.\d+)", pyproject["project"]["requires-python"])
+    assert floor is not None
+    minors = [
+        match.group(1)
+        for classifier in pyproject["project"]["classifiers"]
+        if (match := re.fullmatch(r"Programming Language :: Python :: (3\.\d+)", classifier))
+    ]
+    assert minors[0] == floor.group(1)
+    assert minors == sorted(minors, key=lambda v: int(v.split(".")[1]))
+
+    ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    matrix = re.search(r"python-version: \[([^\]]+)\]", ci)
+    assert matrix is not None
+    assert re.findall(r'"(3\.\d+)"', matrix.group(1)) == minors
+
+    tox = (ROOT / "tox.ini").read_text(encoding="utf-8")
+    envs = re.search(r"envlist = (.+)", tox)
+    assert envs is not None
+    assert [e for e in envs.group(1).split(", ") if e.startswith("py")] == [
+        "py" + m.replace(".", "") for m in minors
+    ]
+    assert pyproject["tool"]["ruff"]["target-version"] == "py" + floor.group(1).replace(".", "")

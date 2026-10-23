@@ -246,7 +246,7 @@ def test_multiline_invocation_mapping_and_untouched_comments(ending):
     assert re.findall(r"\r\n|\r|\n", result.source) == re.findall(r"\r\n|\r|\n", source)
     assert result.source_map[0].output_start == 0
     assert result.source_map[-1].output_end == len(result.source)
-    for left, right in zip(result.source_map, result.source_map[1:]):
+    for left, right in zip(result.source_map, result.source_map[1:], strict=False):
         assert left.output_end == right.output_start
 
 

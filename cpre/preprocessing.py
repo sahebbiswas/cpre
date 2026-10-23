@@ -1641,11 +1641,11 @@ def _finish_unit(context: _UnitContext, pragma_markers: tuple[_SourcePragma, ...
     physical = context.physical
     output = "".join(
         line if keep else "".join(char if char in "\r\n" else " " for char in line)
-        for line, keep in zip(physical, retained)
+        for line, keep in zip(physical, retained, strict=True)
     )
     characters = list(output)
     char_kept = bytearray()
-    for line, keep in zip(physical, retained):
+    for line, keep in zip(physical, retained, strict=True):
         char_kept.extend(bytes([keep]) * len(line))
     for token in expansion.tokens:
         if (
@@ -1658,7 +1658,7 @@ def _finish_unit(context: _UnitContext, pragma_markers: tuple[_SourcePragma, ...
     restored_lines = split_lines(restored, keepends=True)
     removed_lines = frozenset(
         line_number
-        for line_number, (line, keep) in enumerate(zip(restored_lines, retained), 1)
+        for line_number, (line, keep) in enumerate(zip(restored_lines, retained, strict=False), 1)
         if not keep and not line.rstrip("\r\n").strip()
     )
     output, source_map = expansion.render(restored)

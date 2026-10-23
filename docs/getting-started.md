@@ -17,7 +17,7 @@ cpre is a reasoning tool, not a compiler front end. It does not know your compil
 
 ## Install
 
-cpre needs Python 3.9 or later and has no runtime dependencies.
+cpre needs Python 3.10 or later and has no runtime dependencies.
 
 ```bash
 python -m pip install cpre

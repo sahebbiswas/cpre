@@ -199,7 +199,7 @@ def render(source: str, occurrences: tuple[Occurrence, ...]) -> str:
             )
         for position in writable:
             characters[position] = " "
-        for position, char in zip(writable, occurrence.placeholder):
+        for position, char in zip(writable, occurrence.placeholder, strict=False):
             characters[position] = char
     return "".join(characters)
 

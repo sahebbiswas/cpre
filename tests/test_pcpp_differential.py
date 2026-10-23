@@ -220,7 +220,7 @@ def test_offsetof_container_semantics_match_pcpp():
         tokens = _semantic_tokens(output)
         assert "offsetof" not in tokens
         assert "container_of" not in tokens
-        assert ("struct", "item") in tuple(zip(tokens, tokens[1:]))
+        assert ("struct", "item") in tuple(zip(tokens, tokens[1:], strict=False))
         assert "->" in tokens
 
         tree = c_parser.CParser().parse(_without_line_markers(output))
