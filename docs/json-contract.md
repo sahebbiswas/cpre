@@ -87,7 +87,7 @@ Every top-level document has `schema` as its first key. The value is `cpre.<kind
 The number after the slash is the **major version** of that document kind.
 
 - **Compatible changes keep the major version** and may appear in any release: a new field, a new `code`/`status`/`directive` value, a new document kind, or a clarified description. Consumers must ignore fields they do not know and must tolerate new enumerated values.
-- **Incompatible changes raise the major version** of the affected kind: removing or renaming a field, changing its type or meaning, or changing ordering guarantees. The change is announced in the changelog, and this page documents both versions during the transition.
+- **Incompatible changes raise the major version** of the affected kind: removing or renaming a field, changing its type or meaning, or changing ordering guarantees. The change is announced in the [changelog](../CHANGELOG.md), and this page documents both versions during the transition.
 - `cpre --version` is not part of the document. The `schema` value is the only version identifier a consumer needs.
 - Text output, `--sarif` output, and the diagnostics in stderr are outside this contract.
 

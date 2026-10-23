@@ -215,6 +215,10 @@ When extending cpre, keep downstream integrations on the documented top-level `c
 
 `0.7.0` marked the transition from Alpha to Beta. During Beta, the documented top-level API is intended for real integrations; compatibility-sensitive changes must be deliberate and called out as a **Behaviour change:** in the pull request and release notes.
 
+## Changelog and security
+
+Changes are listed in [CHANGELOG.md](https://github.com/sahebbiswas/cpre/blob/main/CHANGELOG.md). To report a vulnerability privately, see [SECURITY.md](https://github.com/sahebbiswas/cpre/blob/main/SECURITY.md).
+
 ## License
 
 Licensed under the Apache License, Version 2.0. See the [repository license](https://github.com/sahebbiswas/cpre/blob/main/LICENSE).

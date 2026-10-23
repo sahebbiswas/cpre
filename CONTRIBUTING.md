@@ -105,11 +105,15 @@ Two function-level imports remain on purpose, each marked in the code: `configur
   [Versioning](#versioning)).
 - **Update the docs** (README, `docs/`, this file) in the same pull request as
   the code they describe.
-- **Describe the change in the pull request.** There is no changelog file; the
-  pull request description is the record of what changed and why. Start any
-  change that users can notice (different results, newly rejected input,
-  removed or renamed options) with **Behaviour change:**, so it can be found
-  when release notes are written.
+- **Update the changelog.** Add a line under **Unreleased** in
+  [`CHANGELOG.md`](CHANGELOG.md) for any change users can notice, under Added,
+  Changed, Deprecated, Removed, Fixed or Security. Start a change that alters
+  results, rejects input that used to be accepted, or removes or renames an
+  option with **Behaviour change:**. Releasing moves **Unreleased** under the new
+  version heading (see [Releasing](#releasing)).
+- **Describe the change in the pull request.** The pull request description is
+  the record of what changed and why. Repeat **Behaviour change:** there for the
+  same changes.
 - **Close the issues it finishes.** Put `Closes #N` in the pull request
   description, one per line, for each issue the pull request completes, so
   GitHub links them and closes them when it merges. Naming the issue (`#N`)
@@ -225,7 +229,14 @@ Publishing (no API tokens are stored).
    against them, uploads to TestPyPI, installs from there, and only then
    uploads to PyPI.
 
-The release notes on GitHub are the history of what each release contains. A
+4. Afterward, open a pull request that moves the **Unreleased** entries in
+   `CHANGELOG.md` under a heading for the released version and date, adds that
+   version's compare link, and points the `[Unreleased]` link at the new tag
+   (`vX.Y.Z...HEAD`), so it lists only what came after the release. (The tag
+   must point at a commit that is already on `main`, so the changelog is updated
+   after the release rather than before.)
+
+The changelog and the release notes on GitHub are the history of what each release contains. A
 version maps to the commit that set it (`git log --oneline -S'__version__ = "0.20.1"' --
 cpre/__init__.py`), and every commit on `main` links to its pull request.
 
