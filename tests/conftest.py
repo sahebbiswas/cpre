@@ -8,7 +8,9 @@ workflow sets it when it runs the suite against the built distributions.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -37,3 +39,14 @@ def _terminal_independent_output(monkeypatch: pytest.MonkeyPatch) -> None:
     from cpre import _style
 
     monkeypatch.setattr(_style, "_enable_windows_vt", lambda stream: True)
+
+
+@pytest.fixture(scope="session")
+def pyproject() -> dict[str, Any]:
+    """``pyproject.toml`` parsed, so tests assert on the declared tables, not on raw text."""
+    if sys.version_info >= (3, 11):
+        import tomllib
+    else:  # tomli is a development dependency on 3.10
+        import tomli as tomllib
+    path = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    return tomllib.loads(path.read_text(encoding="utf-8"))
