@@ -178,9 +178,9 @@ releases are cut from `main` whenever it is stable enough (see
   and no extra fetch. Whether the step is the right one is left to review.
 - GitHub computes that merge commit when the check runs and does not re-run the
   check when `main` moves. To stop two pull requests from merging with the same
-  version, turn on branch protection for `main` with *Require status checks to
-  pass* (including *Version bumped*) and *Require branches to be up to date
-  before merging*.
+  version, `main` is protected with *Require status checks to pass* (including
+  *Version bumped*) and *Require branches to be up to date before merging*; see
+  [Repository settings](#repository-settings).
 - Pick the part to bump by the largest change in the pull request:
 
   | Bump | When | Example |
@@ -200,6 +200,33 @@ releases are cut from `main` whenever it is stable enough (see
   names start with `_`, are internal and can change in any version.
 - Most versions are never published. PyPI only gets the versions that are
   released, so gaps between published versions are expected.
+
+## Repository settings
+
+A few settings live on GitHub rather than in the repository. A maintainer with admin
+rights applies them with the GitHub CLI:
+
+```bash
+.github/scripts/configure_repository.sh --dry-run   # show what would be sent
+.github/scripts/configure_repository.sh             # apply
+```
+
+Run it signed in to the GitHub CLI (`gh auth login`) as a repository admin: the settings
+need admin rights, and the default workflow token of CI cannot change them. Without
+`--dry-run` it changes the repository for real (branch protection, Dependabot, alerts,
+private reporting), so read the dry run first. Branch protection is described in
+[GitHub's documentation](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches).
+
+It protects `main` (required status checks: every job of the CI workflow plus
+*Version bumped*, branch up to date before merging; a new protection also forbids
+force pushes and deletion), and turns on Dependabot security updates, dependency
+alerts and private vulnerability reporting (used by [SECURITY.md](SECURITY.md)). Run
+it again after the CI job names change, for example when the Python version matrix
+changes: on a branch that is already protected it updates only the required status
+checks and leaves every other rule (reviews, push restrictions, admin enforcement)
+as it is.
+`.github/dependabot.yml` keeps the GitHub Actions and development dependencies
+current; cpre itself has no runtime dependencies.
 
 ## Releasing
 

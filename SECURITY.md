@@ -12,6 +12,11 @@ Use GitHub's private reporting: open the repository's **Security** tab and choos
 **Report a vulnerability** (or go to
 <https://github.com/sahebbiswas/cpre/security/advisories/new>).
 
+If that button is not shown (private reporting is a repository setting that may not be
+on yet), do not post details publicly. Open an issue titled "Security contact request"
+that says only that you have a security report, with no technical details, and the
+maintainer will arrange a private channel.
+
 Include the cpre version (`cpre --version`), the command or API call, and the
 smallest input that shows the problem. cpre is maintained by one person, so the
 response is best effort: expect an acknowledgement within about a week, and a fix
