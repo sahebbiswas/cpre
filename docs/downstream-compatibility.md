@@ -91,14 +91,14 @@ Covered:
 
 - **Python API:** every name in `cpre.__all__`, documented in the [API guide](api.md) and exercised by the downstream contract suites. Type annotations are part of it (the package ships `py.typed`).
 - **JSON documents:** every `cpre.<kind>/<major>` document, under the rules in the [JSON contract](json-contract.md). New fields and new enumerated values are compatible changes; consumers must ignore fields they do not know.
-- **SARIF 2.1.0 output:** the rules, results and fixes it documents in [SARIF output](sarif.md).
+- **SARIF 2.1.0 output:** the rules, results, fixes and tool notifications it documents in [SARIF output](sarif.md).
 - **CLI:** documented commands and options, and the exit statuses `0`, `1`, `2` and `130` ([exit status contract](cli.md#exit-status-contract)).
 - **Behaviour:** deterministic ordering, the complete / partial / incomplete result semantics, and the documented analysis and preprocessing semantics. A bug fix that corrects a wrong result is a patch release, even though a result changes.
 
 Not covered (can change in any release):
 
 - human-readable text reports, progress output and stderr diagnostic wording;
-- the `telemetry` key of `--json --telemetry`;
+- telemetry output: the `telemetry` key of `--json --telemetry` and the stderr `telemetry:` lines (the `--telemetry` option itself is covered as a documented CLI option);
 - internal modules (everything but the top-level `cpre` package) and names that start with `_`;
 - the default resource limits (`--max-atoms` and the like): changing one can turn an incomplete result into a complete one, and is called out in the changelog;
 - supported Python versions: they follow CPython's lifecycle, and dropping an end-of-life version is a minor release.

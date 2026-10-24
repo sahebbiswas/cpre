@@ -4,7 +4,7 @@
 
 `cpre` analyzes Boolean conditions in C and C++ preprocessor conditional blocks without parsing the surrounding translation unit. It finds dead and redundant branches, simplifies conditions with bounded ROBDD reasoning, and also exposes a concrete preprocessing API for downstream analyzers that need one selected, macro-expanded source representation.
 
-**Project status: stable (1.0).** The documented CLI, the top-level Python API, the JSON documents and the SARIF output follow [Semantic Versioning](https://semver.org/): they change incompatibly only in a new major version. [What 1.0 promises](https://github.com/sahebbiswas/cpre/blob/main/docs/downstream-compatibility.md#what-10-promises) lists exactly what is covered and what is not (human-readable text, `--telemetry`, internal modules).
+**Project status: stable (1.0).** The documented CLI, the top-level Python API, the JSON documents and the SARIF output follow [Semantic Versioning](https://semver.org/): they change incompatibly only in a new major version. [What 1.0 promises](https://github.com/sahebbiswas/cpre/blob/main/docs/downstream-compatibility.md#what-10-promises) lists exactly what is covered and what is not (human-readable text, telemetry output, internal modules).
 
 ## What cpre provides
 
