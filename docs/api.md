@@ -607,7 +607,7 @@ Use:
 
 ## Compatibility expectations
 
-cpre is in Beta. The documented top-level API is intended for real downstream integrations, and compatibility-sensitive changes should be deliberate and documented.
+Since 1.0 the documented top-level API follows Semantic Versioning: it changes incompatibly only in a new major version. [What 1.0 promises](downstream-compatibility.md#what-10-promises) lists what is covered.
 
 Evergreen integration code should depend on documented types, enum values, result fields, symbolic expression categories/tagged interchange, and `cpre.__all__`, not private helpers or implementation-specific ROBDD/parser details.
 

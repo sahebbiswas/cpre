@@ -52,3 +52,34 @@ def test_the_python_floor_matches_classifiers_ci_and_tox(pyproject: dict[str, An
         "py" + m.replace(".", "") for m in minors
     ]
     assert pyproject["tool"]["ruff"]["target-version"] == "py" + floor.group(1).replace(".", "")
+
+
+def test_development_status_matches_the_major_version(pyproject: dict[str, Any]):
+    major = int(_package_version().split(".")[0])
+    (status,) = [
+        c for c in pyproject["project"]["classifiers"] if c.startswith("Development Status ::")
+    ]
+    if major >= 1:
+        assert status == "Development Status :: 5 - Production/Stable"
+    else:
+        assert status in {
+            "Development Status :: 3 - Alpha",
+            "Development Status :: 4 - Beta",
+        }
+    assert _package_version('__version__ = "1.0.0rc1"\n') == "1.0.0rc1"
+
+
+def _package_version(init: str | None = None) -> str:
+    if init is None:
+        init = (ROOT / "cpre" / "__init__.py").read_text(encoding="utf-8")
+    match = re.search(r'^__version__ = "(\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?)"$', init, re.MULTILINE)
+    assert match is not None
+    return match.group(1)
+
+
+def test_the_stability_promise_is_documented_where_users_look():
+    promise = (ROOT / "docs/downstream-compatibility.md").read_text(encoding="utf-8")
+    assert "## What 1.0 promises" in promise
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "Beta" not in readme
+    assert "downstream-compatibility.md#what-10-promises" in readme
