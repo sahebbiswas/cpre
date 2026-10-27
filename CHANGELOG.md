@@ -32,6 +32,14 @@ raise that document's schema major version and are listed here (see the
   `cpre.evaluation/1` JSON record is documented in the
   [JSON contract](docs/json-contract.md#cpreevaluation1), and the new
   [Evaluating expressions and macros](docs/evaluation.md) guide covers the semantics.
+- `cpre evaluate`, a command that prints the integer value of each macro or expression
+  named on the command line under one concrete configuration (`-D`, `-U`,
+  `--config-from`, `--unknown-names` and the other `preprocess` configuration options),
+  with the expanded expression and a reason for any item that has no provable value. It
+  exits `1` when any item has none, and `--json` writes a `cpre.evaluations/1`
+  document. Control characters in an operand or its expansion are shown as `\xNN` escapes
+  in the text report, never written to the terminal. See the
+  [CLI reference](docs/cli.md#macro-and-expression-values-with-evaluate).
 - `cpre/py.typed` and the `Typing :: Typed` classifier: mypy and pyright now use
   cpre's annotations instead of treating the package as untyped.
 - `SECURITY.md` with the supported versions and how to report a vulnerability

@@ -145,7 +145,15 @@ def test_api_index_names_every_public_symbol() -> None:
 def test_every_cli_option_is_documented() -> None:
     cli = (DOCS / "cli.md").read_text(encoding="utf-8")
     option_re = re.compile(r"(?<![\w-])(--[a-z][a-z0-9-]+)")
-    for command in ("", "simplify-macros", "analyze-macros", "preprocess", "cover", "test-input"):
+    for command in (
+        "",
+        "simplify-macros",
+        "analyze-macros",
+        "preprocess",
+        "cover",
+        "evaluate",
+        "test-input",
+    ):
         argv = [sys.executable, "-m", "cpre", *([command] if command else []), "--help"]
         env = {**os.environ, "COLUMNS": "200"}
         help_text = subprocess.run(argv, capture_output=True, text=True, env=env, check=True).stdout

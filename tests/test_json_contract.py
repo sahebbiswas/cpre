@@ -209,5 +209,6 @@ def test_documented_contract_names_every_schema_kind():
         "unknown-macros",
         "expression",
         "evaluation",
+        "evaluations",
     ):
         assert f"cpre.{kind}/1" in text

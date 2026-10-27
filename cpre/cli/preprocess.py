@@ -24,7 +24,11 @@ from ..unknown_macros import UnknownMacro, unknown_macros_in_source
 from ._common import EXIT_ERROR, EXIT_OK, read_source, source_argument
 from .has_include_answers import answer_provider, parse_has_include_answers
 from .pragma_options import add_pragma_options, pragma_handler_from
-from .preprocess_configuration import configuration_with_origins
+from .preprocess_configuration import (
+    add_configuration_options,
+    configuration_with_origins,
+    require_seed_for_seed_options,
+)
 
 
 def build_parser(prog: str) -> argparse.ArgumentParser:
@@ -41,7 +45,7 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
         type=source_argument,
         help="a C/C++ source file, or - for standard input; directory inputs are not supported",
     )
-    _add_configuration_options(parser)
+    add_configuration_options(parser)
     parser.add_argument(
         "--compact",
         action="store_true",
@@ -92,76 +96,6 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
         "to read the seed closed-world while the target stays open-world"
     )
     return parser
-
-
-def _add_configuration_options(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--define",
-        "-D",
-        dest="defines",
-        action="append",
-        default=[],
-        metavar="NAME[=VALUE]",
-        help="define an external object-like macro; NAME alone defines an empty macro",
-    )
-    parser.add_argument(
-        "--undef",
-        "-U",
-        dest="undefined",
-        action="append",
-        default=[],
-        metavar="NAME",
-        help="explicitly mark an external macro as undefined",
-    )
-    parser.add_argument(
-        "--config-from",
-        dest="config_from",
-        action="append",
-        default=[],
-        type=Path,
-        metavar="PATH",
-        help=(
-            "derive the initial macro configuration from the final macro state of a seed "
-            "file such as flags.h; repeatable, applied in order with the last definition "
-            "winning; -D/-U are visible while seeds are evaluated and always take precedence"
-        ),
-    )
-    parser.add_argument(
-        "--config-exclude",
-        dest="config_exclude",
-        action="append",
-        default=[],
-        metavar="NAME",
-        help=(
-            "remove NAME from the configuration derived by --config-from (a private helper "
-            "macro or a guard the detector does not recognize); repeatable; the seed still "
-            "sees its own definition, and -D/-U of the same name still win"
-        ),
-    )
-    parser.add_argument(
-        "--unknown-names",
-        choices=[policy.value for policy in UnknownNamePolicy],
-        default=UnknownNamePolicy.OPEN.value,
-        help=("policy for names absent from the external configuration (default: open)"),
-    )
-    parser.add_argument(
-        "--config-from-unknown-names",
-        dest="config_from_unknown_names",
-        choices=[policy.value for policy in UnknownNamePolicy],
-        default=None,
-        help=(
-            "policy for names absent from the configuration while --config-from seeds are "
-            "evaluated (default: the --unknown-names policy); 'undefined' reads a guarded "
-            "flags header with normal C semantics without making the target closed-world"
-        ),
-    )
-    parser.add_argument(
-        "--standard-macro",
-        action="append",
-        default=[],
-        metavar="NAME=VALUE",
-        help="supply a deterministic value for a supported standard predefined macro",
-    )
 
 
 def add_include_options(parser: argparse.ArgumentParser) -> None:
@@ -274,10 +208,7 @@ def _check_options(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
         parser.error("--dump-macros cannot be combined with --compact or --list-unknown-macros")
     if args.has_include_from_search and not (args.include_dirs or args.quote_dirs):
         parser.error("--has-include-from-search requires -I or --iquote")
-    if args.config_exclude and not args.config_from:
-        parser.error("--config-exclude requires --config-from")
-    if args.config_from_unknown_names is not None and not args.config_from:
-        parser.error("--config-from-unknown-names requires --config-from")
+    require_seed_for_seed_options(parser, args)
     if len(args.sources) != 1:
         parser.error("preprocess currently accepts exactly one source file")
     path: Path = args.sources[0]
