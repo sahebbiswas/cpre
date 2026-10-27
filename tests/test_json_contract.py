@@ -163,6 +163,27 @@ def test_expression_document_fields(capsys):
     assert set(data) == EXPRESSION_KEYS and data["schema"] == "cpre.expression/1"
 
 
+EVALUATION_KEYS = {
+    "schema", "kind", "expression", "state", "value", "unsigned", "expanded", "reason",
+    "message", "offset",
+}  # fmt: skip
+
+
+def test_evaluation_document_fields_and_schema():
+    import cpre
+    from cpre import serialization
+
+    config = cpre.MacroConfiguration(integers={"A": 2})
+    for evaluation in (
+        cpre.evaluate_expression("A * 3", config),
+        cpre.evaluate_expression("A / 0", config),
+        cpre.evaluate_macro("MISSING", config),
+    ):
+        data = serialization.evaluation_document(evaluation)
+        assert list(data)[0] == "schema" and data["schema"] == "cpre.evaluation/1"
+        assert set(data) == EVALUATION_KEYS
+
+
 @pytest.mark.parametrize("seed", ["0", "1", "12345"])
 def test_output_is_identical_across_hash_seeds(source, seed):
     def output(env_seed):
@@ -187,5 +208,6 @@ def test_documented_contract_names_every_schema_kind():
         "preprocess",
         "unknown-macros",
         "expression",
+        "evaluation",
     ):
         assert f"cpre.{kind}/1" in text

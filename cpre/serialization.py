@@ -18,6 +18,7 @@ from ._types import (
     IncompleteComponent,
 )
 from .coverage import BranchCoverageResult, CoverageConfiguration
+from .evaluation import Evaluation
 from .macro_analysis import MacroAnalysisResult, MacroSimplificationResult
 from .macro_environment import MacroEnvironmentEntry
 from .model import ConditionalTree
@@ -360,6 +361,11 @@ def preprocess_document(
             ],
         },
     )
+
+
+def evaluation_document(evaluation: Evaluation) -> dict[str, object]:
+    """The ``cpre.evaluation/1`` document for one expression or macro evaluation."""
+    return top_level("evaluation", evaluation.to_dict())
 
 
 def expression_document(

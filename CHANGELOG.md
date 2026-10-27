@@ -24,6 +24,14 @@ raise that document's schema major version and are listed here (see the
   itself.
 
 ### Added
+- `evaluate_expression()` and `evaluate_macro()` compute the integer value of an
+  expression, or of a macro that expands to integer arithmetic, under a
+  `MacroConfiguration`, with the same evaluator as `#if`. They return an immutable
+  `Evaluation` (`EvaluationState`, `EvaluationReason`) with the expanded expression and,
+  when no value can be proved, a stable reason instead of a guess or an exception. A
+  `cpre.evaluation/1` JSON record is documented in the
+  [JSON contract](docs/json-contract.md#cpreevaluation1), and the new
+  [Evaluating expressions and macros](docs/evaluation.md) guide covers the semantics.
 - `cpre/py.typed` and the `Typing :: Typed` classifier: mypy and pyright now use
   cpre's annotations instead of treating the package as untyped.
 - `SECURITY.md` with the supported versions and how to report a vulnerability

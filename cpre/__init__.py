@@ -34,6 +34,13 @@ from .coverage import (
     CoverageConfiguration,
     cover_branches,
 )
+from .evaluation import (
+    Evaluation,
+    EvaluationReason,
+    EvaluationState,
+    evaluate_expression,
+    evaluate_macro,
+)
 from .expansion import SourceMapping
 from .macro_analysis import (
     MacroAnalysisResult,
@@ -110,7 +117,7 @@ from .unknown_macros import MacroUse, UnknownMacro, unknown_macros, unknown_macr
 
 # Single source of truth for the package version (Semantic Versioning 2.0.0).
 # Every pull request merged to main bumps it once; see CONTRIBUTING.md.
-__version__ = "1.0.1"
+__version__ = "1.1.0"
 
 __all__ = [
     "AnalysisError",
@@ -138,6 +145,9 @@ __all__ = [
     "DirectiveToken",
     "Disjunction",
     "ErrorCode",
+    "Evaluation",
+    "EvaluationReason",
+    "EvaluationState",
     "ExactSimplification",
     "Expression",
     "FALSE",
@@ -193,6 +203,8 @@ __all__ = [
     "cover_branches",
     "disjunction",
     "equivalent",
+    "evaluate_expression",
+    "evaluate_macro",
     "exact_simplify",
     "expression_from_dict",
     "expression_predicates",

@@ -1,5 +1,7 @@
 """The integer-value evaluator shares its grammar and bounds with #if conditions."""
 
+from dataclasses import replace
+
 import pytest
 
 from cpre.expansion import Expansion
@@ -29,13 +31,14 @@ def obj(name, replacement):
     return MacroDefinition(name, replacement)
 
 
-def evaluate(text, *definitions, limit=100_000, expansion_limit=100_000):
-    return evaluate_integer_expression(
+def evaluate(text, *definitions, limit=100_000, expansion_limit=100_000, keep_expanded=False):
+    result = evaluate_integer_expression(
         text,
         environment(*definitions),
         Expansion(text, AnalysisBudget(expansion_limit)),
         AnalysisBudget(limit),
     )
+    return result if keep_expanded else replace(result, expanded=None)
 
 
 def condition(text, *definitions):
@@ -255,3 +258,27 @@ def test_condition_and_value_evaluators_agree(text):
     else:
         # A character constant can have a known truth without a known value.
         assert value.failure is FailureKind.IMPLEMENTATION_DEFINED
+
+
+@pytest.mark.parametrize(
+    "text, definitions, expanded",
+    [
+        ("1+2 *3", (), "1 + 2 * 3"),
+        ("( 1+2 )*3", (), "(1 + 2) * 3"),
+        ("-1 + - -2", (), "-1 + --2"),
+        ("1-(-2)", (), "1 - (-2)"),
+        ("!0 && ~1", (), "!0 && ~1"),
+        ("1?2:3", (), "1 ? 2 : 3"),
+        ("AREA", (obj("W", "3"), obj("AREA", "(W * 2)")), "(3 * 2)"),
+        ("X * 2", (obj("A", "1"), obj("B", "2"), obj("X", "A+B")), "1 + 2 * 2"),
+        ("1 /* note */ + 2", (), "1 + 2"),
+    ],
+)
+def test_expanded_text_is_the_readable_expansion(text, definitions, expanded):
+    assert evaluate(text, *definitions, keep_expanded=True).expanded == expanded
+
+
+def test_expanded_text_is_kept_for_failures_after_expansion_only():
+    assert evaluate("UNK + 1", keep_expanded=True).expanded == "UNK + 1"
+    assert evaluate("1 / 0", keep_expanded=True).expanded == "1 / 0"
+    assert evaluate("defined(UNK) + 1", keep_expanded=True).expanded is None
