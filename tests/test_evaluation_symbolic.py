@@ -106,11 +106,48 @@ def test_unresolved_names_pass_through_operators(text):
     assert symbolic(text).unresolved == ("UNKNOWN",)
 
 
-@pytest.mark.parametrize("text", ["0 && UNKNOWN", "1 || UNKNOWN", "1 ? 2 : UNKNOWN"])
-def test_an_unresolved_name_in_an_unevaluated_operand_stays_symbolic(text):
-    # Whether such a result is determinate is tracked in #224; nothing is guessed meanwhile.
-    result = symbolic(text)
-    assert result.unresolved == ("UNKNOWN",)
+@pytest.mark.parametrize(
+    ("text", "value"),
+    [
+        ("0 && UNKNOWN", 0),
+        ("1 || UNKNOWN", 1),
+        ("1 ? 2 : UNKNOWN", 2),
+        ("0 ? UNKNOWN : 3", 3),
+        ("0 && (UNKNOWN)", 0),
+        ("1 || defined(UNKNOWN)", 1),
+        ("0 && defined UNKNOWN", 0),
+        ("WIDTH == 3 || UNKNOWN", 1),
+        ("0 ? 1 : 0 ? UNKNOWN : 7", 7),
+    ],
+)
+def test_a_lone_unresolved_name_in_an_unevaluated_operand_does_not_matter(text, value):
+    result = evaluate_expression(text, CONFIG)
+    assert (result.state, result.value, result.unresolved) == (EvaluationState.CONCRETE, value, ())
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "UNKNOWN || 1",  # the unresolved name is evaluated
+        "1 && UNKNOWN",
+        "0 || UNKNOWN",
+        "UNKNOWN ? 1 : 2",
+        "1 ? UNKNOWN : 2",
+        "defined(UNKNOWN) || 1",
+        "1 || F(UNKNOWN, 2)",  # a call is valid only if F is a function-like macro
+        "1 || UNKNOWN + 1",  # not a lone operand: the name could expand to more tokens
+        "0 && 2 * UNKNOWN",
+        "1 || !UNKNOWN",
+        "0 && UNKNOWN == 1",
+    ],
+)
+def test_an_unresolved_name_that_may_be_evaluated_or_regroup_stays_symbolic(text):
+    assert symbolic(text).unresolved
+
+
+def test_a_symbolic_result_still_lists_every_unresolved_name_in_the_expansion():
+    # OTHER does not affect the value, but it is in the text, so the list stays complete.
+    assert symbolic("UNKNOWN + (1 || OTHER)").unresolved == ("UNKNOWN", "OTHER")
 
 
 @pytest.mark.parametrize(

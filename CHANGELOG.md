@@ -73,6 +73,14 @@ raise that document's schema major version and are listed here (see the
   privately, and this changelog.
 
 ### Changed
+- **Behaviour change:** an unresolved name, or a `defined NAME` the configuration does
+  not settle, no longer makes a condition or an evaluation unresolved when it is the
+  whole of an operand that `&&`, `||` or `?:` does not evaluate. `1 || UNKNOWN`,
+  `0 && UNKNOWN`, `1 ? 2 : UNKNOWN` and `0 ? UNKNOWN : 3` now have a value, as in GCC and
+  Clang; `UNKNOWN || 1` and a name that is only part of an unevaluated operand
+  (`1 || UNKNOWN + 1`) stay unresolved
+  ([#224](https://github.com/sahebbiswas/cpre/issues/224)). The result's expanded text is
+  now also kept when the unresolved operand is a `defined NAME`.
 - **Behaviour change:** the minimum supported Python is now 3.10. CPython 3.9 reached
   end of life in October 2025; cpre drops it and follows CPython's lifecycle from
   here on (see [Versioning](CONTRIBUTING.md#versioning)). Installing on 3.9 is

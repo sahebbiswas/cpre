@@ -16,6 +16,12 @@ Open-world configurations keep unresolved macro names unknown. Closed-world `Unk
 
 A name that macro expansion leaves alone because it is already being replaced (a self-referential macro such as `#define A A + 1`, directly or through another macro) is a plain identifier from then on, so it evaluates as 0 in every configuration, as in GCC and Clang (C11 6.10.1). `#if A > 0` is therefore true. It is not an unknown name, so it never makes the condition unresolved. `defined(A)` still tests the macro itself, because its operand is not expanded.
 
+### Names in operands that are never evaluated
+
+`&&`, `||` and `?:` do not evaluate an operand that cannot change the result, and neither does the evaluator. A name that macro expansion leaves unresolved, or a `defined NAME` the configuration does not settle, is therefore harmless in such an operand when it is the whole operand: `1 || UNKNOWN`, `0 && UNKNOWN`, `1 ? 2 : UNKNOWN`, `0 ? UNKNOWN : 3`, `0 && (UNKNOWN)` and `1 || defined(UNKNOWN)` all have a value, and the compilers agree on it. The same name in an operand that is evaluated (`UNKNOWN || 1`, `1 && UNKNOWN`) still leaves the result unresolved.
+
+An unconfigured name could in principle be a macro that expands to more tokens, so the condition is deliberately conservative. A name that is only part of an unevaluated operand (`1 || UNKNOWN + 1`, `0 && !UNKNOWN`, `0 && UNKNOWN == 1`) stays unresolved, because what it expands to could change how the operand groups. So does a call of an unconfigured name (`1 || F(1, 2)`): it is valid only if `F` is a function-like macro, and a compiler rejects it otherwise.
+
 The same evaluator returns values rather than truth: see [Evaluating expressions and macros](evaluation.md).
 
 ## Supported integer-expression surface

@@ -317,6 +317,15 @@ VALUES: list[tuple[str, int, bool]] = [
     ("SEL(0, 1 / 0, AREA)", 14, False),
     ("SQ(AREA) - SQ(SUM)", 147, False),
     ("SEL(1, ALL, 0) + 1", 0, True),
+    # A name nothing defines, set aside because C never evaluates it (the compilers read
+    # it as 0 and agree, but cpre's open-world configuration proves the same value)
+    ("1 || NOPE", 1, False),
+    ("0 && NOPE", 0, False),
+    ("1 ? 2 : NOPE", 2, False),
+    ("0 ? NOPE : 3u", 3, True),
+    ("0 && (NOPE) || 5", 1, False),
+    ("1 || defined(NOPE)", 1, False),
+    ("0 && defined NOPE", 0, False),
 ]
 
 # Expressions with no value cpre will claim, and the reason it gives.
