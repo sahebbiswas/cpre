@@ -200,9 +200,11 @@ def render_evaluation(evaluation: Evaluation, style: Style | None = None) -> str
     """One evaluation as a ``-`` expression line and a ``+`` value line, or why there is none.
 
     A concrete result shows the value (marked unsigned when it is a ``uintmax_t``) and,
-    when macro expansion changed the text, the expanded expression. An unevaluable one
-    shows a caret under the token it concerns, the reason and the message. The layout is
-    the same with and without color.
+    when macro expansion changed the text, the expanded expression. A symbolic one shows
+    that expression on a ``~`` line, with every settled macro substituted and the names
+    that are not settled listed under it. An unevaluable one shows a caret under the
+    token it concerns, the reason and the message. The layout is the same with and
+    without color.
     """
     style = style_for(style, False)
     lines: list[str] = []
@@ -214,7 +216,13 @@ def render_evaluation(evaluation: Evaluation, style: Style | None = None) -> str
     message = _visible(evaluation.message or "")
     if note is not None:
         note = _visible(note)
-    if evaluation.concrete:
+    if evaluation.symbolic:
+        lines.append(f"{style.paint('-', 'before')} {style.paint(operand, 'before')}")
+        shown = _visible(expanded if expanded is not None else evaluation.expression)
+        lines.append(f"{style.paint('~', 'opaque')} {style.paint(shown, 'opaque')}")
+        names = ", ".join(evaluation.unresolved)
+        lines.append(f"  {style.paint('unresolved', 'dim')}  {names}")
+    elif evaluation.concrete:
         suffix = "unsigned" if evaluation.unsigned else None
         lines.extend(
             reporting.transformation_lines(style, "", operand, [(str(evaluation.value), suffix)])
@@ -230,7 +238,7 @@ def render_evaluation(evaluation: Evaluation, style: Style | None = None) -> str
         lines.append(
             f"{style.paint('!', 'incomplete')} {style.paint(reason, 'incomplete')}: {message}"
         )
-    if note is not None:
+    if note is not None and not evaluation.symbolic:
         lines.append(f"  {style.paint('expanded', 'dim')}  {note}")
     return "\n".join(lines)
 

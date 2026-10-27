@@ -113,8 +113,6 @@ def test_division_and_remainder_truncate_toward_zero(text, value):
         ("WIDTH % (HEIGHT - 4)", EvaluationReason.DIVISION_BY_ZERO),
         ("BIG + 1", EvaluationReason.OVERFLOW),
         ("BIG * 2", EvaluationReason.OVERFLOW),
-        ("UNKNOWN + 1", EvaluationReason.UNRESOLVED_IDENTIFIER),
-        ("defined(UNKNOWN)", EvaluationReason.UNRESOLVED_IDENTIFIER),
         ("1 +", EvaluationReason.UNSUPPORTED_SYNTAX),
         ('"text"', EvaluationReason.UNSUPPORTED_SYNTAX),
         ("1.5", EvaluationReason.UNSUPPORTED_SYNTAX),
@@ -229,6 +227,7 @@ def test_to_dict_has_every_field_and_a_stable_order():
         "reason",
         "message",
         "offset",
+        "unresolved",
     ]
     assert concrete == {
         "kind": "macro",
@@ -240,12 +239,16 @@ def test_to_dict_has_every_field_and_a_stable_order():
         "reason": None,
         "message": None,
         "offset": None,
+        "unresolved": [],
     }
-    failed = evaluate_expression("1 + UNKNOWN").to_dict()
-    assert failed["state"] == "unevaluable"
-    assert failed["reason"] == "unresolved_identifier"
-    assert failed["value"] is None and failed["unsigned"] is None
-    assert failed["offset"] == 4
+    symbolic = evaluate_expression("1 + UNKNOWN").to_dict()
+    assert symbolic["state"] == "symbolic"
+    assert symbolic["reason"] == "unresolved_identifier"
+    assert symbolic["value"] is None and symbolic["unsigned"] is None
+    assert symbolic["offset"] == 4 and symbolic["unresolved"] == ["UNKNOWN"]
+    failed = evaluate_expression("1 / 0 + UNKNOWN").to_dict()
+    assert failed["state"] == "unevaluable" and failed["reason"] == "division_by_zero"
+    assert failed["unresolved"] == []
 
 
 def test_every_reason_has_a_distinct_stable_value():

@@ -3,8 +3,9 @@
 The evaluator is the one behind concrete ``#if`` conditions
 (:mod:`cpre.numeric_conditions`), so results follow the preprocessor's controlling
 expression rules: ``intmax_t``/``uintmax_t`` arithmetic, C division and remainder, and
-no types beyond integers. A value that cannot be proved is an ``unevaluable`` result
-with a reason, never a guess and never an exception.
+no types beyond integers. A value that cannot be proved is never a guess and never an
+exception: it is a ``symbolic`` result when the only obstacle is a name the configuration
+does not settle, and an ``unevaluable`` one, with a reason, for any other obstacle.
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ class EvaluationState(str, Enum):
     """Whether an evaluation produced a value."""
 
     CONCRETE = "concrete"
+    SYMBOLIC = "symbolic"
     UNEVALUABLE = "unevaluable"
 
 
@@ -66,11 +68,14 @@ class Evaluation:
 
     ``kind`` is ``"expression"`` or ``"macro"`` and ``expression`` is the text that was
     evaluated (the macro's name for a macro). A ``concrete`` result has ``value`` and
-    ``unsigned`` (whether it is a ``uintmax_t``). An ``unevaluable`` one has ``reason``
-    and ``message`` instead, and ``offset``, the offset in ``expression`` of the token it
-    concerns when one is known; a token that came from a macro's replacement is located
-    at the macro that produced it. ``expanded`` is the expression after macro expansion,
-    whenever expansion got that far.
+    ``unsigned`` (whether it is a ``uintmax_t``). A ``symbolic`` one has no value because
+    names the configuration does not settle remain: ``expanded`` is the expression with
+    every settled macro substituted and those names left in place, and ``unresolved``
+    lists them in order of appearance. An ``unevaluable`` one has some other obstacle.
+    Both have ``reason`` and ``message``, and ``offset``, the offset in ``expression`` of
+    the token they concern when one is known; a token that came from a macro's
+    replacement is located at the macro that produced it. ``expanded`` is the expression
+    after macro expansion, whenever expansion got that far.
     """
 
     kind: str
@@ -82,10 +87,15 @@ class Evaluation:
     reason: EvaluationReason | None = None
     message: str | None = None
     offset: int | None = None
+    unresolved: tuple[str, ...] = ()
 
     @property
     def concrete(self) -> bool:
         return self.state is EvaluationState.CONCRETE
+
+    @property
+    def symbolic(self) -> bool:
+        return self.state is EvaluationState.SYMBOLIC
 
     def to_dict(self) -> dict[str, object]:
         """The JSON-ready record documented in the JSON contract (``cpre.evaluation/1``)."""
@@ -99,6 +109,7 @@ class Evaluation:
             "reason": None if self.reason is None else self.reason.value,
             "message": self.message,
             "offset": self.offset,
+            "unresolved": list(self.unresolved),
         }
 
 
@@ -155,9 +166,22 @@ def evaluate_macro(
             f"{name} is a function-like macro; evaluate a call of it as an expression",
         )
     if state.definition is None:
-        detail = "not defined" if state.defined is False else "not settled by the configuration"
-        return _unevaluable(
-            "macro", name, EvaluationReason.UNRESOLVED_IDENTIFIER, f"macro {name!r} is {detail}"
+        if state.defined is False:
+            return _unevaluable(
+                "macro",
+                name,
+                EvaluationReason.UNRESOLVED_IDENTIFIER,
+                f"macro {name!r} is not defined",
+            )
+        return Evaluation(
+            "macro",
+            name,
+            EvaluationState.SYMBOLIC,
+            expanded=name,
+            reason=EvaluationReason.UNRESOLVED_IDENTIFIER,
+            message=f"macro {name!r} is not settled by the configuration",
+            offset=0,
+            unresolved=(name,),
         )
     return _evaluate("macro", name, _condition_environment(environment), budget)
 
@@ -213,7 +237,12 @@ def _evaluate(kind: str, text: str, view: MacroLookup, budget: AnalysisBudget) -
     expansion.current_offset = -1
     try:
         outcome = evaluate_integer_expression(
-            text, view, expansion, budget, unsupported_identifiers=_PREDEFINED_MACROS
+            text,
+            view,
+            expansion,
+            budget,
+            unsupported_identifiers=_PREDEFINED_MACROS,
+            symbolic=True,
         )
     except ExpansionError as error:
         offset = expansion.current_offset
@@ -240,6 +269,18 @@ def _from_integer(kind: str, text: str, outcome: IntegerEvaluation) -> Evaluatio
             expanded=outcome.expanded,
         )
     assert outcome.failure is not None
+    if outcome.symbolic:
+        return Evaluation(
+            kind,
+            text,
+            EvaluationState.SYMBOLIC,
+            expanded=outcome.expanded,
+            reason=EvaluationReason.UNRESOLVED_IDENTIFIER,
+            message=outcome.message
+            or "expression depends on a name the configuration does not settle",
+            offset=outcome.offset,
+            unresolved=outcome.unresolved_names,
+        )
     return _unevaluable(
         kind,
         text,

@@ -12,11 +12,11 @@ from .._style import COLOR_CHOICES
 from .._types import AnalysisOptions
 from ..configuration import MacroConfiguration
 from ..errors import CpreError
-from ..evaluation import Evaluation, evaluate_expression, evaluate_macro
+from ..evaluation import Evaluation, EvaluationState, evaluate_expression, evaluate_macro
 from ..preprocessing import PreprocessingContext
 from ..serialization import evaluations_document
 from ..text_reports import format_error, render_evaluation
-from ._common import EXIT_ERROR, EXIT_FINDINGS, EXIT_OK, output_style
+from ._common import EXIT_ERROR, EXIT_FINDINGS, EXIT_OK, EXIT_SYMBOLIC, output_style
 from .preprocess_configuration import (
     add_configuration_options,
     configuration_from_arguments,
@@ -65,7 +65,7 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
     )
     parser.epilog = (
         "example: cpre evaluate -D WIDTH=3 -D HEIGHT=4 -D 'AREA=(WIDTH * HEIGHT)' AREA "
-        "'AREA % 5' (exit status 1 when any item has no value)"
+        "'AREA % 5' (exit status 1 when an item is unevaluable, 3 when one is only symbolic)"
     )
     return parser
 
@@ -84,7 +84,8 @@ def evaluate_item(
 
 
 def evaluate_main(argv: Sequence[str] | None = None, prog: str = "cpre evaluate") -> int:
-    """Evaluate each operand; status 1 when any has no value, 2 when the run failed."""
+    """Evaluate each operand: status 1 when one is unevaluable, 3 when some are only symbolic,
+    2 when the run failed."""
     parser = build_parser(prog)
     args = parser.parse_args(argv)
     require_seed_for_seed_options(parser, args)
@@ -108,4 +109,8 @@ def evaluate_main(argv: Sequence[str] | None = None, prog: str = "cpre evaluate"
     else:
         style = output_style(args)
         print("\n".join(render_evaluation(evaluation, style) for evaluation in evaluations))
-    return EXIT_OK if all(evaluation.concrete for evaluation in evaluations) else EXIT_FINDINGS
+    if any(evaluation.state is EvaluationState.UNEVALUABLE for evaluation in evaluations):
+        return EXIT_FINDINGS
+    if any(evaluation.symbolic for evaluation in evaluations):
+        return EXIT_SYMBOLIC
+    return EXIT_OK

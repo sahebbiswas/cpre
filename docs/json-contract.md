@@ -66,12 +66,14 @@ Every top-level document has `schema` as its first key. The value is `cpre.<kind
 
 ### `cpre.evaluation/1`
 
-`kind`, `expression`, `state`, `value`, `unsigned`, `expanded`, `reason`, `message`, `offset` (see [Evaluating expressions and macros](evaluation.md)).
+`kind`, `expression`, `state`, `value`, `unsigned`, `expanded`, `reason`, `message`, `offset`, `unresolved` (see [Evaluating expressions and macros](evaluation.md)).
 
 - `kind` is `expression` or `macro`; `expression` is the text that was evaluated (the macro's name for a macro).
-- `state` is `concrete` or `unevaluable`. A concrete result has an integer `value` and a Boolean `unsigned`; an unevaluable one has `null` for both and carries `reason` and `message`.
+- `state` is `concrete`, `symbolic` or `unevaluable`. A concrete result has an integer `value` and a Boolean `unsigned`; the other two have `null` for both and carry `reason` and `message`. A `symbolic` result means the only obstacle is a name the configuration does not settle: `expanded` is the expression with the settled macros substituted, `reason` is `unresolved_identifier` and `unresolved` lists the names.
 - `reason` is one of `division_by_zero`, `overflow`, `unresolved_identifier`, `unsupported_syntax`, `implementation_defined`, `function_like`, `nesting_bound`, `expansion_error`, `budget_exceeded`, or `null` for a concrete result. New reasons are compatible additions. `message` is explanatory text whose wording is not part of the contract.
 - `expanded` is the expression after macro expansion, or `null` when evaluation stopped before expansion. `offset` is the offset in `expression` of the token the reason concerns, or `null`.
+- `unresolved` is a list of names, empty unless `state` is `symbolic`. Names are listed in the order they first appear in the expanded expression, each once, so the list is deterministic for a given input.
+- The `symbolic` state and the `unresolved` field are compatible additions, so the schema stays `cpre.evaluation/1`: consumers must ignore fields they do not know and tolerate new `state` values. A consumer that only tested for `concrete` sees the same results as before for every concrete record; an expression with an unresolved name moved from `unevaluable` to `symbolic` before this schema was released.
 
 ### `cpre.evaluations/1`
 
