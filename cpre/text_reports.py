@@ -8,6 +8,7 @@ same results live in :mod:`cpre.serialization`.
 from __future__ import annotations
 
 import difflib
+import re
 import shlex
 from collections.abc import Sequence
 from pathlib import Path
@@ -16,6 +17,7 @@ from . import reporting
 from ._style import PLAIN, Style, style_for
 from ._types import AnalysisIncomplete, AnalysisTelemetry, IncompleteComponent
 from .errors import CpreError
+from .evaluation import Evaluation
 from .macro_analysis import MacroAnalysisResult
 from .model import ConditionalTree
 from .preprocessing import PreprocessDiagnostic
@@ -184,6 +186,53 @@ def render_macro_report(
     if results:
         return "No simplifiable macro definitions found.", False
     return "No macro definitions found.", False
+
+
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+
+def _visible(text: str) -> str:
+    """``text`` with each control character replaced by a ``\\xNN`` escape."""
+    return _CONTROL.sub(lambda match: f"\\x{ord(match.group()):02x}", text)
+
+
+def render_evaluation(evaluation: Evaluation, style: Style | None = None) -> str:
+    """One evaluation as a ``-`` expression line and a ``+`` value line, or why there is none.
+
+    A concrete result shows the value (marked unsigned when it is a ``uintmax_t``) and,
+    when macro expansion changed the text, the expanded expression. An unevaluable one
+    shows a caret under the token it concerns, the reason and the message. The layout is
+    the same with and without color.
+    """
+    style = style_for(style, False)
+    lines: list[str] = []
+    expanded = evaluation.expanded
+    note = None if expanded is None or expanded == evaluation.expression else expanded
+    # Operands and replacement text come from the caller or a seed file, so control
+    # characters are shown as escapes rather than sent to the terminal. JSON is untouched.
+    operand = _visible(evaluation.expression)
+    message = _visible(evaluation.message or "")
+    if note is not None:
+        note = _visible(note)
+    if evaluation.concrete:
+        suffix = "unsigned" if evaluation.unsigned else None
+        lines.extend(
+            reporting.transformation_lines(style, "", operand, [(str(evaluation.value), suffix)])
+        )
+    else:
+        lines.append(f"{style.paint('-', 'before')} {style.paint(operand, 'before')}")
+        offset = evaluation.offset
+        # The caret is only meaningful when the operand is shown exactly as given; for a
+        # macro it sits under the macro's name, the place its replacement is located at.
+        if offset is not None and operand == evaluation.expression and offset <= len(operand):
+            lines.append(f"  {' ' * offset}{style.paint('^', 'incomplete')}")
+        reason = evaluation.reason.value if evaluation.reason is not None else "unevaluable"
+        lines.append(
+            f"{style.paint('!', 'incomplete')} {style.paint(reason, 'incomplete')}: {message}"
+        )
+    if note is not None:
+        lines.append(f"  {style.paint('expanded', 'dim')}  {note}")
+    return "\n".join(lines)
 
 
 def count_macro_findings(results: Sequence[MacroAnalysisResult]) -> FindingCounts:

@@ -18,6 +18,7 @@ Every top-level document has `schema` as its first key. The value is `cpre.<kind
 | `cpre.cover/1` | `cpre cover --json` |
 | `cpre.unknown-macros/1` | `cpre preprocess --list-unknown-macros --json` |
 | `cpre.expression/1` | `cpre test-input --json` |
+| `cpre.evaluations/1` | `cpre evaluate --json` |
 | `cpre.evaluation/1` | `Evaluation.to_dict()`, with `schema` added by `cpre.serialization.evaluation_document()` |
 
 `cpre --json` and `cpre simplify-macros --json` write one file record directly for a single file. For several files (or `--recursive`) they write `{"schema": ..., "files": [record, ...]}` with `files` in command-line order, and the per-file records do not repeat `schema`.
@@ -71,6 +72,10 @@ Every top-level document has `schema` as its first key. The value is `cpre.<kind
 - `state` is `concrete` or `unevaluable`. A concrete result has an integer `value` and a Boolean `unsigned`; an unevaluable one has `null` for both and carries `reason` and `message`.
 - `reason` is one of `division_by_zero`, `overflow`, `unresolved_identifier`, `unsupported_syntax`, `implementation_defined`, `function_like`, `nesting_bound`, `expansion_error`, `budget_exceeded`, or `null` for a concrete result. New reasons are compatible additions. `message` is explanatory text whose wording is not part of the contract.
 - `expanded` is the expression after macro expansion, or `null` when evaluation stopped before expansion. `offset` is the offset in `expression` of the token the reason concerns, or `null`.
+
+### `cpre.evaluations/1`
+
+`evaluations`: one record per operand of `cpre evaluate`, in command-line order. Each record has the fields of [`cpre.evaluation/1`](#cpreevaluation1) and does not repeat `schema`.
 
 ### `cpre.unknown-macros/1`
 

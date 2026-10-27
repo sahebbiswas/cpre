@@ -232,7 +232,13 @@ cpre.evaluate_expression("AREA / (PAD - 2)", config).reason
 # EvaluationReason.DIVISION_BY_ZERO
 ```
 
-See [Evaluating expressions and macros](evaluation.md).
+From the shell, `cpre evaluate` takes the same configuration options as `cpre preprocess`, so a project's flags header can supply the definitions:
+
+```bash
+cpre evaluate --config-from include/flags.h AREA 'AREA % 5'
+```
+
+See [Evaluating expressions and macros](evaluation.md) and [`cpre evaluate`](cli.md#macro-and-expression-values-with-evaluate).
 
 ## Build a configuration matrix for tests
 

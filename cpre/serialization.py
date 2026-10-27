@@ -368,6 +368,11 @@ def evaluation_document(evaluation: Evaluation) -> dict[str, object]:
     return top_level("evaluation", evaluation.to_dict())
 
 
+def evaluations_document(evaluations: Sequence[Evaluation]) -> dict[str, object]:
+    """The ``cpre.evaluations/1`` document of ``cpre evaluate --json``: one record per item."""
+    return top_level("evaluations", {"evaluations": [e.to_dict() for e in evaluations]})
+
+
 def expression_document(
     expression: str,
     simplified: str,

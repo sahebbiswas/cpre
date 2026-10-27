@@ -17,6 +17,8 @@ result.expanded  # "(3 * 4 + 2)"
 cpre.evaluate_expression("AREA % 5", config).value  # 4
 ```
 
+The same evaluation is available from the shell as [`cpre evaluate`](cli.md#macro-and-expression-values-with-evaluate).
+
 ## Semantics
 
 Evaluation uses the same evaluator as concrete `#if` and `#elif` conditions, so a value is exactly what a condition would see. The grammar, the 64-bit `intmax_t`/`uintmax_t` model, the signed and unsigned conversions, C's truncating division and remainder, and the bounds are those of [Concrete `#if` / `#elif` expression support](conditional-expressions.md). It is the preprocessor's integer constant expression, not general C: there are no types beyond integers, so `sizeof`, casts, floating-point constants and string literals have no value.

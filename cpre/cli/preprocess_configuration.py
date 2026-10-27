@@ -14,6 +14,77 @@ from ..preprocessing import PreprocessDiagnostic, PreprocessingContext
 from ..text_reports import format_error, format_incomplete
 
 
+def add_configuration_options(parser: argparse.ArgumentParser) -> None:
+    """The options that build the external macro configuration, shared by ``preprocess`` and ``evaluate``."""
+    parser.add_argument(
+        "--define",
+        "-D",
+        dest="defines",
+        action="append",
+        default=[],
+        metavar="NAME[=VALUE]",
+        help="define an external object-like macro; NAME alone defines an empty macro",
+    )
+    parser.add_argument(
+        "--undef",
+        "-U",
+        dest="undefined",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="explicitly mark an external macro as undefined",
+    )
+    parser.add_argument(
+        "--config-from",
+        dest="config_from",
+        action="append",
+        default=[],
+        type=Path,
+        metavar="PATH",
+        help=(
+            "derive the initial macro configuration from the final macro state of a seed "
+            "file such as flags.h; repeatable, applied in order with the last definition "
+            "winning; -D/-U are visible while seeds are evaluated and always take precedence"
+        ),
+    )
+    parser.add_argument(
+        "--config-exclude",
+        dest="config_exclude",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help=(
+            "remove NAME from the configuration derived by --config-from (a private helper "
+            "macro or a guard the detector does not recognize); repeatable; the seed still "
+            "sees its own definition, and -D/-U of the same name still win"
+        ),
+    )
+    parser.add_argument(
+        "--unknown-names",
+        choices=[policy.value for policy in UnknownNamePolicy],
+        default=UnknownNamePolicy.OPEN.value,
+        help=("policy for names absent from the external configuration (default: open)"),
+    )
+    parser.add_argument(
+        "--config-from-unknown-names",
+        dest="config_from_unknown_names",
+        choices=[policy.value for policy in UnknownNamePolicy],
+        default=None,
+        help=(
+            "policy for names absent from the configuration while --config-from seeds are "
+            "evaluated (default: the --unknown-names policy); 'undefined' reads a guarded "
+            "flags header with normal C semantics without making the target closed-world"
+        ),
+    )
+    parser.add_argument(
+        "--standard-macro",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help="supply a deterministic value for a supported standard predefined macro",
+    )
+
+
 def parse_name_value(value: str, option: str) -> tuple[str, str]:
     """Parse a CLI macro assignment into a name and replacement text."""
     if "=" in value:
@@ -157,6 +228,16 @@ def _restricted(explicit: MacroConfiguration, names: frozenset[str]) -> MacroCon
         undefined=explicit.undefined & names,
         unknown_names=explicit.unknown_names,
     )
+
+
+def require_seed_for_seed_options(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> None:
+    """Reject the options that only refine ``--config-from`` when it is not given."""
+    if args.config_exclude and not args.config_from:
+        parser.error("--config-exclude requires --config-from")
+    if args.config_from_unknown_names is not None and not args.config_from:
+        parser.error("--config-from-unknown-names requires --config-from")
 
 
 def _excluded_names(args: argparse.Namespace) -> list[str]:

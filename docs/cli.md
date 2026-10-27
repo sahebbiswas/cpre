@@ -10,6 +10,7 @@ New to cpre? Start with [Getting started](getting-started.md); for recipes see t
 | `cpre simplify-macros FILE…` (also spelled `analyze-macros`) | Report, `--diff`, `--check` or `--rewrite` macro simplifications | No | `--check` with a pending rewrite, or `--fail-on-findings` and a finding |
 | `cpre preprocess FILE` | One concrete configuration: transformed source, `--list-unknown-macros`, `--dump-macros` | Only through `-I`/`--iquote`/`--config-from` | not used |
 | `cpre cover FILE` | Verified `-D`/`-U` argument lists that together select every reachable branch | Only through `-I`/`--iquote` | An outcome is not covered |
+| `cpre evaluate NAME_OR_EXPR…` | The integer value of macros and expressions under one concrete configuration | Only through `--config-from` | An item has no provable value |
 | `cpre test-input EXPR` | Evaluate and simplify one Boolean expression | No | not used |
 
 Every command exits `2` when it could not complete. `-` reads standard input where a source is expected.
@@ -240,7 +241,7 @@ The CLI uses these process statuses:
 | Status | Meaning |
 | --- | --- |
 | `0` | Normal completion. Findings may exist unless `--fail-on-findings` was requested. |
-| `1` | Normal completion with `--fail-on-findings`, and at least one dead or redundant branch was found. |
+| `1` | Normal completion with `--fail-on-findings`, and at least one dead or redundant branch was found. For `cpre evaluate`: normal completion, and at least one item has no provable value. |
 | `2` | Source ingestion failed, analysis/preprocessing reasoning was incomplete for a source, or command-line/path validation failed. |
 | `130` | The run was interrupted with Ctrl-C. |
 
@@ -685,6 +686,37 @@ cpre cover src/config.c
 cpre cover -I include --standard-macro __STDC_VERSION__=201710L --json src/config.c
 ```
 
+## Macro and expression values with evaluate
+
+`cpre evaluate` prints the integer value of each macro or expression you name, under one concrete configuration. It uses the same evaluator as concrete `#if` conditions, so a value is what a condition would see; the semantics, reasons and limits are in [Evaluating expressions and macros](evaluation.md).
+
+```bash
+cpre evaluate -D WIDTH=3 -D HEIGHT=4 -D PAD=2 -D 'AREA=(WIDTH * HEIGHT + PAD)' -D 'SUM=WIDTH + HEIGHT' AREA 'SUM * 2' 'AREA / (PAD - 2)'
+```
+
+```text
+- AREA
++ 14
+  expanded  (3 * 4 + 2)
+- SUM * 2
++ 11
+  expanded  3 + 4 * 2
+- AREA / (PAD - 2)
+                 ^
+! division_by_zero: division by zero in concrete condition
+  expanded  (3 * 4 + 2) / (2 - 2)
+```
+
+Each operand is either a macro name, evaluated as that macro's value, or an expression, which may use macros and function-like macro calls. An operand that starts with `-` needs `--` in front of the operands (`cpre evaluate -- '-7 / 2'`); an operand with a space in it, as above, does not.
+
+Each item shows the operand on a `-` line and its value on a `+` line, with `(unsigned)` after a `uintmax_t` value. When macro expansion changed the text, an `expanded` line shows the expression as it was evaluated, which is where an unparenthesized replacement such as `SUM * 2` becoming `3 + 4 * 2` shows up. A value that cannot be proved has a `!` line with the [reason](evaluation.md#reasons) and a caret under the token it concerns (under the macro's name for a macro). Control characters in an operand, its expansion or a message are shown as `\xNN` escapes in the text report so they cannot drive the terminal; `--json` keeps the original text. In color the value is green, the unevaluable reason and caret yellow and the `expanded` label dim, following the [color meanings](#color); the layout is the same without color.
+
+The configuration options are those of [`preprocess`](#concrete-preprocessing): `-D`/`--define`, `-U`/`--undef`, `--config-from`, `--config-exclude`, `--unknown-names`, `--config-from-unknown-names` and `--standard-macro`. `--config-exclude` and `--config-from-unknown-names` refine `--config-from` and are rejected without it, as in `preprocess`. `--max-work N` limits the work spent on each item, and `--color WHEN` works as elsewhere.
+
+`--json` writes one `cpre.evaluations/1` document with an `evaluations` list in operand order; each entry is the [`cpre.evaluation/1`](json-contract.md#cpreevaluation1) record without its own `schema`.
+
+The exit status is `0` when every item has a value, `1` when any item has none, and `2` when the configuration or an option is invalid or a seed cannot be read.
+
 ## Arbitrary Boolean expression testing with test-input
 
 The `cpre test-input` subcommand accepts an arbitrary Boolean macro equation or expression, runs it through cpre's Boolean parser and ROBDD simplification machinery, and prints the optimized equivalent expression:
@@ -860,7 +892,7 @@ An incomplete ROBDD computation is never reported as a successful simplification
 
 --max-atoms N / --max-bdd-nodes N / --max-work N
     Resource limits (defaults 64 / 100000 / 500000); see "Resource limits". Also accepted by
-    simplify-macros, analyze-macros, cover and test-input.
+    simplify-macros, analyze-macros, cover and test-input; evaluate accepts --max-work.
 ```
 
 `--json` and `--sarif` cannot be used together.
