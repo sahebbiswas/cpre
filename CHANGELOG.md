@@ -40,6 +40,13 @@ raise that document's schema major version and are listed here (see the
 - Package metadata uses a PEP 639 license expression (`Apache-2.0`) and requires
   `setuptools>=77` to build; the deprecated license table and classifier are gone.
 
+### Fixed
+- **Behaviour change:** a condition that depends on an implementation-defined character
+  constant (a multicharacter constant, or a constant such as `'a'` compared with another
+  constant) is now reported at that constant. It used to be reported at whichever later
+  token the parser had reached, for example column 12 instead of column 5 in
+  `#if 'ab' + 1`. Which conditions are unresolved is unchanged.
+
 ## [0.42.0] - 2026-10-22
 
 ### Added

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from enum import Enum
 
 from .expansion import Expansion, ExpansionError
 from .lexer import Token, tokenize
@@ -12,16 +13,34 @@ from .macros import MacroLookup
 from .robdd import AnalysisBudget
 
 
+class FailureKind(str, Enum):
+    """Why an integer expression has no concrete value."""
+
+    UNRESOLVED_IDENTIFIER = "unresolved-identifier"
+    DIVISION_BY_ZERO = "division-by-zero"
+    OVERFLOW = "overflow"
+    IMPLEMENTATION_DEFINED = "implementation-defined"
+    NESTING_BOUND = "nesting-bound"
+    UNSUPPORTED = "unsupported"
+
+
 class NumericConditionError(ValueError):
     """A concrete condition uses syntax we intentionally cannot evaluate.
 
     ``offset`` is the offset in the condition text of the token the error concerns,
-    when one is known, so a caller can report its physical position.
+    when one is known, so a caller can report its physical position. ``kind`` says
+    why evaluation stopped; anything not otherwise classified is ``UNSUPPORTED``.
     """
 
-    def __init__(self, message: str, offset: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        offset: int | None = None,
+        kind: FailureKind = FailureKind.UNSUPPORTED,
+    ) -> None:
         super().__init__(message)
         self.offset = offset
+        self.kind = kind
 
 
 _INTEGER = re.compile(
@@ -62,6 +81,8 @@ class _Value:
     truth_value: bool | None = None
     character: str | None = None
     reason: str | None = None
+    # Where an unknown value came from, so a result can point at the constant itself.
+    origin: int | None = None
 
     def truth(self) -> bool:
         if self.value is not None:
@@ -69,13 +90,18 @@ class _Value:
         if self.truth_value is not None:
             return self.truth_value
         raise NumericConditionError(
-            self.reason or "expression value is implementation-defined in concrete evaluation"
+            self.reason or "expression value is implementation-defined in concrete evaluation",
+            self.origin,
+            FailureKind.IMPLEMENTATION_DEFINED,
         )
 
 
 def _signed(value: int) -> _Value:
     if value < _SIGNED_MIN or value > _SIGNED_MAX:
-        raise NumericConditionError("signed integer expression exceeds concrete-evaluation range")
+        raise NumericConditionError(
+            "signed integer expression exceeds concrete-evaluation range",
+            kind=FailureKind.OVERFLOW,
+        )
     return _Value(value)
 
 
@@ -106,8 +132,17 @@ def _numeric(value: _Value) -> int:
     if value.value is not None:
         return value.value
     raise NumericConditionError(
-        value.reason or "expression depends on an implementation-defined character constant value"
+        value.reason or "expression depends on an implementation-defined character constant value",
+        value.origin,
+        FailureKind.IMPLEMENTATION_DEFINED,
     )
+
+
+def _unknown_origin(*values: _Value) -> int | None:
+    for value in values:
+        if value.reason:
+            return value.origin
+    return None
 
 
 def _unknown_reason(*values: _Value) -> str:
@@ -117,7 +152,15 @@ def _unknown_reason(*values: _Value) -> str:
     return "expression depends on an implementation-defined character constant value"
 
 
-def _resolve_defined(tokens: list[Token], environment: MacroLookup) -> list[Token] | None:
+@dataclass(frozen=True)
+class _Unresolved:
+    """The expression still depends on a name the environment does not settle."""
+
+    message: str
+    offset: int | None = None
+
+
+def _resolve_defined(tokens: list[Token], environment: MacroLookup) -> list[Token] | _Unresolved:
     result: list[Token] = []
     index = 0
     while index < len(tokens):
@@ -139,7 +182,7 @@ def _resolve_defined(tokens: list[Token], environment: MacroLookup) -> list[Toke
             raise NumericConditionError("malformed defined operator")
         defined = environment.get(name).defined
         if defined is None:
-            return None
+            return _Unresolved(f"definedness of {name!r} is unknown", token.start)
         result.append(Token("1" if defined else "0", "number", token.start, end, generated=True))
     return result
 
@@ -159,9 +202,17 @@ def _integer(text: str) -> _Value:
         if len(body) > 1 and body.startswith("0")
         else 10
     )
-    value = int(body, base)
+    try:
+        value = int(body, base)
+    except ValueError:
+        # CPython refuses to convert a decimal string of thousands of digits.
+        raise NumericConditionError(
+            "integer constant exceeds concrete-evaluation range", kind=FailureKind.OVERFLOW
+        ) from None
     if value > _UINT_MASK:
-        raise NumericConditionError("integer constant exceeds concrete-evaluation range")
+        raise NumericConditionError(
+            "integer constant exceeds concrete-evaluation range", kind=FailureKind.OVERFLOW
+        )
     if "u" in suffix:
         return _unsigned(value)
     if value <= _SIGNED_MAX:
@@ -170,7 +221,10 @@ def _integer(text: str) -> _Value:
     # value is not representable by intmax_t. Decimal overflow is kept explicit.
     if base != 10:
         return _unsigned(value)
-    raise NumericConditionError("decimal integer constant exceeds signed concrete-evaluation range")
+    raise NumericConditionError(
+        "decimal integer constant exceeds signed concrete-evaluation range",
+        kind=FailureKind.OVERFLOW,
+    )
 
 
 def _numeric_character(value: int, text: str) -> _Value:
@@ -294,7 +348,9 @@ def _character(text: str) -> _Value:
 
 def _divide(left: int, right: int) -> int:
     if right == 0:
-        raise NumericConditionError("division by zero in concrete condition")
+        raise NumericConditionError(
+            "division by zero in concrete condition", kind=FailureKind.DIVISION_BY_ZERO
+        )
     quotient = abs(left) // abs(right)
     return -quotient if (left < 0) != (right < 0) else quotient
 
@@ -319,7 +375,10 @@ class _Parser:
     def _enter(self) -> None:
         self.depth += 1
         if self.depth > _MAX_DEPTH:
-            raise NumericConditionError("expression nesting exceeds concrete-evaluation bound")
+            raise NumericConditionError(
+                "expression nesting exceeds concrete-evaluation bound",
+                kind=FailureKind.NESTING_BOUND,
+            )
 
     def _leave(self) -> None:
         self.depth -= 1
@@ -357,14 +416,18 @@ class _Parser:
         if token.kind == "number":
             return _integer(token.text)
         if token.kind == "literal" and "'" in token.text:
-            return _character(token.text)
+            return replace(_character(token.text), origin=token.start)
         if token.kind == "identifier":
             if token.text in token.hidden:
                 # Expansion left this name alone because it was already being replaced
                 # (a self-referential macro). It is a plain identifier from now on, and
                 # every identifier left in a controlling expression is 0 (C11 6.10.1).
                 return _Value(0)
-            raise NumericConditionError(f"unresolved identifier {token.text!r}", token.start)
+            raise NumericConditionError(
+                f"unresolved identifier {token.text!r}",
+                token.start,
+                FailureKind.UNRESOLVED_IDENTIFIER,
+            )
         raise NumericConditionError(
             f"unsupported token {token.text!r} in concrete condition", token.start
         )
@@ -422,7 +485,10 @@ class _Parser:
                 result = left_value * right_value
             elif unsigned:
                 if right_value == 0:
-                    raise NumericConditionError("division by zero in concrete condition")
+                    raise NumericConditionError(
+                        "division by zero in concrete condition",
+                        kind=FailureKind.DIVISION_BY_ZERO,
+                    )
                 result = left_value // right_value if op == "/" else left_value % right_value
             else:
                 quotient = _divide(left_value, right_value)
@@ -448,7 +514,9 @@ class _Parser:
                 return _Value(None, left.unsigned)
             left_value, right_value = _numeric(left), _numeric(right)
             if right_value < 0 or right_value > _MAX_SHIFT:
-                raise NumericConditionError("shift count exceeds concrete-evaluation bound")
+                raise NumericConditionError(
+                    "shift count exceeds concrete-evaluation bound", kind=FailureKind.OVERFLOW
+                )
             if op == "<<":
                 result = left_value << right_value
                 return _unsigned(result) if left.unsigned else _signed(result)
@@ -493,7 +561,11 @@ class _Parser:
             elif right.value == 0 and left.truth_value is not None:
                 equal = not left.truth_value
             else:
-                raise NumericConditionError(_unknown_reason(left, right))
+                raise NumericConditionError(
+                    _unknown_reason(left, right),
+                    _unknown_origin(left, right),
+                    FailureKind.IMPLEMENTATION_DEFINED,
+                )
             return _Value(int(equal if op == "==" else not equal))
 
         return self.binary(self.relational, {"==", "!="}, evaluate, apply)
@@ -557,24 +629,44 @@ class _Parser:
         return when_true if condition_truth else when_false
 
 
-def evaluate_numeric_condition(
+@dataclass(frozen=True)
+class IntegerEvaluation:
+    """The outcome of evaluating an integer expression.
+
+    A concrete result has ``value`` (and ``unsigned`` says whether it is a
+    ``uintmax_t``). Otherwise ``failure`` says why there is no value, ``message``
+    describes it, and ``offset`` is the offset in the expression text of the token it
+    concerns, when one is known.
+    """
+
+    value: int | None = None
+    unsigned: bool = False
+    failure: FailureKind | None = None
+    message: str | None = None
+    offset: int | None = None
+
+    @property
+    def concrete(self) -> bool:
+        return self.value is not None
+
+
+def _evaluate(
     text: str,
     environment: MacroLookup,
     expansion: Expansion,
     budget: AnalysisBudget,
-    *,
-    unsupported_identifiers: frozenset[str] = frozenset(),
-) -> bool | None:
-    """Evaluate a macro-expanded integer condition, or return None if still unknown.
+    unsupported_identifiers: frozenset[str],
+) -> tuple[_Parser, _Value] | _Unresolved:
+    """Expand and parse ``text``; the caller decides what to ask of the value.
 
-    ``unsupported_identifiers`` is checked after standards-style macro expansion so
-    callers can distinguish an unmodeled predefined macro from an ordinary unresolved
-    identifier, including when another macro expands to the predefined name.
+    Raises ``NumericConditionError`` (with ``kind``, and an offset when one is known) for
+    syntax or arithmetic that concrete evaluation does not model, and ``ExpansionError``
+    when expansion itself fails.
     """
     original = [t for t in tokenize(text) if t.kind not in {"space", "comment"}]
     resolved = _resolve_defined(original, environment)
-    if resolved is None:
-        return None
+    if isinstance(resolved, _Unresolved):
+        return resolved
     expanded = expansion._expand(resolved, environment)
     for token in expanded:
         if (
@@ -589,17 +681,91 @@ def evaluate_numeric_condition(
     significant = [token for token in expanded if token.kind != "empty"]
     parser = _Parser(significant, budget)
     try:
-        return parser.parse().truth()
+        return parser, parser.parse()
     except RecursionError as error:
         raise NumericConditionError(
-            "expression nesting exceeds concrete-evaluation bound", parser.here()
+            "expression nesting exceeds concrete-evaluation bound",
+            parser.here(),
+            FailureKind.NESTING_BOUND,
         ) from error
     except NumericConditionError as error:
-        if str(error).startswith("unresolved identifier"):
-            return None
+        if error.kind is FailureKind.UNRESOLVED_IDENTIFIER:
+            return _Unresolved(str(error), error.offset)
         if error.offset is None:
             error.offset = parser.here()
         raise
 
 
-__all__ = ["NumericConditionError", "evaluate_numeric_condition"]
+def evaluate_numeric_condition(
+    text: str,
+    environment: MacroLookup,
+    expansion: Expansion,
+    budget: AnalysisBudget,
+    *,
+    unsupported_identifiers: frozenset[str] = frozenset(),
+) -> bool | None:
+    """Evaluate a macro-expanded integer condition, or return None if still unknown.
+
+    ``unsupported_identifiers`` is checked after standards-style macro expansion so
+    callers can distinguish an unmodeled predefined macro from an ordinary unresolved
+    identifier, including when another macro expands to the predefined name.
+    """
+    outcome = _evaluate(text, environment, expansion, budget, unsupported_identifiers)
+    if isinstance(outcome, _Unresolved):
+        return None
+    parser, value = outcome
+    try:
+        return value.truth()
+    except NumericConditionError as error:
+        if error.offset is None:
+            error.offset = parser.here()
+        raise
+
+
+def evaluate_integer_expression(
+    text: str,
+    environment: MacroLookup,
+    expansion: Expansion,
+    budget: AnalysisBudget,
+    *,
+    unsupported_identifiers: frozenset[str] = frozenset(),
+) -> IntegerEvaluation:
+    """Evaluate a macro-expanded integer expression to its value.
+
+    The grammar, conversions and bounds are exactly those of
+    :func:`evaluate_numeric_condition`; this returns the integer (and whether it is
+    unsigned) where that returns only its truth. Anything that prevents a value,
+    including an unresolved identifier, comes back as a result with ``failure`` set
+    rather than as an exception. ``ExpansionError`` and an exhausted ``budget`` still
+    propagate, as they do for conditions.
+    """
+    try:
+        outcome = _evaluate(text, environment, expansion, budget, unsupported_identifiers)
+    except NumericConditionError as error:
+        return IntegerEvaluation(failure=error.kind, message=str(error), offset=error.offset)
+    if isinstance(outcome, _Unresolved):
+        return IntegerEvaluation(
+            failure=FailureKind.UNRESOLVED_IDENTIFIER,
+            message=outcome.message,
+            offset=outcome.offset,
+        )
+    parser, value = outcome
+    if value.value is None:
+        message = (
+            value.reason or "expression value is implementation-defined in concrete evaluation"
+        )
+        return IntegerEvaluation(
+            failure=FailureKind.IMPLEMENTATION_DEFINED,
+            message=message,
+            offset=value.origin if value.origin is not None else parser.here(),
+        )
+    return IntegerEvaluation(value=value.value, unsigned=value.unsigned)
+
+
+__all__ = [
+    "FailureKind",
+    "IntegerEvaluation",
+    "NumericConditionError",
+    "evaluate_integer_expression",
+    "evaluate_numeric_condition",
+]
