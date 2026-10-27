@@ -724,7 +724,31 @@ cpre evaluate -D WIDTH=3 -D 'AREA=(WIDTH * 2 + PAD)' 'AREA % 5'
 
 The configuration options are those of [`preprocess`](#concrete-preprocessing): `-D`/`--define`, `-U`/`--undef`, `--config-from`, `--config-exclude`, `--unknown-names`, `--config-from-unknown-names` and `--standard-macro`. `--config-exclude` and `--config-from-unknown-names` refine `--config-from` and are rejected without it, as in `preprocess`. `--max-work N` limits the work spent on each item, and `--color WHEN` works as elsewhere.
 
-`--json` writes one `cpre.evaluations/1` document with an `evaluations` list in operand order; each entry is the [`cpre.evaluation/1`](json-contract.md#cpreevaluation1) record without its own `schema`.
+`--explain` adds the derivation under each item: the macro expansions in order, the expanded expression, a warning when an expansion regroups with the operators around it (an unparenthesized `SUM` as `W + H` in `SUM * 2`), a note when a signed operand becomes unsigned, and each operation with its result. It changes only what is printed; values and exit statuses are the same. See [Explaining a value](evaluation.md#explaining-a-value).
+
+```bash
+cpre evaluate -D W=3 -D H=4 -D 'SUM=W + H' --explain 'SUM * 2'
+```
+
+```text
+- SUM * 2
++ 11
+  expanded  3 + 4 * 2
+  trace
+    start     SUM * 2
+    expand    SUM → W + H
+    warning   SUM: the top-level '+' in SUM's replacement binds looser than the '*' after it, so the operands regroup (use SUM on its own to see its meaning); parenthesize the replacement list
+    expand    W → 3
+    expand    H → 4
+    expanded  3 + 4 * 2
+    evaluate  4 * 2 = 8
+    evaluate  3 + 4 * 2 = 11
+    result    SUM * 2 = 11
+```
+
+In color the `warning`, `conversion` and `stop` labels are yellow, the result green and a symbolic operation cyan; the layout is the same without color. At most 200 steps are shown, followed by a `truncated` line when more occurred.
+
+`--json` writes one `cpre.evaluations/1` document with an `evaluations` list in operand order; each entry is the [`cpre.evaluation/1`](json-contract.md#cpreevaluation1) record without its own `schema`. With `--explain` each record also has a `trace`.
 
 The exit status is `0` when every item has a value, `1` when any item is unevaluable, `3` when none is unevaluable but at least one is symbolic, and `2` when the configuration or an option is invalid or a seed cannot be read. Status `1` wins over `3`, so a script can treat `0` as "all values proved", `3` as "nothing is wrong, but something is unknown" and `1` as "something cannot be evaluated".
 

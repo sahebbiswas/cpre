@@ -233,6 +233,8 @@ cpre.evaluate_expression("AREA / (PAD - 2)", config).reason
 cpre.evaluate_expression("AREA + BASE", config).expanded  # "(3 * 4 + 2) + BASE"
 ```
 
+When a result is not what you expected, ask for the derivation with `trace=True` (or `--explain` on the command line): it lists each macro expansion and warns when an unparenthesized replacement such as `SUM` as `W + H` regroups inside `SUM * 2`, or when a signed operand turns unsigned.
+
 When a macro the expression uses is not configured, the result is symbolic: the expression with what is known substituted, and the names still missing in `unresolved`.
 
 From the shell, `cpre evaluate` takes the same configuration options as `cpre preprocess`, so a project's flags header can supply the definitions:

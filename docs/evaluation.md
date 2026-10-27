@@ -75,6 +75,63 @@ A result is symbolic only when an unresolved name is the *only* obstacle:
 
 `unknown_macros()` finds the names a whole source depends on; for one expression the result's own `unresolved` list is the discovery, taken from the expanded tokens, so names that only appear through macro replacement are included.
 
+## Explaining a value
+
+A value alone does not show why a result differs from what you expected. The usual causes are precedence (an unparenthesized replacement used inside a larger expression) and a conversion to unsigned. Pass `trace=True` to either function, or `--explain` to [`cpre evaluate`](cli.md#macro-and-expression-values-with-evaluate), to get the derivation in `Evaluation.trace`:
+
+```python
+config = cpre.MacroConfiguration(
+    definitions=[
+        cpre.MacroDefinition("W", "3"),
+        cpre.MacroDefinition("H", "4"),
+        cpre.MacroDefinition("SUM", "W + H"),
+    ]
+)
+
+result = cpre.evaluate_expression("SUM * 2", config, trace=True)
+for step in result.trace.steps:
+    print(step.kind.value, step.text)
+```
+
+```text
+start SUM * 2
+expand SUM
+warning SUM
+expand W
+expand H
+expanded 3 + 4 * 2
+evaluate 4 * 2
+evaluate 3 + 4 * 2
+result SUM * 2
+```
+
+`Evaluation.trace` is a `Trace` with `steps` (a tuple of `TraceStep`) and `truncated`. The value and every other field are the same with and without `trace=True`; a trace is `None` unless requested.
+
+| `TraceKind` | Meaning |
+| --- | --- |
+| `START` | The expression, or the macro name, being evaluated. Always first |
+| `EXPAND` | One macro replacement, in the order they happen: `text` is the invocation (`SQ(W + 1)`) and `replacement` what it became before rescanning. Macros inside arguments expand first |
+| `WARNING` | The replacement just expanded regroups with its neighbours, with the reason in `note` |
+| `EXPANDED` | The fully expanded expression, which is what is evaluated |
+| `CONVERSION` | A signed operand became unsigned under the usual arithmetic conversions, with the value it became in `note` |
+| `EVALUATE` | One operation that was evaluated, innermost first, with its `state`, `value` and `unsigned`. An operand that C does not evaluate (`1 / 0` after `0 &&`) has no step |
+| `RESULT` | The value of a concrete result. Always last for one |
+| `STOP` | Where evaluation ended without a value: `state` is `symbolic` or `unevaluable`, `replacement` is the expansion when there is one, and `note` gives the reason, the message and the offset. Always last for such a result |
+
+Only `EVALUATE`, `RESULT` and `STOP` have a `state`, because they are the steps with an outcome; an `EVALUATE` inside a symbolic expression is `symbolic` and one that depends on nothing unresolved is `concrete`, so the settled parts of `3 * 4 + PAD` show as `3 * 4 = 12`.
+
+### Precedence warnings
+
+A `WARNING` is added when an expansion's top-level operator binds looser than the operator next to it, so its operands regroup. That covers a prefix operator (`-SUM`, `!SUM`), a tighter operator on either side (`2 * SUM`, `SUM % 4`), a non-associative operator of the same precedence on its left (`10 - DIFF` with `DIFF` as `H - W`) and a replacement that divides or takes a remainder next to a `*` (`2 * Q` with `Q` as `H / W`: `2 * 7 / 2` is 7, not `2 * (7 / 2)` = 6). It does not fire for a parenthesized replacement, for `1 + SUM` or `SUM - 1`, which group as they read, or for a replacement with no top-level operator. The test is the one `simplify-macros` uses for `&&` and `||` (a replacement with a top-level binary operator is not substitution-safe), extended to the arithmetic operators. A function-like macro's arguments are not checked against their parameters: `SQ_RAW(W + 1)` is shown through its `EXPANDED` text, `3 + 1 * 3 + 1`.
+
+### Conversions
+
+`CONVERSION` marks the step that is most often a surprise: `-1 < 0u` compares `18446744073709551615` with `0`, so it is `0`. It is added for the arithmetic, bitwise, relational and equality operators and for the arms of a conditional operator, and not for shifts, `&&`, `||` or `!`, which do not convert their operands to a common type. A conversion that keeps the value (`5 + 1u`) is noted as unchanged.
+
+### Size
+
+A trace is deterministic and holds at most 200 steps, so its size does not grow with the expression. When more steps occur, the later ones are dropped, `Trace.truncated` is `True` and the outcome step is still kept last. The work of producing it is part of the evaluation, within the same `max_work` limit; a result that is cut short by that limit ends in a `STOP` step.
+
 ### Reasons
 
 An unevaluable result is an ordinary return value. Invalid arguments raise `AnalysisError`; nothing that merely prevents a value does. A symbolic result has the reason `UNRESOLVED_IDENTIFIER`.

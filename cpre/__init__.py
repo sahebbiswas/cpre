@@ -38,6 +38,9 @@ from .evaluation import (
     Evaluation,
     EvaluationReason,
     EvaluationState,
+    Trace,
+    TraceKind,
+    TraceStep,
     evaluate_expression,
     evaluate_macro,
 )
@@ -117,7 +120,7 @@ from .unknown_macros import MacroUse, UnknownMacro, unknown_macros, unknown_macr
 
 # Single source of truth for the package version (Semantic Versioning 2.0.0).
 # Every pull request merged to main bumps it once; see CONTRIBUTING.md.
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 __all__ = [
     "AnalysisError",
@@ -188,6 +191,9 @@ __all__ = [
     "StructureDiagnosticCode",
     "SuggestedEdit",
     "TRUE",
+    "Trace",
+    "TraceKind",
+    "TraceStep",
     "UnknownMacro",
     "UnknownNamePolicy",
     "Variable",

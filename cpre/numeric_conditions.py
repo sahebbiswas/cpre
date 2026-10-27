@@ -7,7 +7,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from enum import Enum
 
-from .expansion import Expansion, ExpansionError
+from ._evaluation_types import EvaluationState, TraceKind, TraceRecorder, TraceStep
+from ._precedence import use_site_conflict
+from .expansion import Expansion, ExpansionError, ExpansionEvent
 from .lexer import Token, tokenize
 from .macros import MacroLookup
 from .robdd import AnalysisBudget
@@ -388,6 +390,8 @@ class _Parser:
         # In symbolic mode a name the environment does not settle becomes an unresolved
         # operand that propagates through operators, so every other obstacle is still found.
         self.symbolic = symbolic
+        # When set, every operation that is evaluated is recorded as a trace step.
+        self.recorder: TraceRecorder | None = None
 
     def peek(self, text: str | None = None) -> Token | None:
         if self.index >= len(self.tokens):
@@ -494,34 +498,70 @@ class _Parser:
     def unary(self, evaluate: bool) -> _Value:
         head = self.peek()
         if head is not None and head.text in {"+", "-", "!", "~"}:
-            self.take()
-            op = head.text
-            self._enter()
-            try:
-                value = self.unary(evaluate)
-            finally:
-                self._leave()
-            if op == "!":
-                if evaluate and value.unresolved:
-                    return value
-                return _Value(int(not value.truth())) if evaluate else _Value(None)
-            if op == "+":
-                return value
-            if not evaluate:
-                return _Value(None, value.unsigned)
-            if value.unresolved:
-                return value
-            if value.value is None:
-                return _Value(
-                    None,
-                    value.unsigned,
-                    value.truth_value if op == "-" else None,
-                    reason=value.reason,
-                )
-            if op == "-":
-                return _unsigned(-value.value) if value.unsigned else _signed(-value.value)
-            return _unsigned(~value.value) if value.unsigned else _signed(~value.value)
+            start = self.index
+            value = self._unary_operator(head, evaluate)
+            if evaluate and head.text != "+":
+                self._note(start, value)
+            return value
         return self.primary(evaluate)
+
+    def _unary_operator(self, head: Token, evaluate: bool) -> _Value:
+        self.take()
+        op = head.text
+        self._enter()
+        try:
+            value = self.unary(evaluate)
+        finally:
+            self._leave()
+        if op == "!":
+            if evaluate and value.unresolved:
+                return value
+            return _Value(int(not value.truth())) if evaluate else _Value(None)
+        if op == "+":
+            return value
+        if not evaluate:
+            return _Value(None, value.unsigned)
+        if value.unresolved:
+            return value
+        if value.value is None:
+            return _Value(
+                None,
+                value.unsigned,
+                value.truth_value if op == "-" else None,
+                reason=value.reason,
+            )
+        if op == "-":
+            return _unsigned(-value.value) if value.unsigned else _signed(-value.value)
+        return _unsigned(~value.value) if value.unsigned else _signed(~value.value)
+
+    def _note(self, start: int, value: _Value) -> None:
+        """Record the tokens from ``start`` to here as one evaluated operation."""
+        if self.recorder is None:
+            return
+        if value.unresolved:
+            state, number, unsigned = EvaluationState.SYMBOLIC, None, None
+        elif value.value is None:
+            state, number, unsigned = EvaluationState.UNEVALUABLE, None, None
+        else:
+            state, number, unsigned = EvaluationState.CONCRETE, value.value, value.unsigned
+        text = _render(self.tokens[start : self.index])
+        self.recorder.add(TraceStep(TraceKind.EVALUATE, text, None, state, number, unsigned))
+
+    def _note_conversion(self, start: int, left: _Value, right: _Value) -> None:
+        """Record a signed operand becoming unsigned under the usual arithmetic conversions."""
+        if self.recorder is None or left.unsigned == right.unsigned:
+            return
+        signed = right if left.unsigned else left
+        if signed.unresolved or signed.value is None:
+            return
+        converted = signed.value & _UINT_MASK
+        what = (
+            f"signed {signed.value} becomes unsigned {converted}"
+            if converted != signed.value
+            else f"signed {signed.value} becomes unsigned (the value is unchanged)"
+        )
+        text = _render(self.tokens[start : self.index])
+        self.recorder.add(TraceStep(TraceKind.CONVERSION, text, note=what))
 
     def binary(
         self,
@@ -530,15 +570,20 @@ class _Parser:
         evaluate: bool,
         apply: Callable[[str, _Value, _Value, bool], _Value],
     ) -> _Value:
+        start = self.index
         value = operand(evaluate)
         while (head := self.peek()) is not None and head.text in operators:
             self.take()
             op = head.text
             right = operand(evaluate)
+            if evaluate and op not in {"<<", ">>"}:
+                self._note_conversion(start, value, right)
             if evaluate and (value.unresolved or right.unresolved):
                 value = self._with_unresolved(op, value, right)
             else:
                 value = apply(op, value, right, evaluate)
+            if evaluate:
+                self._note(start, value)
         return value
 
     @staticmethod
@@ -682,6 +727,7 @@ class _Parser:
         return _unsigned(result) if unsigned else _signed(result)
 
     def logical_and(self, evaluate: bool) -> _Value:
+        start = self.index
         value = self.bitor(evaluate)
         while self.take("&&") is not None:
             if evaluate and value.unresolved:
@@ -694,9 +740,12 @@ class _Parser:
                 value = right
             else:
                 value = _Value(int(left_truth and right.truth())) if evaluate else _Value(None)
+            if evaluate:
+                self._note(start, value)
         return value
 
     def logical_or(self, evaluate: bool) -> _Value:
+        start = self.index
         value = self.logical_and(evaluate)
         while self.take("||") is not None:
             if evaluate and value.unresolved:
@@ -708,9 +757,12 @@ class _Parser:
                 value = right
             else:
                 value = _Value(int(left_truth or right.truth())) if evaluate else _Value(None)
+            if evaluate:
+                self._note(start, value)
         return value
 
     def conditional(self, evaluate: bool) -> _Value:
+        start = self.index
         condition = self.logical_or(evaluate)
         if self.take("?") is None:
             return condition
@@ -728,12 +780,18 @@ class _Parser:
         finally:
             self._leave()
 
+        chosen = when_true if condition_truth else when_false
+        other = when_false if condition_truth else when_true
         when_true, when_false, unsigned = _convert(when_true, when_false)
         if not evaluate:
             return _Value(None, unsigned)
         if unknown_condition:
-            return replace(condition, unsigned=unsigned)
-        return when_true if condition_truth else when_false
+            result = replace(condition, unsigned=unsigned)
+        else:
+            self._note_conversion(start, chosen, other)
+            result = when_true if condition_truth else when_false
+        self._note(start, result)
+        return result
 
 
 @dataclass(frozen=True)
@@ -770,6 +828,7 @@ def _evaluate(
     capture: list[Token] | None = None,
     *,
     symbolic: bool = False,
+    recorder: TraceRecorder | None = None,
 ) -> tuple[_Parser, _Value] | _Unresolved:
     """Expand and parse ``text``; the caller decides what to ask of the value.
 
@@ -781,7 +840,11 @@ def _evaluate(
     resolved = _resolve_defined(original, environment, symbolic=symbolic)
     if isinstance(resolved, _Unresolved):
         return resolved
-    expanded = expansion._expand(resolved, environment)
+    expansion.observer = _observer(recorder) if recorder is not None else None
+    try:
+        expanded = expansion._expand(resolved, environment)
+    finally:
+        expansion.observer = None
     for token in expanded:
         if (
             token.kind == "identifier"
@@ -795,7 +858,10 @@ def _evaluate(
     significant = [token for token in expanded if token.kind != "empty"]
     if capture is not None:
         capture.extend(significant)
+    if recorder is not None:
+        recorder.add(TraceStep(TraceKind.EXPANDED, _render(significant)))
     parser = _Parser(significant, budget, symbolic=symbolic)
+    parser.recorder = recorder
     try:
         return parser, parser.parse()
     except RecursionError as error:
@@ -810,6 +876,44 @@ def _evaluate(
         if error.offset is None:
             error.offset = parser.here()
         raise
+
+
+def _observer(recorder: TraceRecorder) -> Callable[[ExpansionEvent], None]:
+    """An expansion observer that records each replacement and any use-site regrouping."""
+
+    def observe(event: ExpansionEvent) -> None:
+        name = event.token.text
+        replacement = [token for token in event.generated if token.kind != "empty"]
+        shown = _render(replacement)
+        if event.definition.parameters is None:
+            invocation = name
+        else:
+            arguments = ", ".join(_render(tokens) for tokens in event.arguments.values())
+            invocation = f"{name}({arguments})"
+        recorder.add(TraceStep(TraceKind.EXPAND, invocation, shown))
+        conflict = use_site_conflict(
+            [token.text for token in replacement],
+            [token.text for token in event.before],
+            event.after.text if event.after is not None else None,
+        )
+        if conflict is not None:
+            weakest, neighbour, side = conflict
+            where = "in front of" if side == "before" else "after"
+            recorder.add(
+                TraceStep(
+                    TraceKind.WARNING,
+                    name,
+                    shown,
+                    note=(
+                        f"the top-level '{weakest}' in {name}'s replacement binds looser than "
+                        f"the '{neighbour}' {where} it, so the operands regroup "
+                        f"(use {name} on its own to see its meaning); parenthesize the "
+                        f"replacement list"
+                    ),
+                )
+            )
+
+    return observe
 
 
 def _unresolved_names(tokens: list[Token]) -> tuple[str, ...]:
@@ -897,6 +1001,7 @@ def evaluate_integer_expression(
     *,
     unsupported_identifiers: frozenset[str] = frozenset(),
     symbolic: bool = False,
+    recorder: TraceRecorder | None = None,
 ) -> IntegerEvaluation:
     """Evaluate a macro-expanded integer expression to its value.
 
@@ -913,10 +1018,24 @@ def evaluate_integer_expression(
     as an unknown operand, so any other obstacle (a division by zero that cannot be
     skipped, overflow, unsupported syntax, an implementation-defined character) is still
     reported as the failure and wins over the unresolved name.
+
+    A ``recorder`` collects the derivation: each macro replacement (with a warning when it
+    regroups with its neighbours), the expanded expression, and every operation that is
+    evaluated. When the symbolic pass runs it replaces what the strict pass recorded.
     """
     captured: list[Token] = []
+    if recorder is not None:
+        recorder.mark()
     try:
-        outcome = _evaluate(text, environment, expansion, budget, unsupported_identifiers, captured)
+        outcome = _evaluate(
+            text,
+            environment,
+            expansion,
+            budget,
+            unsupported_identifiers,
+            captured,
+            recorder=recorder,
+        )
     except NumericConditionError as error:
         return IntegerEvaluation(
             failure=error.kind,
@@ -926,7 +1045,11 @@ def evaluate_integer_expression(
         )
     expanded = _render(captured) if captured else None
     if isinstance(outcome, _Unresolved) and symbolic:
-        return _symbolic(text, environment, expansion, budget, unsupported_identifiers, outcome)
+        if recorder is not None:
+            recorder.rewind()
+        return _symbolic(
+            text, environment, expansion, budget, unsupported_identifiers, outcome, recorder
+        )
     if isinstance(outcome, _Unresolved):
         return IntegerEvaluation(
             failure=FailureKind.UNRESOLVED_IDENTIFIER,
@@ -955,12 +1078,20 @@ def _symbolic(
     budget: AnalysisBudget,
     unsupported_identifiers: frozenset[str],
     strict: _Unresolved,
+    recorder: TraceRecorder | None = None,
 ) -> IntegerEvaluation:
     """Classify an unresolved expression: symbolic, or blocked by another obstacle."""
     captured: list[Token] = []
     try:
         outcome = _evaluate(
-            text, environment, expansion, budget, unsupported_identifiers, captured, symbolic=True
+            text,
+            environment,
+            expansion,
+            budget,
+            unsupported_identifiers,
+            captured,
+            symbolic=True,
+            recorder=recorder,
         )
     except NumericConditionError as error:
         return IntegerEvaluation(

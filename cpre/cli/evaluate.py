@@ -52,6 +52,14 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
         help="resource limit: work units for each item (default: 500000)",
     )
     parser.add_argument(
+        "--explain",
+        action="store_true",
+        help=(
+            "show how each value was derived: the macro expansions, warnings about use-site "
+            "precedence and signed-to-unsigned conversions, and each evaluated operation"
+        ),
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="write a JSON document with one evaluation record per item",
@@ -75,12 +83,14 @@ def evaluate_item(
     configuration: MacroConfiguration,
     context: PreprocessingContext | None,
     options: AnalysisOptions,
+    *,
+    trace: bool = False,
 ) -> Evaluation:
     """A bare identifier is evaluated as a macro, anything else as an expression."""
     name = item.strip()
     if _IDENTIFIER.match(name):
-        return evaluate_macro(name, configuration, context=context, options=options)
-    return evaluate_expression(item, configuration, context=context, options=options)
+        return evaluate_macro(name, configuration, context=context, options=options, trace=trace)
+    return evaluate_expression(item, configuration, context=context, options=options, trace=trace)
 
 
 def evaluate_main(argv: Sequence[str] | None = None, prog: str = "cpre evaluate") -> int:
@@ -98,7 +108,10 @@ def evaluate_main(argv: Sequence[str] | None = None, prog: str = "cpre evaluate"
         if built is None:
             return EXIT_ERROR
         configuration, context = built
-        evaluations = [evaluate_item(item, configuration, context, options) for item in args.items]
+        evaluations = [
+            evaluate_item(item, configuration, context, options, trace=args.explain)
+            for item in args.items
+        ]
     except (CpreError, ValueError) as error:
         message = format_error(error) if isinstance(error, CpreError) else str(error)
         print(f"{prog}: error: {message}", file=sys.stderr)

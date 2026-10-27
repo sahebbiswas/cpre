@@ -7,6 +7,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from ._lines import line_starts as _line_starts
+from ._precedence import top_level_binary_operators
 from ._types import (
     AnalysisIncomplete,
     AnalysisOptions,
@@ -267,15 +268,8 @@ def _has_top_level_binary_operator(replacement: str) -> bool:
     ``!M`` mean ``!A || B``. Any rewrite adds outer parentheses, which would
     change the meaning of those uses, so it must not be applied.
     """
-    depth = 0
-    for token in tokens(replacement):
-        if token.text == "(":
-            depth += 1
-        elif token.text == ")":
-            depth -= 1
-        elif depth == 0 and token.text in ("&&", "||"):
-            return True
-    return False
+    operators = top_level_binary_operators([token.text for token in tokens(replacement)])
+    return any(operator in ("&&", "||") for operator in operators)
 
 
 def analyze_macro(
