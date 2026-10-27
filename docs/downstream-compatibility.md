@@ -110,6 +110,7 @@ The covered Python names are exactly `cpre.__all__`. These tests keep the promis
 - `tests/test_documentation.py`: every name in `cpre.__all__` is in the [API index](api.md#public-api-index), and every CLI option is documented
 - `tests/test_downstream_contract.py` and `tests/test_structural_downstream_contract.py`: the symbolic, analysis and structural API
 - `tests/test_json_contract.py`: the `cpre.<kind>/<major>` documents
+- `tests/test_evaluation.py`: `evaluate_expression()`, `evaluate_macro()` and the `Evaluation` record
 - `tests/test_sarif.py`: the SARIF output
 - `tests/test_py_typed.py`: the shipped type information
 

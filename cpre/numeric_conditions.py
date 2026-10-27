@@ -636,7 +636,8 @@ class IntegerEvaluation:
     A concrete result has ``value`` (and ``unsigned`` says whether it is a
     ``uintmax_t``). Otherwise ``failure`` says why there is no value, ``message``
     describes it, and ``offset`` is the offset in the expression text of the token it
-    concerns, when one is known.
+    concerns, when one is known. ``expanded`` is the expression after macro expansion,
+    when expansion got that far.
     """
 
     value: int | None = None
@@ -644,6 +645,7 @@ class IntegerEvaluation:
     failure: FailureKind | None = None
     message: str | None = None
     offset: int | None = None
+    expanded: str | None = None
 
     @property
     def concrete(self) -> bool:
@@ -656,6 +658,7 @@ def _evaluate(
     expansion: Expansion,
     budget: AnalysisBudget,
     unsupported_identifiers: frozenset[str],
+    capture: list[Token] | None = None,
 ) -> tuple[_Parser, _Value] | _Unresolved:
     """Expand and parse ``text``; the caller decides what to ask of the value.
 
@@ -679,6 +682,8 @@ def _evaluate(
                 f"predefined macro {token.text} is not supported during concrete preprocessing"
             )
     significant = [token for token in expanded if token.kind != "empty"]
+    if capture is not None:
+        capture.extend(significant)
     parser = _Parser(significant, budget)
     try:
         return parser, parser.parse()
@@ -722,6 +727,25 @@ def evaluate_numeric_condition(
         raise
 
 
+_UNARY_OPERATORS = frozenset({"+", "-", "!", "~"})
+
+
+def _render(tokens: list[Token]) -> str:
+    """Expanded tokens as readable text: spaced operators, tight parentheses and unary signs."""
+    parts: list[str] = []
+    previous: Token | None = None
+    previous_unary = False
+    for token in tokens:
+        operand_before = previous is not None and (
+            previous.kind in {"number", "identifier", "literal"} or previous.text == ")"
+        )
+        unary = token.text in _UNARY_OPERATORS and (token.text in {"!", "~"} or not operand_before)
+        tight = previous is None or previous.text == "(" or token.text == ")" or previous_unary
+        parts.append(token.text if tight else f" {token.text}")
+        previous, previous_unary = token, unary
+    return "".join(parts)
+
+
 def evaluate_integer_expression(
     text: str,
     environment: MacroLookup,
@@ -739,15 +763,23 @@ def evaluate_integer_expression(
     rather than as an exception. ``ExpansionError`` and an exhausted ``budget`` still
     propagate, as they do for conditions.
     """
+    captured: list[Token] = []
     try:
-        outcome = _evaluate(text, environment, expansion, budget, unsupported_identifiers)
+        outcome = _evaluate(text, environment, expansion, budget, unsupported_identifiers, captured)
     except NumericConditionError as error:
-        return IntegerEvaluation(failure=error.kind, message=str(error), offset=error.offset)
+        return IntegerEvaluation(
+            failure=error.kind,
+            message=str(error),
+            offset=error.offset,
+            expanded=_render(captured) if captured else None,
+        )
+    expanded = _render(captured) if captured else None
     if isinstance(outcome, _Unresolved):
         return IntegerEvaluation(
             failure=FailureKind.UNRESOLVED_IDENTIFIER,
             message=outcome.message,
             offset=outcome.offset,
+            expanded=expanded,
         )
     parser, value = outcome
     if value.value is None:
@@ -758,8 +790,9 @@ def evaluate_integer_expression(
             failure=FailureKind.IMPLEMENTATION_DEFINED,
             message=message,
             offset=value.origin if value.origin is not None else parser.here(),
+            expanded=expanded,
         )
-    return IntegerEvaluation(value=value.value, unsigned=value.unsigned)
+    return IntegerEvaluation(value=value.value, unsigned=value.unsigned, expanded=expanded)
 
 
 __all__ = [

@@ -211,6 +211,29 @@ cpre cover widget.h --consume-pragma once
 
 When the header is included from a source file instead, none of this applies: with `-I`, `#pragma once` and detected guards in included headers are handled automatically ([Include resolution](include-resolution.md)).
 
+## Check the value of a macro
+
+Ask for the value instead of writing a probe `#if`. The result carries the expanded expression, so a precedence mistake is visible, and an unevaluable result says why.
+
+```python
+import cpre
+
+config = cpre.MacroConfiguration(
+    integers={"WIDTH": 3, "HEIGHT": 4, "PAD": 2},
+    definitions=[
+        cpre.MacroDefinition("AREA", "(WIDTH * HEIGHT + PAD)"),
+        cpre.MacroDefinition("SUM", "WIDTH + HEIGHT"),
+    ],
+)
+
+cpre.evaluate_macro("AREA", config).value  # 14
+cpre.evaluate_expression("SUM * 2", config).expanded  # "3 + 4 * 2"
+cpre.evaluate_expression("AREA / (PAD - 2)", config).reason
+# EvaluationReason.DIVISION_BY_ZERO
+```
+
+See [Evaluating expressions and macros](evaluation.md).
+
 ## Build a configuration matrix for tests
 
 ```bash
