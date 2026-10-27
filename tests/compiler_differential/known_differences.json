@@ -21,5 +21,14 @@
     "reference": "accepted",
     "cpre": "incomplete at line 1: unsupported_condition_expression",
     "reason": "The value of an ordinary character constant depends on the implementation's execution character set, so cpre declines to evaluate it instead of assuming ASCII."
+  },
+  "if_skipped_unsigned_division_by_zero.c": {
+    "issue": "#228",
+    "kind": "intentional",
+    "compilers": ["gcc"],
+    "version_dependent": true,
+    "reference": "accepted",
+    "cpre": "accepted: unsigned_result",
+    "reason": "In a conditional operator arm that is not selected, GCC types a division or remainder by an unsigned zero as its left operand's type, so the whole conditional stays signed. The usual arithmetic conversions make the operation unsigned, and Clang agrees, so cpre follows the standard and reports an unsigned result."
   }
 }

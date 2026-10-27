@@ -24,6 +24,12 @@ raise that document's schema major version and are listed here (see the
   itself.
 
 ### Added
+- Evaluated values are checked against GCC and Clang. `tests/test_evaluation_differential.py`
+  runs a `#if (EXPR) == VALUE` probe, plus a signedness probe, for every expression cpre
+  reports as concrete: operator, boundary, unsigned and macro fixtures and a seeded random
+  generator (rerun a failure with `CPRE_DIFFERENTIAL_SEED`). The one difference found, GCC
+  typing a skipped division by an unsigned zero as signed, is recorded in
+  `known_differences.json` ([#228](https://github.com/sahebbiswas/cpre/issues/228)).
 - `evaluate_expression()` and `evaluate_macro()` compute the integer value of an
   expression, or of a macro that expands to integer arithmetic, under a
   `MacroConfiguration`, with the same evaluator as `#if`. They return an immutable

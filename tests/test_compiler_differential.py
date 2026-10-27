@@ -366,6 +366,12 @@ def test_cpre_matches_reference(case: Case, reference: Reference) -> None:
         assert agrees(theirs, ours), _report(case, reference, theirs, ours)
         return
 
+    # cpre's side of a recorded difference is checked first: a compiler release that
+    # stops differing is no excuse for cpre to change.
+    assert ours.signature() == known["cpre"], _report(case, reference, theirs, ours)
+    if known.get("version_dependent") and agrees(theirs, ours):
+        pytest.skip(f"{case.name}: this {reference.family} release no longer differs")
+
     # A recorded difference must still exist exactly as documented, so that a fix
     # (or a new divergence) is noticed and the record is updated.
     assert not agrees(theirs, ours), (
@@ -390,6 +396,7 @@ def test_known_differences_are_documented() -> None:
         assert entry["reference"] in {"accepted", "rejected"}
         assert entry["kind"] in {"bug", "gap", "intentional"}
         assert set(entry.get("compilers", ["gcc", "clang"])) <= {"gcc", "clang"}
+        assert isinstance(entry.get("version_dependent", False), bool)
     documented = (HERE.parents[1] / "docs" / "compiler-differential.md").read_text("utf-8")
     for name in KNOWN_DIFFERENCES:
         assert f"`{name}`" in documented, f"{name} is not listed in docs/compiler-differential.md"

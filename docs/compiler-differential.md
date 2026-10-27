@@ -53,6 +53,40 @@ Options apply in order, as for the compiler driver, so the last `-D` or `-U` for
 
 Keep cases deterministic: no `__DATE__`, `__TIME__` or `__FILE__` in included headers, and nothing that depends on the target. Put a construct that differs into a case of its own, so recording it does not stop the rest of a file from being checked.
 
+## Evaluated values
+
+The fixtures include a few cases that C leaves undefined but both compilers evaluate the same way in `#if` and that cpre's documented model fixes (a left shift of a negative value, `INT64_MIN % -1`). They check that shared behaviour, not a guarantee of the standard.
+
+`tests/test_evaluation_differential.py` checks the values from [`evaluate_expression()`](evaluation.md), not the preprocessed output. For every expression cpre reports as concrete it asks each reference compiler the same question with a probe:
+
+```c
+#if (EXPR) == VALUE
+eq
+#endif
+#if 0 * (EXPR) - 1 < 0
+signed
+#endif
+```
+
+The first probe checks the value and the second its signedness, so a `uintmax_t` result is not mistaken for an `intmax_t` one. The macros the expression uses are defined in the probe file and in the `MacroConfiguration` passed to cpre. The same compiler discovery, `CPRE_REFERENCE_CC` override and skip rule as above apply; without a compiler the cpre-only checks still run and the comparison is skipped with the same reason.
+
+An unevaluable result is never compared. The fixtures only assert its reason, so signed overflow (`BIG + 1`, `1 << 63`, `LOW / -1`), which GCC and Clang warn about and wrap, stays an `overflow` result in cpre. That difference is the evaluator's documented contract, not a gap.
+
+Three groups of tests:
+
+- **Fixtures** (`VALUES`): every arithmetic, bitwise, relational, logical and conditional operator; truncating division and the sign of `%`; negative operands and arithmetic right shifts; `INT64_MIN % -1`; the `INT64_MIN` and `INT64_MAX` boundaries; unsigned conversion and wraparound; short-circuiting around a division by zero; and nested, function-like and unparenthesized macros, including the use-site precedence case. Each fixture states its expected value, so the table is checked against cpre even without a compiler.
+- **Unevaluable fixtures** (`UNEVALUABLE`): division by zero, each overflow form, unresolved names, implementation-defined character constants and unsupported syntax, each with the expected `EvaluationReason`.
+- **Seeded random expressions**: a generator in the test file builds a few macros over earlier macros and expressions over those macros, with bounded depth and size and no new dependency. Some operands are left unparenthesized so C's precedence rules decide the grouping, and shift counts stay between 0 and 40. The generator redraws a macro that has no value, and a run must keep at least 40% of its expressions concrete so it cannot pass by checking nothing.
+
+A failure names the seed, the expression and value cpre computed, and the macro definitions the expression reaches (a minimal reproduction you can paste into a `.c` file), and prints the command to rerun it:
+
+```bash
+CPRE_DIFFERENTIAL_SEED=17 pytest tests/test_evaluation_differential.py -k random
+CPRE_DIFFERENTIAL_SEED=17 CPRE_DIFFERENTIAL_COUNT=1000 pytest tests/test_evaluation_differential.py -k random
+```
+
+Without `CPRE_DIFFERENTIAL_SEED` the tests run seeds 1 to 8 with 60 expressions each; `CPRE_DIFFERENTIAL_COUNT` changes the number per seed. A wider search, for example when changing the numeric evaluator, is a loop over seeds.
+
 ## Known differences
 
 [`known_differences.json`](../tests/compiler_differential/known_differences.json) records each case where cpre is expected to differ, with:
@@ -62,11 +96,13 @@ Keep cases deterministic: no `__DATE__`, `__TIME__` or `__FILE__` in included he
 - `reference`: what the compiler does (`accepted` or `rejected`);
 - `cpre`: exactly what cpre currently does, including the line it reports. For accepted output this includes the tokens.
 - `compilers` (optional): the families it applies to, when only one differs.
+- `version_dependent` (optional, `true`): the difference comes from a compiler release and may be fixed in another. When the compiler agrees with cpre the pair is skipped instead of failing, so one release can differ while another does not.
 
-A recorded case is still run, and it fails if the difference changes in any way, including disappearing. So when a fix lands, the test tells you to delete the entry, and a partial fix or a new divergence is noticed. Every entry must also be listed here.
+A recorded case is still run, and it fails if the difference changes in any way, including disappearing. So when a fix lands, the test tells you to delete the entry (unless it is `version_dependent`), and a partial fix or a new divergence is noticed. Every entry must also be listed here.
 
 | Case | Kind | Issue | Difference |
 |---|---|---|---|
 | `comment_across_line_directive.c` | intentional | #156 | Clang only: for a `#line` directive that a comment spreads over two physical lines, Clang gives the new number to the directive's second line, so `__LINE__` on the line after it is one higher. GCC and cpre apply the number to the line after the whole directive. |
 | `line_directive_backslash_continued.c` | intentional | #156 | Clang only: for a backslash-continued `#line` directive, Clang gives the new number to the directive's second physical line, so `__LINE__` on the line after it is one higher. GCC and cpre apply the number to the line after the whole directive. |
 | `if_character_constants.c` | intentional | #50 | cpre does not evaluate ordinary character constants such as `'A'` in `#if`, because their values depend on the execution character set. The result is incomplete instead. |
+| `if_skipped_unsigned_division_by_zero.c` | intentional | #228 | GCC only: in a conditional operator arm that is not selected, a division or remainder by an unsigned zero keeps the type of its left operand, so the conditional stays signed. The C usual arithmetic conversions make it unsigned, as Clang and cpre do. The value is unaffected. |
