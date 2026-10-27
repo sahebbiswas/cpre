@@ -72,8 +72,10 @@ We use `tox` to run checks consistently across all supported Python versions.
   preprocesses every case in `tests/compiler_differential/cases` with each
   compiler found on `PATH` and with cpre, and fails on any difference that is
   not recorded. When changing concrete preprocessing, add a case for the
-  construct you touched. See
-  [Compiler differential tests](docs/compiler-differential.md).
+  construct you touched. `tests/test_evaluation_differential.py` does the same
+  for evaluated values; when changing the integer evaluator, add a fixture and
+  rerun a wider seed range (`CPRE_DIFFERENTIAL_SEED=N`, `CPRE_DIFFERENTIAL_COUNT=N`).
+  See [Compiler differential tests](docs/compiler-differential.md).
 
 ## Code Style
 
