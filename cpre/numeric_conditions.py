@@ -180,9 +180,7 @@ class _Unresolved:
     names: tuple[str, ...] = ()
 
 
-def _resolve_defined(
-    tokens: list[Token], environment: MacroLookup, *, symbolic: bool = False
-) -> list[Token] | _Unresolved:
+def _resolve_defined(tokens: list[Token], environment: MacroLookup) -> list[Token]:
     result: list[Token] = []
     index = 0
     while index < len(tokens):
@@ -204,12 +202,11 @@ def _resolve_defined(
             raise NumericConditionError("malformed defined operator")
         defined = environment.get(name).defined
         if defined is None:
-            if symbolic:
-                # Keep the operator as one placeholder operand so the rest is still checked.
-                shown = f"defined({name})" if tokens[index - 1].text == ")" else f"defined {name}"
-                result.append(Token(shown, "unresolved", token.start, end, generated=True))
-                continue
-            return _Unresolved(f"definedness of {name!r} is unknown", token.start)
+            # Keep the operator as one placeholder operand: the parser decides whether its
+            # value is needed, so `1 || defined(NAME)` does not depend on NAME.
+            shown = f"defined({name})" if tokens[index - 1].text == ")" else f"defined {name}"
+            result.append(Token(shown, "unresolved", token.start, end, generated=True))
+            continue
         result.append(Token("1" if defined else "0", "number", token.start, end, generated=True))
     return result
 
@@ -451,31 +448,61 @@ class _Parser:
             return _integer(token.text)
         if token.kind == "literal" and "'" in token.text:
             return replace(_character(token.text), origin=token.start)
-        if token.kind == "unresolved" and self.symbolic:
-            return _Value(None, unresolved=True, origin=token.start)
+        if token.kind == "unresolved":
+            # An undetermined `defined NAME`; its text is the operator as written.
+            name = token.text.removeprefix("defined").strip(" ()")
+            return self._unsettled(token, evaluate, f"definedness of {name!r} is unknown")
         if token.kind == "identifier":
             if token.text in token.hidden:
                 # Expansion left this name alone because it was already being replaced
                 # (a self-referential macro). It is a plain identifier from now on, and
                 # every identifier left in a controlling expression is 0 (C11 6.10.1).
                 return _Value(0)
-            if self.symbolic:
-                if token.text in _NOT_A_NAME:
-                    # A C keyword is never a macro, so no definition could give it a value.
-                    raise NumericConditionError(
-                        f"unsupported token {token.text!r} in concrete condition", token.start
-                    )
-                if self.peek("(") is not None:
-                    self._skip_call()
-                return _Value(None, unresolved=True, origin=token.start)
-            raise NumericConditionError(
-                f"unresolved identifier {token.text!r}",
-                token.start,
-                FailureKind.UNRESOLVED_IDENTIFIER,
-            )
+            if self.symbolic and token.text in _NOT_A_NAME:
+                # A C keyword is never a macro, so no definition could give it a value.
+                raise NumericConditionError(
+                    f"unsupported token {token.text!r} in concrete condition", token.start
+                )
+            if self.symbolic and self.peek("(") is not None:
+                self._skip_call()
+            return self._unsettled(token, evaluate, f"unresolved identifier {token.text!r}")
         raise NumericConditionError(
             f"unsupported token {token.text!r} in concrete condition", token.start
         )
+
+    def _unsettled(self, token: Token, evaluate: bool, message: str) -> _Value:
+        """An operand the environment does not settle.
+
+        It is unresolved when its value is needed (and, in symbolic mode, an unknown
+        operand). In an operand that is never evaluated it stands alone, so the result
+        cannot depend on it and it reads as a placeholder.
+        """
+        if self.symbolic:
+            return _Value(None, unresolved=True, origin=token.start)
+        if not evaluate:
+            end = self._standalone_end(self.index - 1)
+            if end is not None:
+                while self.index < end:
+                    self.take()
+                return _Value(0)
+        raise NumericConditionError(message, token.start, FailureKind.UNRESOLVED_IDENTIFIER)
+
+    def _standalone_end(self, position: int) -> int | None:
+        """Where the name at ``position`` ends, if it is a whole operand.
+
+        An unconfigured name could in principle expand to tokens that change how its
+        neighbours group (an operator, an unbalanced parenthesis), so only a name whose
+        neighbours are the edges of a logical or conditional operand is set aside. A name
+        followed by ``(`` is not: it is a valid operand only if it is a function-like macro,
+        which is not known, and a compiler rejects it otherwise.
+        """
+        tokens = self.tokens
+        if position > 0 and tokens[position - 1].text not in _OPERAND_OPENERS:
+            return None
+        end = position + 1
+        if end < len(tokens) and tokens[end].text not in _OPERAND_CLOSERS:
+            return None
+        return end
 
     def _skip_call(self) -> None:
         """Consume the balanced argument list of a call to a name that is not a macro."""
@@ -837,9 +864,7 @@ def _evaluate(
     when expansion itself fails.
     """
     original = [t for t in tokenize(text) if t.kind not in {"space", "comment"}]
-    resolved = _resolve_defined(original, environment, symbolic=symbolic)
-    if isinstance(resolved, _Unresolved):
-        return resolved
+    resolved = _resolve_defined(original, environment)
     expansion.observer = _observer(recorder) if recorder is not None else None
     try:
         expanded = expansion._expand(resolved, environment)
@@ -965,6 +990,10 @@ _NOT_A_NAME = frozenset(
     _Thread_local alignof
     """.split()
 )
+
+# Tokens that begin and end a whole operand of `&&`, `||` or `?:` (or a parenthesis).
+_OPERAND_OPENERS = frozenset({"&&", "||", "?", ":", "("})
+_OPERAND_CLOSERS = frozenset({")", ":", "?", "&&", "||"})
 
 _UNARY_OPERATORS = frozenset({"+", "-", "!", "~"})
 

@@ -281,4 +281,4 @@ def test_expanded_text_is_the_readable_expansion(text, definitions, expanded):
 def test_expanded_text_is_kept_for_failures_after_expansion_only():
     assert evaluate("UNK + 1", keep_expanded=True).expanded == "UNK + 1"
     assert evaluate("1 / 0", keep_expanded=True).expanded == "1 / 0"
-    assert evaluate("defined(UNK) + 1", keep_expanded=True).expanded is None
+    assert evaluate("defined(UNK) + 1", keep_expanded=True).expanded == "defined(UNK) + 1"
