@@ -165,7 +165,7 @@ def test_expression_document_fields(capsys):
 
 EVALUATION_KEYS = {
     "schema", "kind", "expression", "state", "value", "unsigned", "expanded", "reason",
-    "message", "offset",
+    "message", "offset", "unresolved",
 }  # fmt: skip
 
 

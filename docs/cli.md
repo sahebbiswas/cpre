@@ -158,7 +158,7 @@ On a terminal the report is colored, with one meaning per color:
 | yellow | `REDUNDANT` and `INCOMPLETE` |
 | green | `SIMPLIFY`, `REWRITTEN`, and the "after" (`+`) side of a transformation; green is used for nothing else |
 | bold | the tokens that actually changed between the `-` and `+` lines |
-| cyan | headings and opaque predicates |
+| cyan | headings, opaque predicates and the unresolved parts of a symbolic value |
 | dim | `ok` and `skip` entries, labels and notes |
 
 Color is only ever added to text that already reads correctly without it: the badges and the `-`/`+` markers carry the meaning in plain output, so a report piped to a file or a log is the same layout.
@@ -241,11 +241,12 @@ The CLI uses these process statuses:
 | Status | Meaning |
 | --- | --- |
 | `0` | Normal completion. Findings may exist unless `--fail-on-findings` was requested. |
-| `1` | Normal completion with `--fail-on-findings`, and at least one dead or redundant branch was found. For `cpre evaluate`: normal completion, and at least one item has no provable value. |
+| `1` | Normal completion with `--fail-on-findings`, and at least one dead or redundant branch was found. For `cpre evaluate`: normal completion, and at least one item is unevaluable. |
 | `2` | Source ingestion failed, analysis/preprocessing reasoning was incomplete for a source, or command-line/path validation failed. |
+| `3` | `cpre evaluate` only: normal completion, no item is unevaluable, and at least one item is symbolic (its value depends on a name the configuration does not settle). |
 | `130` | The run was interrupted with Ctrl-C. |
 
-Status `2` takes precedence over status `1`. If any input cannot be processed completely, the overall run is an error even if other inputs also contain findings.
+Status `2` takes precedence over status `1`, and status `1` over `3`. If any input cannot be processed completely, the overall run is an error even if other inputs also contain findings.
 
 ## Error and incomplete-analysis behavior
 
@@ -709,13 +710,23 @@ cpre evaluate -D WIDTH=3 -D HEIGHT=4 -D PAD=2 -D 'AREA=(WIDTH * HEIGHT + PAD)' -
 
 Each operand is either a macro name, evaluated as that macro's value, or an expression, which may use macros and function-like macro calls. An operand that starts with `-` needs `--` in front of the operands (`cpre evaluate -- '-7 / 2'`); an operand with a space in it, as above, does not.
 
-Each item shows the operand on a `-` line and its value on a `+` line, with `(unsigned)` after a `uintmax_t` value. When macro expansion changed the text, an `expanded` line shows the expression as it was evaluated, which is where an unparenthesized replacement such as `SUM * 2` becoming `3 + 4 * 2` shows up. A value that cannot be proved has a `!` line with the [reason](evaluation.md#reasons) and a caret under the token it concerns (under the macro's name for a macro). Control characters in an operand, its expansion or a message are shown as `\xNN` escapes in the text report so they cannot drive the terminal; `--json` keeps the original text. In color the value is green, the unevaluable reason and caret yellow and the `expanded` label dim, following the [color meanings](#color); the layout is the same without color.
+Each item shows the operand on a `-` line and its value on a `+` line, with `(unsigned)` after a `uintmax_t` value. When macro expansion changed the text, an `expanded` line shows the expression as it was evaluated, which is where an unparenthesized replacement such as `SUM * 2` becoming `3 + 4 * 2` shows up. A value that depends on a name the configuration does not settle is [symbolic](evaluation.md#symbolic-results): a `~` line shows the expression with every settled macro substituted and the unresolved names left in place, and an `unresolved` line lists them. A value that cannot be proved for another reason has a `!` line with the [reason](evaluation.md#reasons) and a caret under the token it concerns. Control characters in an operand, its expansion or a message are shown as `\xNN` escapes in the text report so they cannot drive the terminal; `--json` keeps the original text. In color the value is green, the symbolic expression cyan (it holds opaque names), the unevaluable reason and caret yellow and the `expanded` and `unresolved` labels dim, following the [color meanings](#color); the layout is the same without color.
+
+```bash
+cpre evaluate -D WIDTH=3 -D 'AREA=(WIDTH * 2 + PAD)' 'AREA % 5'
+```
+
+```text
+- AREA % 5
+~ (3 * 2 + PAD) % 5
+  unresolved  PAD
+```
 
 The configuration options are those of [`preprocess`](#concrete-preprocessing): `-D`/`--define`, `-U`/`--undef`, `--config-from`, `--config-exclude`, `--unknown-names`, `--config-from-unknown-names` and `--standard-macro`. `--config-exclude` and `--config-from-unknown-names` refine `--config-from` and are rejected without it, as in `preprocess`. `--max-work N` limits the work spent on each item, and `--color WHEN` works as elsewhere.
 
 `--json` writes one `cpre.evaluations/1` document with an `evaluations` list in operand order; each entry is the [`cpre.evaluation/1`](json-contract.md#cpreevaluation1) record without its own `schema`.
 
-The exit status is `0` when every item has a value, `1` when any item has none, and `2` when the configuration or an option is invalid or a seed cannot be read.
+The exit status is `0` when every item has a value, `1` when any item is unevaluable, `3` when none is unevaluable but at least one is symbolic, and `2` when the configuration or an option is invalid or a seed cannot be read. Status `1` wins over `3`, so a script can treat `0` as "all values proved", `3` as "nothing is wrong, but something is unknown" and `1` as "something cannot be evaluated".
 
 ## Arbitrary Boolean expression testing with test-input
 

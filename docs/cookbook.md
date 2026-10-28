@@ -230,7 +230,10 @@ cpre.evaluate_macro("AREA", config).value  # 14
 cpre.evaluate_expression("SUM * 2", config).expanded  # "3 + 4 * 2"
 cpre.evaluate_expression("AREA / (PAD - 2)", config).reason
 # EvaluationReason.DIVISION_BY_ZERO
+cpre.evaluate_expression("AREA + BASE", config).expanded  # "(3 * 4 + 2) + BASE"
 ```
+
+When a macro the expression uses is not configured, the result is symbolic: the expression with what is known substituted, and the names still missing in `unresolved`.
 
 From the shell, `cpre evaluate` takes the same configuration options as `cpre preprocess`, so a project's flags header can supply the definitions:
 

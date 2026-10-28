@@ -83,8 +83,12 @@ class _Value:
     reason: str | None = None
     # Where an unknown value came from, so a result can point at the constant itself.
     origin: int | None = None
+    # A value that depends on a name the environment does not settle (symbolic mode only).
+    unresolved: bool = False
 
     def truth(self) -> bool:
+        if self.unresolved:
+            raise _unresolved_error(self)
         if self.value is not None:
             return self.value != 0
         if self.truth_value is not None:
@@ -94,6 +98,14 @@ class _Value:
             self.origin,
             FailureKind.IMPLEMENTATION_DEFINED,
         )
+
+
+def _unresolved_error(value: _Value) -> NumericConditionError:
+    return NumericConditionError(
+        "expression depends on an unresolved identifier",
+        value.origin,
+        FailureKind.UNRESOLVED_IDENTIFIER,
+    )
 
 
 def _signed(value: int) -> _Value:
@@ -110,6 +122,8 @@ def _unsigned(value: int) -> _Value:
 
 
 def _as_unsigned(value: _Value) -> _Value:
+    if value.unresolved:
+        return replace(value, unsigned=True)
     if value.value is not None:
         return _unsigned(value.value)
     return _Value(
@@ -129,6 +143,8 @@ def _convert(left: _Value, right: _Value) -> tuple[_Value, _Value, bool]:
 
 
 def _numeric(value: _Value) -> int:
+    if value.unresolved:
+        raise _unresolved_error(value)
     if value.value is not None:
         return value.value
     raise NumericConditionError(
@@ -158,9 +174,13 @@ class _Unresolved:
 
     message: str
     offset: int | None = None
+    # Every unresolved name left in the expanded expression (symbolic mode only).
+    names: tuple[str, ...] = ()
 
 
-def _resolve_defined(tokens: list[Token], environment: MacroLookup) -> list[Token] | _Unresolved:
+def _resolve_defined(
+    tokens: list[Token], environment: MacroLookup, *, symbolic: bool = False
+) -> list[Token] | _Unresolved:
     result: list[Token] = []
     index = 0
     while index < len(tokens):
@@ -182,6 +202,11 @@ def _resolve_defined(tokens: list[Token], environment: MacroLookup) -> list[Toke
             raise NumericConditionError("malformed defined operator")
         defined = environment.get(name).defined
         if defined is None:
+            if symbolic:
+                # Keep the operator as one placeholder operand so the rest is still checked.
+                shown = f"defined({name})" if tokens[index - 1].text == ")" else f"defined {name}"
+                result.append(Token(shown, "unresolved", token.start, end, generated=True))
+                continue
             return _Unresolved(f"definedness of {name!r} is unknown", token.start)
         result.append(Token("1" if defined else "0", "number", token.start, end, generated=True))
     return result
@@ -356,8 +381,13 @@ def _divide(left: int, right: int) -> int:
 
 
 class _Parser:
-    def __init__(self, tokens: list[Token], budget: AnalysisBudget) -> None:
+    def __init__(
+        self, tokens: list[Token], budget: AnalysisBudget, *, symbolic: bool = False
+    ) -> None:
         self.tokens, self.budget, self.index, self.depth = tokens, budget, 0, 0
+        # In symbolic mode a name the environment does not settle becomes an unresolved
+        # operand that propagates through operators, so every other obstacle is still found.
+        self.symbolic = symbolic
 
     def peek(self, text: str | None = None) -> Token | None:
         if self.index >= len(self.tokens):
@@ -417,12 +447,23 @@ class _Parser:
             return _integer(token.text)
         if token.kind == "literal" and "'" in token.text:
             return replace(_character(token.text), origin=token.start)
+        if token.kind == "unresolved" and self.symbolic:
+            return _Value(None, unresolved=True, origin=token.start)
         if token.kind == "identifier":
             if token.text in token.hidden:
                 # Expansion left this name alone because it was already being replaced
                 # (a self-referential macro). It is a plain identifier from now on, and
                 # every identifier left in a controlling expression is 0 (C11 6.10.1).
                 return _Value(0)
+            if self.symbolic:
+                if token.text in _NOT_A_NAME:
+                    # A C keyword is never a macro, so no definition could give it a value.
+                    raise NumericConditionError(
+                        f"unsupported token {token.text!r} in concrete condition", token.start
+                    )
+                if self.peek("(") is not None:
+                    self._skip_call()
+                return _Value(None, unresolved=True, origin=token.start)
             raise NumericConditionError(
                 f"unresolved identifier {token.text!r}",
                 token.start,
@@ -431,6 +472,24 @@ class _Parser:
         raise NumericConditionError(
             f"unsupported token {token.text!r} in concrete condition", token.start
         )
+
+    def _skip_call(self) -> None:
+        """Consume the balanced argument list of a call to a name that is not a macro."""
+        self.take("(")
+        depth = 1
+        while depth:
+            token = self.take()
+            if token is None:
+                raise NumericConditionError(
+                    "expected ')' in concrete condition", self.here(), FailureKind.UNSUPPORTED
+                )
+            if token.kind == "identifier" and token.text in _NOT_A_NAME:
+                # The arguments are not evaluated, but a keyword in them is still not C
+                # that an unconfigured macro could turn into a value.
+                raise NumericConditionError(
+                    f"unsupported token {token.text!r} in concrete condition", token.start
+                )
+            depth += (token.text == "(") - (token.text == ")")
 
     def unary(self, evaluate: bool) -> _Value:
         head = self.peek()
@@ -443,11 +502,15 @@ class _Parser:
             finally:
                 self._leave()
             if op == "!":
+                if evaluate and value.unresolved:
+                    return value
                 return _Value(int(not value.truth())) if evaluate else _Value(None)
             if op == "+":
                 return value
             if not evaluate:
                 return _Value(None, value.unsigned)
+            if value.unresolved:
+                return value
             if value.value is None:
                 return _Value(
                     None,
@@ -472,8 +535,34 @@ class _Parser:
             self.take()
             op = head.text
             right = operand(evaluate)
-            value = apply(op, value, right, evaluate)
+            if evaluate and (value.unresolved or right.unresolved):
+                value = self._with_unresolved(op, value, right)
+            else:
+                value = apply(op, value, right, evaluate)
         return value
+
+    @staticmethod
+    def _with_unresolved(op: str, left: _Value, right: _Value) -> _Value:
+        """An operation with an unresolved operand: unresolved, unless something is certain.
+
+        The other operand is still evaluated, and a divisor or shift count that is known
+        to be bad fails whatever the unresolved operand turns out to be.
+        """
+        for operand in (left, right):
+            if not operand.unresolved:
+                _numeric(operand)
+        if not right.unresolved:
+            if op in {"/", "%"} and right.value == 0:
+                raise NumericConditionError(
+                    "division by zero in concrete condition",
+                    kind=FailureKind.DIVISION_BY_ZERO,
+                )
+            if op in {"<<", ">>"} and (right.value or 0) not in range(_MAX_SHIFT + 1):
+                raise NumericConditionError(
+                    "shift count exceeds concrete-evaluation bound", kind=FailureKind.OVERFLOW
+                )
+        origin = left.origin if left.unresolved else right.origin
+        return _Value(None, unresolved=True, origin=origin)
 
     def multiplicative(self, evaluate: bool) -> _Value:
         def apply(op: str, left: _Value, right: _Value, active: bool) -> _Value:
@@ -595,17 +684,30 @@ class _Parser:
     def logical_and(self, evaluate: bool) -> _Value:
         value = self.bitor(evaluate)
         while self.take("&&") is not None:
+            if evaluate and value.unresolved:
+                # Whether the right operand runs depends on the unresolved left one.
+                self.bitor(False)
+                continue
             left_truth = value.truth() if evaluate else False
             right = self.bitor(evaluate and left_truth)
-            value = _Value(int(left_truth and right.truth())) if evaluate else _Value(None)
+            if evaluate and left_truth and right.unresolved:
+                value = right
+            else:
+                value = _Value(int(left_truth and right.truth())) if evaluate else _Value(None)
         return value
 
     def logical_or(self, evaluate: bool) -> _Value:
         value = self.logical_and(evaluate)
         while self.take("||") is not None:
+            if evaluate and value.unresolved:
+                self.logical_and(False)
+                continue
             left_truth = value.truth() if evaluate else False
             right = self.logical_and(evaluate and not left_truth)
-            value = _Value(int(left_truth or right.truth())) if evaluate else _Value(None)
+            if evaluate and not left_truth and right.unresolved:
+                value = right
+            else:
+                value = _Value(int(left_truth or right.truth())) if evaluate else _Value(None)
         return value
 
     def conditional(self, evaluate: bool) -> _Value:
@@ -613,19 +715,24 @@ class _Parser:
         if self.take("?") is None:
             return condition
 
-        condition_truth = condition.truth() if evaluate else False
+        unknown_condition = evaluate and condition.unresolved
+        condition_truth = condition.truth() if evaluate and not unknown_condition else False
         self._enter()
         try:
             when_true = self.conditional(evaluate and condition_truth)
             if self.take(":") is None:
                 raise NumericConditionError("expected ':' in conditional expression")
-            when_false = self.conditional(evaluate and not condition_truth)
+            when_false = self.conditional(
+                evaluate and not condition_truth and not unknown_condition
+            )
         finally:
             self._leave()
 
         when_true, when_false, unsigned = _convert(when_true, when_false)
         if not evaluate:
             return _Value(None, unsigned)
+        if unknown_condition:
+            return replace(condition, unsigned=unsigned)
         return when_true if condition_truth else when_false
 
 
@@ -646,6 +753,8 @@ class IntegerEvaluation:
     message: str | None = None
     offset: int | None = None
     expanded: str | None = None
+    symbolic: bool = False
+    unresolved_names: tuple[str, ...] = ()
 
     @property
     def concrete(self) -> bool:
@@ -659,6 +768,8 @@ def _evaluate(
     budget: AnalysisBudget,
     unsupported_identifiers: frozenset[str],
     capture: list[Token] | None = None,
+    *,
+    symbolic: bool = False,
 ) -> tuple[_Parser, _Value] | _Unresolved:
     """Expand and parse ``text``; the caller decides what to ask of the value.
 
@@ -667,7 +778,7 @@ def _evaluate(
     when expansion itself fails.
     """
     original = [t for t in tokenize(text) if t.kind not in {"space", "comment"}]
-    resolved = _resolve_defined(original, environment)
+    resolved = _resolve_defined(original, environment, symbolic=symbolic)
     if isinstance(resolved, _Unresolved):
         return resolved
     expanded = expansion._expand(resolved, environment)
@@ -684,7 +795,7 @@ def _evaluate(
     significant = [token for token in expanded if token.kind != "empty"]
     if capture is not None:
         capture.extend(significant)
-    parser = _Parser(significant, budget)
+    parser = _Parser(significant, budget, symbolic=symbolic)
     try:
         return parser, parser.parse()
     except RecursionError as error:
@@ -695,10 +806,21 @@ def _evaluate(
         ) from error
     except NumericConditionError as error:
         if error.kind is FailureKind.UNRESOLVED_IDENTIFIER:
-            return _Unresolved(str(error), error.offset)
+            return _Unresolved(str(error), error.offset, _unresolved_names(significant))
         if error.offset is None:
             error.offset = parser.here()
         raise
+
+
+def _unresolved_names(tokens: list[Token]) -> tuple[str, ...]:
+    """Names left in an expanded expression that the environment does not settle."""
+    names: dict[str, None] = {}
+    for token in tokens:
+        if token.kind == "identifier" and token.text not in token.hidden:
+            names[token.text] = None
+        elif token.kind == "unresolved":
+            names[re.findall(r"[A-Za-z_]\w*", token.text)[-1]] = None
+    return tuple(names)
 
 
 def evaluate_numeric_condition(
@@ -727,6 +849,19 @@ def evaluate_numeric_condition(
         raise
 
 
+# The keywords of C11 (and C23's `alignof`). A keyword is never a macro, so symbolic
+# evaluation must not mistake one for an unconfigured macro: `sizeof(int)` has no integer
+# value in `#if` whatever is defined.
+_NOT_A_NAME = frozenset(
+    """
+    auto break case char const continue default do double else enum extern float for goto
+    if inline int long register restrict return short signed sizeof static struct switch
+    typedef union unsigned void volatile while
+    _Alignas _Alignof _Atomic _Bool _Complex _Generic _Imaginary _Noreturn _Static_assert
+    _Thread_local alignof
+    """.split()
+)
+
 _UNARY_OPERATORS = frozenset({"+", "-", "!", "~"})
 
 
@@ -737,10 +872,18 @@ def _render(tokens: list[Token]) -> str:
     previous_unary = False
     for token in tokens:
         operand_before = previous is not None and (
-            previous.kind in {"number", "identifier", "literal"} or previous.text == ")"
+            previous.kind in {"number", "identifier", "literal", "unresolved"}
+            or previous.text == ")"
         )
         unary = token.text in _UNARY_OPERATORS and (token.text in {"!", "~"} or not operand_before)
-        tight = previous is None or previous.text == "(" or token.text == ")" or previous_unary
+        call = token.text == "(" and previous is not None and previous.kind == "identifier"
+        tight = (
+            previous is None
+            or previous.text == "("
+            or token.text in {")", ","}
+            or previous_unary
+            or call
+        )
         parts.append(token.text if tight else f" {token.text}")
         previous, previous_unary = token, unary
     return "".join(parts)
@@ -753,6 +896,7 @@ def evaluate_integer_expression(
     budget: AnalysisBudget,
     *,
     unsupported_identifiers: frozenset[str] = frozenset(),
+    symbolic: bool = False,
 ) -> IntegerEvaluation:
     """Evaluate a macro-expanded integer expression to its value.
 
@@ -762,6 +906,13 @@ def evaluate_integer_expression(
     including an unresolved identifier, comes back as a result with ``failure`` set
     rather than as an exception. ``ExpansionError`` and an exhausted ``budget`` still
     propagate, as they do for conditions.
+
+    With ``symbolic`` set, an expression whose only obstacle is a name the environment
+    does not settle comes back with ``symbolic`` true, the expansion with that name left
+    in place and ``unresolved_names``. It is found by evaluating again with each such name
+    as an unknown operand, so any other obstacle (a division by zero that cannot be
+    skipped, overflow, unsupported syntax, an implementation-defined character) is still
+    reported as the failure and wins over the unresolved name.
     """
     captured: list[Token] = []
     try:
@@ -774,6 +925,8 @@ def evaluate_integer_expression(
             expanded=_render(captured) if captured else None,
         )
     expanded = _render(captured) if captured else None
+    if isinstance(outcome, _Unresolved) and symbolic:
+        return _symbolic(text, environment, expansion, budget, unsupported_identifiers, outcome)
     if isinstance(outcome, _Unresolved):
         return IntegerEvaluation(
             failure=FailureKind.UNRESOLVED_IDENTIFIER,
@@ -793,6 +946,60 @@ def evaluate_integer_expression(
             expanded=expanded,
         )
     return IntegerEvaluation(value=value.value, unsigned=value.unsigned, expanded=expanded)
+
+
+def _symbolic(
+    text: str,
+    environment: MacroLookup,
+    expansion: Expansion,
+    budget: AnalysisBudget,
+    unsupported_identifiers: frozenset[str],
+    strict: _Unresolved,
+) -> IntegerEvaluation:
+    """Classify an unresolved expression: symbolic, or blocked by another obstacle."""
+    captured: list[Token] = []
+    try:
+        outcome = _evaluate(
+            text, environment, expansion, budget, unsupported_identifiers, captured, symbolic=True
+        )
+    except NumericConditionError as error:
+        return IntegerEvaluation(
+            failure=error.kind,
+            message=str(error),
+            offset=error.offset,
+            expanded=_render(captured) if captured else None,
+        )
+    expanded = _render(captured) if captured else None
+    if isinstance(outcome, _Unresolved):
+        return IntegerEvaluation(
+            failure=FailureKind.UNRESOLVED_IDENTIFIER,
+            message=strict.message,
+            offset=strict.offset if strict.offset is not None else outcome.offset,
+            expanded=expanded,
+            symbolic=True,
+            unresolved_names=outcome.names,
+        )
+    parser, value = outcome
+    if not value.unresolved and value.value is None:
+        message = (
+            value.reason or "expression value is implementation-defined in concrete evaluation"
+        )
+        return IntegerEvaluation(
+            failure=FailureKind.IMPLEMENTATION_DEFINED,
+            message=message,
+            offset=value.origin if value.origin is not None else parser.here(),
+            expanded=expanded,
+        )
+    # Unresolved names that do not change the result (an unevaluated operand) still make
+    # the expression symbolic: strict evaluation did not settle it, and nothing is guessed.
+    return IntegerEvaluation(
+        failure=FailureKind.UNRESOLVED_IDENTIFIER,
+        message=strict.message,
+        offset=strict.offset,
+        expanded=expanded,
+        symbolic=True,
+        unresolved_names=_unresolved_names(captured),
+    )
 
 
 __all__ = [

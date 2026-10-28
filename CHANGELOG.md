@@ -30,6 +30,18 @@ raise that document's schema major version and are listed here (see the
   generator (rerun a failure with `CPRE_DIFFERENTIAL_SEED`). The one difference found, GCC
   typing a skipped division by an unsigned zero as signed, is recorded in
   `known_differences.json` ([#228](https://github.com/sahebbiswas/cpre/issues/228)).
+- **Behaviour change:** an expression whose only obstacle is a name the configuration
+  does not settle now has a **symbolic** result (`EvaluationState.SYMBOLIC`) instead of
+  being unevaluable, and `cpre evaluate` exits `3` for it instead of `1`:
+  `Evaluation.expanded` is the expression with every settled macro substituted and the
+  unresolved names left in place, and the new `Evaluation.unresolved` lists them. It is
+  never folded, and any other obstacle still wins: an unresolved name beside a division
+  by a certain zero, an overflow, unsupported syntax or an implementation-defined
+  character is unevaluable with that reason. `cpre evaluate` prints a `~` line and the
+  names and exits `3` when an item is symbolic and none is unevaluable (`1` still wins).
+  The `cpre.evaluation/1` record gains `unresolved` and the `symbolic` state, which are
+  compatible additions, so the schema version is unchanged
+  ([#221](https://github.com/sahebbiswas/cpre/issues/221)).
 - `evaluate_expression()` and `evaluate_macro()` compute the integer value of an
   expression, or of a macro that expands to integer arithmetic, under a
   `MacroConfiguration`, with the same evaluator as `#if`. They return an immutable

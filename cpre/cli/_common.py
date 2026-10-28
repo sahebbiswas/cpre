@@ -18,6 +18,7 @@ from ._progress import PROGRESS_CHOICES, Progress, paused
 EXIT_OK = 0
 EXIT_FINDINGS = 1
 EXIT_ERROR = 2
+EXIT_SYMBOLIC = 3  # only `cpre evaluate`: nothing is unevaluable, but some value is symbolic
 EXIT_INTERRUPTED = 130  # the shell's convention for a run ended by Ctrl-C (128 + SIGINT)
 
 

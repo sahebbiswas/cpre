@@ -60,15 +60,15 @@ def test_a_bare_identifier_is_a_macro_and_anything_else_an_expression(capsys):
     assert [r["value"] for r in records] == [3, 3]
 
 
-def test_an_item_without_a_value_exits_one_and_shows_why(capsys):
-    code, out, err = _evaluate(capsys, *DEFINES, "AREA", "1 + UNKNOWN", "--color", "never")
+def test_an_unevaluable_item_exits_one_and_shows_why(capsys):
+    code, out, err = _evaluate(capsys, *DEFINES, "AREA", "1 + 2 / 0", "--color", "never")
     assert (code, err) == (1, "")
     lines = out.splitlines()
     assert lines[:3] == ["- AREA", "+ 14", "  expanded  (3 * 4 + 2)"]
     assert lines[3:] == [
-        "- 1 + UNKNOWN",
-        "      ^",
-        "! unresolved_identifier: unresolved identifier 'UNKNOWN'",
+        "- 1 + 2 / 0",
+        "          ^",
+        "! division_by_zero: division by zero in concrete condition",
     ]
 
 
@@ -92,6 +92,12 @@ def test_control_characters_are_shown_as_escapes_in_text_but_not_in_json(capsys)
     assert json.loads(out)["evaluations"][0]["expression"] == hostile
 
 
+def test_an_item_with_an_unsettled_name_is_symbolic_and_exits_three(capsys):
+    code, out, err = _evaluate(capsys, *DEFINES, "AREA", "1 + UNKNOWN", "--color", "never")
+    assert (code, err) == (3, "")
+    assert out.splitlines()[3:] == ["- 1 + UNKNOWN", "~ 1 + UNKNOWN", "  unresolved  UNKNOWN"]
+
+
 @pytest.mark.parametrize(
     "item, reason",
     [
@@ -99,7 +105,6 @@ def test_control_characters_are_shown_as_escapes_in_text_but_not_in_json(capsys)
         ("9223372036854775807 + 1", "overflow"),
         ("'ab'", "implementation_defined"),
         ("1 +", "unsupported_syntax"),
-        ("NOPE", "unresolved_identifier"),
     ],
 )
 def test_each_reason_is_reported(capsys, item, reason):
@@ -135,6 +140,7 @@ def test_json_document_has_the_schema_first_and_stable_records(capsys):
         "reason": None,
         "message": None,
         "offset": None,
+        "unresolved": [],
     }
 
 
