@@ -30,6 +30,15 @@ raise that document's schema major version and are listed here (see the
   generator (rerun a failure with `CPRE_DIFFERENTIAL_SEED`). The one difference found, GCC
   typing a skipped division by an unsigned zero as signed, is recorded in
   `known_differences.json` ([#228](https://github.com/sahebbiswas/cpre/issues/228)).
+- `evaluate_expression(..., trace=True)`, `evaluate_macro(..., trace=True)` and
+  `cpre evaluate --explain` show how a value was derived (`Evaluation.trace`, a `Trace` of
+  `TraceStep` and `TraceKind`): each macro expansion in order, a warning when an
+  unparenthesized replacement regroups with the operators around its use (`SUM` as
+  `W + H` in `SUM * 2`), a note when a signed operand becomes unsigned, each evaluated
+  operation with its result, and where evaluation stopped. The trace holds at most 200
+  steps and reports truncation. The `cpre.evaluation/1` record gains an optional `trace`
+  (a compatible addition, absent unless requested). The precedence test is shared with
+  `simplify-macros` ([#222](https://github.com/sahebbiswas/cpre/issues/222)).
 - **Behaviour change:** an expression whose only obstacle is a name the configuration
   does not settle now has a **symbolic** result (`EvaluationState.SYMBOLIC`) instead of
   being unevaluable, and `cpre evaluate` exits `3` for it instead of `1`:

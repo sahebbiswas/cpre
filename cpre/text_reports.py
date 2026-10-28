@@ -14,10 +14,11 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from . import reporting
+from ._evaluation_types import TRACE_LIMIT
 from ._style import PLAIN, Style, style_for
 from ._types import AnalysisIncomplete, AnalysisTelemetry, IncompleteComponent
 from .errors import CpreError
-from .evaluation import Evaluation
+from .evaluation import Evaluation, EvaluationState, Trace, TraceKind
 from .macro_analysis import MacroAnalysisResult
 from .model import ConditionalTree
 from .preprocessing import PreprocessDiagnostic
@@ -240,7 +241,68 @@ def render_evaluation(evaluation: Evaluation, style: Style | None = None) -> str
         )
     if note is not None and not evaluation.symbolic:
         lines.append(f"  {style.paint('expanded', 'dim')}  {note}")
+    if evaluation.trace is not None:
+        lines.extend(trace_lines(evaluation.trace, style))
     return "\n".join(lines)
+
+
+_TRACE_ROLES = {
+    TraceKind.WARNING: "incomplete",
+    TraceKind.CONVERSION: "incomplete",
+    TraceKind.STOP: "incomplete",
+    TraceKind.RESULT: "after",
+}
+_TRACE_STATE_ROLES = {
+    EvaluationState.SYMBOLIC: "opaque",
+    EvaluationState.UNEVALUABLE: "incomplete",
+}
+
+
+def trace_lines(trace: Trace, style: Style) -> list[str]:
+    """The derivation of an evaluation, one line per step under a ``trace`` heading.
+
+    The step kinds are the same words with and without color; color only marks the
+    steps that deserve a second look (warnings, conversions, where evaluation stopped)
+    and the result.
+    """
+    lines = [f"  {style.paint('trace', 'dim')}"]
+    width = max((len(step.kind.value) for step in trace.steps), default=0)
+    for step in trace.steps:
+        text = _visible(step.text)
+        replacement = _visible(step.replacement or "")
+        note = None if step.note is None else _visible(step.note)
+        label = style.paint(step.kind.value.ljust(width), _TRACE_ROLES.get(step.kind, "dim"))
+        if step.kind is TraceKind.EXPAND:
+            detail = f"{text} {style.arrow} {replacement}"
+        elif step.kind in {TraceKind.EVALUATE, TraceKind.RESULT}:
+            role = (
+                "after"
+                if step.kind is TraceKind.RESULT
+                else _TRACE_STATE_ROLES.get(step.state or EvaluationState.CONCRETE)
+            )
+            outcome = style.paint(_step_value(step.state, step.value, step.unsigned), role or "dim")
+            detail = f"{text} = {outcome}"
+        elif step.kind is TraceKind.STOP:
+            detail = note or text
+        elif note is not None:
+            detail = f"{text}: {note}" if step.kind is TraceKind.WARNING else f"{text}  ({note})"
+        else:
+            detail = text
+        lines.append(f"    {label}  {detail}")
+    if trace.truncated:
+        lines.append(
+            f"    {style.paint('truncated', 'incomplete')}  "
+            f"steps beyond the first {TRACE_LIMIT} were dropped; the line above is the outcome"
+        )
+    return lines
+
+
+def _step_value(state: EvaluationState | None, value: int | None, unsigned: bool | None) -> str:
+    if state is EvaluationState.SYMBOLIC:
+        return "symbolic"
+    if state is EvaluationState.UNEVALUABLE or value is None:
+        return "unevaluable"
+    return f"{value} (unsigned)" if unsigned else str(value)
 
 
 def count_macro_findings(results: Sequence[MacroAnalysisResult]) -> FindingCounts:

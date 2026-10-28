@@ -16,17 +16,18 @@ rules for invocations that straddle lines.
 from __future__ import annotations
 
 from bisect import bisect_right
+from collections.abc import Callable
 
 from ._expansion_output import Edit, SourceLocator, SourceMapping, merged_edits, render
 from ._replacement import ExpansionError, ReplacementCache
-from ._rescan import Rescanner
+from ._rescan import ExpansionEvent, Rescanner
 from ._substitution import Substituter
 from .errors import SourceLocation
 from .lexer import Token, tokenize
 from .macros import MacroDefinition, MacroLookup
 from .robdd import AnalysisBudget, AnalysisLimitExceeded
 
-__all__ = ["Expansion", "ExpansionError", "SourceMapping", "tokenize"]
+__all__ = ["Expansion", "ExpansionError", "ExpansionEvent", "SourceMapping", "tokenize"]
 
 
 class Expansion:
@@ -51,6 +52,15 @@ class Expansion:
     @current_offset.setter
     def current_offset(self, offset: int) -> None:
         self.rescanner.current_offset = offset
+
+    @property
+    def observer(self) -> Callable[[ExpansionEvent], None] | None:
+        """Called with every macro replacement, to explain how an expression expanded."""
+        return self.rescanner.observer
+
+    @observer.setter
+    def observer(self, observer: Callable[[ExpansionEvent], None] | None) -> None:
+        self.rescanner.observer = observer
 
     def location(self, offset: int) -> SourceLocation:
         return self.locator.location(offset)

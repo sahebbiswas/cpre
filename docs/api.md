@@ -36,7 +36,7 @@ Every name in `cpre.__all__`, by purpose, with the guide that owns its contract.
 | Macro simplification | `analyze_macro`, `analyze_macros`, `simplify_macros`, `rewrite_macros`, `MacroAnalysisResult`, `MacroSimplificationResult` | [Macro simplification](macro-simplification.md) |
 | Macro state and configuration | `MacroAssumptions`, `MacroConfiguration`, `MacroDefinition`, `MacroState`, `MacroEnvironment`, `UnknownNamePolicy`, `PreprocessingContext` | [Concrete configuration](concrete-configuration.md) |
 | Unknown macros | `unknown_macros`, `unknown_macros_in_source`, `UnknownMacro`, `MacroUse` | [below](#unknown-macro-dependencies) |
-| Evaluating values | `evaluate_expression`, `evaluate_macro`, `Evaluation`, `EvaluationState` (concrete, symbolic, unevaluable), `EvaluationReason` | [Evaluating expressions and macros](evaluation.md) |
+| Evaluating values | `evaluate_expression`, `evaluate_macro`, `Evaluation`, `EvaluationState` (concrete, symbolic, unevaluable), `EvaluationReason`, `Trace`, `TraceStep`, `TraceKind` | [Evaluating expressions and macros](evaluation.md) |
 | Concrete preprocessing | `preprocess_source`, `compact`, `PreprocessResult`, `PreprocessDiagnostic`, `SkippedInclude`, `SourceMapping` | [Preprocessing](preprocessing.md) |
 | Pragmas | `PragmaHandler`, `Pragma`, `PragmaDisposition`, `PragmaOrigin` | [Pragma handling](pragma-handling.md) |
 | Branch coverage | `cover_branches`, `BranchCoverageResult`, `BranchOutcome`, `BranchOutcomeStatus`, `CoverageConfiguration` | [Branch coverage](branch-coverage.md) |

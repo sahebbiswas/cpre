@@ -10,7 +10,7 @@ nested invocations cannot exhaust the interpreter stack.
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from dataclasses import replace
 from typing import NamedTuple
 
@@ -32,6 +32,23 @@ from .robdd import AnalysisBudget
 Rescan = Generator[list[Token], list[Token], list[Token]]
 
 
+class ExpansionEvent(NamedTuple):
+    """One macro invocation that has just been replaced, with the tokens around it.
+
+    ``before`` holds up to two tokens that precede the invocation in the stream being
+    rescanned and ``after`` the token that follows it, so an observer can tell how the
+    replacement groups with its surroundings. ``generated`` is the substituted
+    replacement list before it is rescanned.
+    """
+
+    token: Token
+    definition: MacroDefinition
+    arguments: Bindings
+    generated: list[Token]
+    before: tuple[Token, ...]
+    after: Token | None
+
+
 class _Invocation(NamedTuple):
     """One macro invocation after argument collection."""
 
@@ -39,6 +56,17 @@ class _Invocation(NamedTuple):
     hidden: frozenset[str]
     raw: Bindings
     expanded: Bindings
+
+
+def _last_significant(emitted: list[Token], count: int) -> tuple[Token, ...]:
+    """The last ``count`` tokens of ``emitted`` that are not placeholders for nothing."""
+    found: list[Token] = []
+    for token in reversed(emitted):
+        if token.kind != "empty":
+            found.append(token)
+            if len(found) == count:
+                break
+    return tuple(reversed(found))
 
 
 class Rescanner:
@@ -52,6 +80,8 @@ class Rescanner:
         self.replacements = replacements
         # Offset of the token being expanded, for locating budget and error reports.
         self.current_offset = 0
+        # Told about every replacement, for callers that explain an expansion.
+        self.observer: Callable[[ExpansionEvent], None] | None = None
 
     def expand(self, tokens: list[Token], environment: MacroLookup) -> list[Token]:
         """Fully expand ``tokens``, running argument prescans on an explicit stack."""
@@ -112,6 +142,17 @@ class Rescanner:
             replacement = self.replacements.get(definition)
             invocation = yield from self._invoke(token, definition, replacement, pending)
             generated = self._generate(token, definition, replacement, invocation)
+            if self.observer is not None:
+                self.observer(
+                    ExpansionEvent(
+                        token,
+                        definition,
+                        invocation.raw,
+                        generated,
+                        _last_significant(emitted, 2),
+                        pending[0] if pending else None,
+                    )
+                )
             if generated:
                 pending.extendleft(reversed(generated))
             else:
