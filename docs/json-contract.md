@@ -46,11 +46,12 @@ Every top-level document has `schema` as its first key. The value is `cpre.<kind
 - `incomplete_components`: `{index, groups, atoms, diagnostics}` per component that did not finish; `groups` entries are `{line, end_line, directive, condition}`.
 - `macros`: `{name, line, column, candidate, simplified, original, replacement, equivalent, rewritable, reason, semantics, symbolic_literals}`.
 - `semantics` is `ordinary` or `symbolic-literal`; `symbolic_literals` lists the integers treated as free atoms.
+- With `--expand-macros`, the file record also has `expand_macros: true`, and each macro record has `expanded_from` (the macros substituted, in expansion order, empty when none) and `expanded_replacement` (the expanded text that was simplified, or `null`). A simplification found by expansion has `rewritable: false`. Without the option these keys are absent, so existing records are unchanged and the schema stays `cpre.analysis/1`.
 - `telemetry` appears only with `--telemetry` and is diagnostic (see [Opt-in diagnostic data](#opt-in-diagnostic-data)).
 
 ### `cpre.simplify-macros/1` (file record)
 
-`path`, `rewritten`, `applied_count`, `verified`, `semantics`, `symbolic_literals`, `macros` (same macro records as above). `rewritten` means the file was written.
+`path`, `rewritten`, `applied_count`, `verified`, `semantics`, `symbolic_literals`, `macros` (same macro records as above). `rewritten` means the file was written. With `--expand-macros` the record also has `expand_macros: true` and the macro records carry the expansion fields described above; that option never writes a file.
 
 ### `cpre.simplify-macros-preview/1` (file record)
 

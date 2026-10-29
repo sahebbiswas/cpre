@@ -31,6 +31,7 @@ from ._common import (
     EXIT_ERROR,
     EXIT_FINDINGS,
     EXIT_OK,
+    add_expand_macros_option,
     add_limit_options,
     add_presentation_options,
     add_symbolic_literal_options,
@@ -103,6 +104,7 @@ def build_parser(prog: str) -> argparse.ArgumentParser:
         help="exit with status 1 when simplifiable macros are found",
     )
     add_symbolic_literal_options(parser, "macro")
+    add_expand_macros_option(parser)
     add_limit_options(parser)
     add_presentation_options(parser)
     return parser
@@ -139,6 +141,7 @@ def _simplify_files(
                 rewrite=args.rewrite or preview,
                 symbolic_literals=symbolic_literals,
                 options=options,
+                expand_macros=args.expand_macros,
             )
             for r in res.results:
                 if not r.complete and r.incomplete:
@@ -175,7 +178,11 @@ def _write_json(
         files = []
         for path, res in file_results:
             f_data, has_visible = build_simplify_macros_json(
-                path, res, verbose=args.verbose, symbolic_literals=symbolic_literals
+                path,
+                res,
+                verbose=args.verbose,
+                symbolic_literals=symbolic_literals,
+                expand_macros=args.expand_macros,
             )
             if args.verbose or has_visible:
                 files.append(f_data)
@@ -186,6 +193,7 @@ def _write_json(
             file_results[0][1],
             verbose=args.verbose,
             symbolic_literals=symbolic_literals,
+            expand_macros=args.expand_macros,
         )
         print(json.dumps(top_level("simplify-macros", f_data), indent=2))
 
@@ -266,6 +274,11 @@ def simplify_macros_main(
     preview = args.diff or args.check
     if args.rewrite and preview:
         parser.error("--rewrite cannot be combined with --diff or --check")
+    if args.expand_macros and (args.rewrite or preview):
+        parser.error(
+            "--expand-macros cannot be combined with --rewrite, --in-place, --diff or --check: "
+            "a simplification found by expanding other macros is reported but never applied"
+        )
     if args.rewrite and any(is_stdin(path) for path in args.sources):
         parser.error(
             "standard input cannot be rewritten in place; use --diff or --check, or name a file"

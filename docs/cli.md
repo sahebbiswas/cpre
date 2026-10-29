@@ -321,6 +321,21 @@ Only `0` and `1` are supported as symbolic literals. Passing any other value ter
 
 See [Macro Boolean simplification](macro-simplification.md) for full semantic details and warnings.
 
+### Expanding referenced macros
+
+By default each macro is simplified on its own and every identifier in its replacement is an opaque atom. `--expand-macros` first replaces identifiers that name a Boolean macro defined in the same source:
+
+```c
+#define A (B || C)
+#define D (A && C)
+```
+
+```bash
+cpre --expand-macros source.c
+```
+
+reports `D` as `(!!C)`, with a hint naming `A`. Only Boolean macros (and bare identifier aliases of them) are expanded. A plain constant such as `#define ENABLED 1`, a function-like macro or any other macro whose value is not a Boolean expression stays an atom, because its value depends on the build configuration. A macro is also left alone when it is defined more than once, is `#undef`'d, is defined after the macro that uses it, or sits in a conditional block that does not enclose that macro; the macro's `reason` says which. These findings are reported, never rewritten. `--no-macros` disables macro analysis and SARIF output has no macro findings, so `cpre --expand-macros` with either is a usage error with status `2`. `cpre simplify-macros` accepts the option as well. It rejects it together with `--rewrite`, `--in-place`, `--diff` or `--check`, because a result found by expansion is never applied; each of those combinations is also a usage error with status `2`. See [Expanding referenced macros](macro-simplification.md#expanding-referenced-macros-opt-in).
+
 ### Disabling specific analyses
 
 If an integration requires checking only conditional branches or only macro definitions, use the opt-out flags:
@@ -603,7 +618,12 @@ cpre simplify-macros --rewrite --symbolic-literal 0 source.c
 # Preserve always-on switches such as (1 || A) && B
 cpre simplify-macros --symbolic-literal 1 source.c
 cpre simplify-macros --rewrite --symbolic-literal 1 source.c
+
+# Report simplifications found by expanding other macros (report-only)
+cpre simplify-macros --expand-macros source.c
 ```
+
+`--expand-macros` is described in [Expanding referenced macros](#expanding-referenced-macros). It reports and never rewrites, so combining it with `--rewrite`, `--in-place`, `--diff` or `--check` is a usage error (status `2`).
 
 ### JSON output for macro workflows
 
@@ -613,6 +633,8 @@ Passing `--json` to `simplify-macros` produces structured machine-readable resul
 cpre simplify-macros --json source.c
 cpre simplify-macros --rewrite --json source.c
 ```
+
+With `--expand-macros`, the document also has `expand_macros: true` and each macro entry has `expanded_from` and `expanded_replacement`.
 
 The output (schema `cpre.simplify-macros/1`) contains `path`, `rewritten`, `applied_count`, `verified`, `semantics`, `symbolic_literals`, and the array of analyzed `macros`. Each macro entry has `rewritable`, which is `false` for a simplification that is reported but not rewritten; its `reason` then starts with `not rewritten:`.
 
@@ -905,6 +927,12 @@ An incomplete ROBDD computation is never reported as a successful simplification
 --symbolic-literal N
     Treat integer literal N (0 or 1) as a symbolic Boolean atom in macro analysis.
     May be repeated.
+
+--expand-macros
+    Expand Boolean macros defined in the source before simplifying a macro, so
+    '#define D (A && C)' sees through 'A'. Other macros stay atoms. Reports only: with
+    simplify-macros it cannot be combined with --rewrite, --in-place, --diff or --check,
+    and with the default command it cannot be combined with --no-macros or --sarif.
 
 --no-macros
     Disable macro Boolean simplification analysis.

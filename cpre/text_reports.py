@@ -170,7 +170,13 @@ def render_macro_report(
                     [(r.simplified_replacement or "", note)],
                 )
             )
-            if not r.rewritable:
+            if r.expanded:
+                lines.append(
+                    f"   {style.paint('hint', 'dim')}  "
+                    f"expanded {', '.join(r.expanded_from)} to {r.expanded_replacement}; "
+                    "reported only, never rewritten"
+                )
+            elif not r.rewritable:
                 lines.append(
                     f"   {style.paint('hint', 'dim')}  "
                     "not rewritten: parenthesize the original first"

@@ -142,8 +142,9 @@ def telemetry_to_dict(telemetry: AnalysisTelemetry) -> dict[str, object]:
     }
 
 
-def macro_to_dict(result: MacroAnalysisResult) -> dict[str, object]:
-    return {
+def macro_to_dict(result: MacroAnalysisResult, *, expansion: bool = False) -> dict[str, object]:
+    """The record for one macro; ``expansion`` adds the ``expand_macros`` fields."""
+    record: dict[str, object] = {
         "name": result.name,
         "line": result.location.line if result.location else None,
         "column": result.location.column if result.location else None,
@@ -157,6 +158,10 @@ def macro_to_dict(result: MacroAnalysisResult) -> dict[str, object]:
         "semantics": result.semantics,
         "symbolic_literals": list(result.symbolic_literals),
     }
+    if expansion:
+        record["expanded_from"] = list(result.expanded_from)
+        record["expanded_replacement"] = result.expanded_replacement
+    return record
 
 
 def build_file_json(
@@ -168,6 +173,7 @@ def build_file_json(
     enable_macros: bool,
     symbolic_literals: tuple[int, ...],
     analysis: AnalysisResult | None = None,
+    expand_macros: bool = False,
 ) -> tuple[dict[str, object], bool]:
     """The JSON document for one analyzed file and whether it has anything to report."""
     f_data: dict[str, object] = {"path": str(path)}
@@ -192,7 +198,11 @@ def build_file_json(
         f_data.update(complete=None, partial=None, incomplete=None, incomplete_components=None)
 
     if enable_macros:
-        visible_macros = [macro_to_dict(r) for r in m_results if (verbose or r.simplified)]
+        visible_macros = [
+            macro_to_dict(r, expansion=expand_macros)
+            for r in m_results
+            if (verbose or r.simplified)
+        ]
         if any(r.simplified for r in m_results):
             has_visible = True
         f_data["macros"] = visible_macros
@@ -201,6 +211,8 @@ def build_file_json(
 
     f_data["semantics"] = semantics_name(symbolic_literals)
     f_data["symbolic_literals"] = list(symbolic_literals)
+    if expand_macros and enable_macros:
+        f_data["expand_macros"] = True
     return f_data, has_visible
 
 
@@ -210,9 +222,12 @@ def build_simplify_macros_json(
     *,
     verbose: bool,
     symbolic_literals: tuple[int, ...],
+    expand_macros: bool = False,
 ) -> tuple[dict[str, object], bool]:
     """The JSON document for one simplified file and whether it has any findings."""
-    visible_macros = [macro_to_dict(r) for r in res.results if (verbose or r.simplified)]
+    visible_macros = [
+        macro_to_dict(r, expansion=expand_macros) for r in res.results if (verbose or r.simplified)
+    ]
     f_data: dict[str, object] = {
         "path": str(path),
         "rewritten": res.rewritten,
@@ -222,6 +237,8 @@ def build_simplify_macros_json(
         "symbolic_literals": list(symbolic_literals),
         "macros": visible_macros,
     }
+    if expand_macros:
+        f_data["expand_macros"] = True
     has_visible = res.has_findings
     return f_data, has_visible
 

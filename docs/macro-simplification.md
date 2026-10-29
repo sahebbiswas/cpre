@@ -85,7 +85,7 @@ Without this, `#define HAS_X (X && X)` simplified to `(X)` would change `#if HAS
 The analyzer maintains clear semantic boundaries:
 
 - **Distinction from general constant folding**: `cpre` simplifies Boolean expressions, not general C integer expressions. Integer constants `0` and `1` maintain their normal Boolean truth values (`0` = false, `1` = true) unless [symbolic-literal mode](#symbolic-literal-mode-opt-in) is explicitly selected. Ordinary integer constants such as `1024` or `0x8000` are never reinterpreted as truth-values.
-- **Local and non-recursive**: Analyzing a replacement list does not expand other macro definitions. Identifiers in the replacement list remain symbolic atoms even if prior lines define them to integer values.
+- **Local by default**: Analyzing a replacement list does not expand other macro definitions. Identifiers in the replacement list remain symbolic atoms even if prior lines define them to integer values. [Expanding referenced macros](#expanding-referenced-macros-opt-in) is an opt-in that sees through other Boolean macros.
 - **No preprocessor `defined` operator**: Unlike `#if` and `#elif` directives where `defined` queries macro presence in the preprocessor environment, macro Boolean simplification models replacement lists as self-contained Boolean formulas. The `defined` identifier is intentionally unsupported in replacement lists. (This is distinct from the C preprocessor rule where `defined` is permitted as an identifier in `#define` replacement lists and only produces undefined behavior if generated via macro expansion during conditional directive evaluation.)
 - **Deterministic resource bounds**: ROBDD construction respects `AnalysisOptions` resource limits (`max_atoms`, `max_bdd_nodes`, `max_work`). If a resource limit is exceeded, analysis is marked incomplete and no unproven rewrite is emitted.
 
@@ -170,6 +170,68 @@ A rewrite proven in symbolic-literal mode holds for *every* value of the symboli
 
 > **Warning**: equivalence in symbolic-literal mode is equivalence *within that interpretation*. A result such as "already simplest" for `(0 && A) || B` does not mean the expression is irreducible in C — it means the disabled control point was preserved on request. The same applies to `(1 || A) && B` with the literal `1` selected. Use ordinary mode when you want to know what the macro actually evaluates to.
 
+## Expanding referenced macros (opt-in)
+
+Each macro is normally simplified on its own, so identifiers in its replacement list are opaque atoms even when the same source defines them:
+
+```c
+#define A (B || C)
+#define D (A && C)
+```
+
+`D` is already minimal as written (`A && C`), although after expansion it is `((B || C) && C)`, which is `C`. `expand_macros` (the `--expand-macros` flag on the command line) replaces identifiers that name a macro defined in the same source by that macro's replacement, then runs the usual ROBDD reduction on the expanded form:
+
+```python
+import cpre
+
+source = """
+#define A (B || C)
+#define D (A && C)
+"""
+
+d = {r.name: r for r in cpre.analyze_macros(source, expand_macros=True)}["D"]
+assert d.simplified_replacement == "(!!C)"
+assert d.expanded_from == ("A",)
+assert d.expanded_replacement == "((B || C) && C)"
+assert d.rewritable is False
+```
+
+```bash
+cpre --expand-macros source.c
+cpre simplify-macros --expand-macros source.c
+```
+
+### What is expanded
+
+An identifier is replaced only if it names a macro in the same source that is
+
+- a [Boolean candidate](#candidate-requirements) whose replacement is [parenthesized](#unparenthesized-replacements-are-reported-not-rewritten), or a bare identifier alias (`#define ALIAS OTHER`), which keeps the value of what it names and so only renames an atom;
+- defined exactly once, with no `#undef` anywhere in the source;
+- defined before the macro that uses it;
+- defined in a conditional block that also encloses the macro that uses it. A definition inside an include guard that encloses both is fine; a definition in another `#if` branch, or in a block that has closed, is not.
+
+A replacement with `&&` or `||` outside parentheses is never expanded as a unit, because the preprocessor pastes its text into each use: with `#define A B || C`, `A && C` means `B || (C && C)`, not `(B || C) && C`. Such a macro stays an atom and the result's `reason` says it is not parenthesized.
+
+Expansion is transitive. A cycle (`#define A (B && D)` with `#define D (A || C)`) and expansion nested more than 128 macros deep stay atoms.
+
+Everything else stays an opaque atom. That includes **non-candidate macros**: plain constants such as `#define ENABLED 1` or `#define LEVEL 2`, anything with arithmetic, bitwise, comparison or ternary operators, function-like macros, and empty definitions. The analysis decomposes on macro *names*, not on their values. A macro's value is often configuration dependent (set per build, per target or on the command line), so substituting whatever the analyzed source happens to define would give a result that holds for only one configuration. Keeping the name as an atom makes the reduction true for every value the macro can take, and it leaves a deliberate `0` or `1` switch (see [symbolic-literal mode](#symbolic-literal-mode-opt-in)) visible. Names not defined in the analyzed source, for example from an included header, are atoms as well.
+
+### Reported, never rewritten
+
+C binds a macro's replacement where the macro is used, not where it is defined. `D` simplified to `(!!C)` is only equivalent while `A` keeps its definition, so rewriting `D` could change what it means after `A` is redefined elsewhere in the build. A result found by expansion therefore has `rewritable` set to `False`, a `reason` starting `not rewritten:` that names the macros it depends on, and no `edit`. A macro that is simplified without expansion keeps its rewritable status.
+
+Combining the option with a rewrite is an error: `simplify_macros(..., rewrite=True, expand_macros=True)` raises `AnalysisError` with `ErrorCode.INVALID_CONFIGURATION`, and the CLI rejects `--expand-macros` together with `--rewrite`, `--in-place`, `--diff` or `--check` (the last two run the same rewrite) with status `2`. `rewrite_macros()` does not take the option.
+
+Without the option, results are unchanged and carry no expansion fields.
+
+### Results
+
+The simplification is reported only when the expanded form reduces. If expansion merely inlines a body that is already minimal (`#define E (A || X)` with `#define A (B && C)`), the macro is reported as already simplest, with `expanded_from` naming what was substituted. When a referenced macro could not be expanded, the result's `reason` ends with `(not expanded: ...)` and says why, for example `A is defined more than once` or `A is defined in a conditional block that does not enclose D`.
+
+Expansion counts toward the `AnalysisOptions` limits (`max_atoms`, `max_bdd_nodes`, `max_work`), measured on the expanded expression. An expanded expression nested more than 256 levels deep (operators and parentheses, counted through the expanded bodies) is incomplete too, with `incomplete.resource == "nesting"`, so chains of deeply nested macros cannot exhaust the Python stack. Exceeding one makes that macro [incomplete](#semantic-verification) as usual. `analyze_macro()` takes a mapping of definitions instead of a flag: `analyze_macro(definition, expand_macros={"A": MacroDefinition("A", "(B || C)")})`, where each entry is taken to be the single, unconditional definition of its name that precedes `definition`.
+
+Expanded macros follow the active semantics: with `symbolic_literals=(0,)` a selected literal inside an expanded body is the same free atom as in the macro that uses it.
+
 ## Python API
 
 The macro analysis capability is exposed via two functions and a structured result type:
@@ -222,6 +284,10 @@ Each analyzed macro produces a structured `MacroAnalysisResult`:
 | `rewritable` | `bool` | `False` when the simplification is reported but must not be rewritten, because the original replacement is not parenthesized (`reason` then says why) |
 | `edit` | `SuggestedEdit \| None` (property) | Structured edit suggestion when a simpler equivalent expression is proven and the definition is `rewritable` |
 | `symbolic_literals` | `tuple[int, ...]` | Literals treated as symbolic atoms; `()` in ordinary mode |
+| `expanded_from` | `tuple[str, ...]` | Macros substituted by `expand_macros`, in expansion order; `()` otherwise |
+| `expanded_replacement` | `str \| None` | The expanded text that was simplified, when `expanded_from` is not empty |
+| `expanded_expression` | `Expression \| None` | The expanded Boolean AST, when `expanded_from` is not empty |
+| `expanded` | `bool` (property) | `True` if `expanded_from` is not empty |
 | `semantics` | `str` (property) | `"ordinary"` or `"symbolic-literal"` |
 | `simplified` | `bool` (property) | `True` if a simpler equivalent expression was found |
 | `complete` | `bool` (property) | `True` if analysis completed within resource limits |
@@ -312,5 +378,6 @@ cpre verifies every macro simplification semantically; there is no separate `--v
 | Resource limit exceeded (atoms, BDD nodes or work) | The macro is incomplete: `is_equivalent` is `None`, `incomplete` carries the diagnostic, `reason` starts with `resource limit exceeded`. It is never rewritten and never counted as clean, and stderr names the limit | `2` |
 | Unsupported definition (function-like, string, non-Boolean literal, unsupported operator) | Not a candidate: `candidate` is false with a `reason`. It is not an error and is never rewritten | unaffected |
 | Proven equivalent but unparenthesized | Reported with a `not rewritten` hint, never rewritten | unaffected |
+| Simplified by `expand_macros` | Equivalence is proved on the expanded form; reported with `rewritable == False` and never rewritten. The option cannot be combined with a rewrite | `0` (`2` when combined with a rewrite mode: usage error) |
 
 An incomplete macro does not stop other macros in the same file from being analyzed: with `--rewrite`, the independently verified macros are still rewritten and the incomplete one is left byte-for-byte as it was, but the run exits `2`. Raise the limits (`AnalysisOptions(max_atoms=..., max_bdd_nodes=..., max_work=...)`; the diagnostic names the limit that was hit) to resolve an incomplete result; see [Exit status contract](cli.md#exit-status-contract).

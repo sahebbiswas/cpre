@@ -10,8 +10,9 @@ from .._style import COLOR_CHOICES, Style, detect_style
 from .._types import AnalysisOptions
 from ..discovery import STDIN_PATH, source_paths
 from ..errors import CpreError
-from ..macro_analysis import _resolve_symbolic_literals
+from ..macro_analysis import MacroAnalysisResult, _resolve_symbolic_literals, analyze_macros
 from ..model import ConditionError
+from ..text_reports import format_incomplete
 from ._progress import PROGRESS_CHOICES, Progress, paused
 
 # Exit statuses documented in docs/cli.md.
@@ -82,6 +83,19 @@ def symbolic_literals_from(
         return _resolve_symbolic_literals(args.symbolic_literals)
     except CpreError as error:
         parser.error(error.message)
+
+
+def add_expand_macros_option(parser: argparse.ArgumentParser) -> None:
+    """The opt-in ``--expand-macros`` option of the macro simplification commands."""
+    parser.add_argument(
+        "--expand-macros",
+        action="store_true",
+        help=(
+            "expand Boolean macros defined in the source before simplifying, so "
+            "'#define D (A && C)' sees through 'A'; other macros stay atoms. Reports only: "
+            "cannot be combined with --rewrite, --diff or --check"
+        ),
+    )
 
 
 def add_limit_options(parser: argparse.ArgumentParser) -> None:
@@ -194,3 +208,29 @@ def report_failure(path: Path | str, message: str) -> None:
     """The ``PATH: message`` line every command prints on stderr for a failed input."""
     with paused():
         print(f"{path}: {message}", file=sys.stderr)
+
+
+def analyze_file_macros(
+    path: Path,
+    source: str,
+    symbolic_literals: tuple[int, ...],
+    options: AnalysisOptions,
+    expand_macros: bool = False,
+) -> tuple[tuple[MacroAnalysisResult, ...], bool]:
+    """Analyze one file's macros; also whether any result was cut short by a resource limit.
+
+    Each incomplete result is reported on stderr as it is found.
+    """
+    results = analyze_macros(
+        source,
+        filename=str(path),
+        symbolic_literals=symbolic_literals,
+        options=options,
+        expand_macros=expand_macros,
+    )
+    failed = False
+    for result in results:
+        if not result.complete and result.incomplete:
+            report_failure(path, format_incomplete(result.incomplete))
+            failed = True
+    return results, failed
