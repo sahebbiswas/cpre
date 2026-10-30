@@ -175,7 +175,7 @@ Progress is written to standard error, never standard output, so reports, JSON, 
 - `always`: show progress even for a quick run, and print plain `cpre: 100/318 files (31%), 5 findings, 4s elapsed` lines (and a closing summary) when standard error is a log or a pipe.
 - `never`: no progress.
 
-A single file never shows progress. The estimated time remaining is weighted by file size and shown only once enough work is done to make it meaningful. If one file takes more than a couple of seconds, its elapsed time is shown next to its name. Pressing Ctrl-C stops the run, reports how far it got, and exits with status `130`; text results already written stay written.
+A single file shows progress only when it is slow: after about half a second a live status line that counts macros (for example `20/25 macros`, a bar, `80%`, and the macro being analyzed once it has run for a couple of seconds) or, in a log, one plain line such as `cpre: 20/25 macros (80%), M20 running 9s` every ten seconds. A large file with `--expand-macros` is therefore never silent. The estimated time remaining is weighted by file size and shown only once enough work is done to make it meaningful. If one file takes more than a couple of seconds, its elapsed time is shown next to its name. Pressing Ctrl-C stops the run, reports how far it got, and exits with status `130`; text results already written stay written.
 
 ## JSON output
 

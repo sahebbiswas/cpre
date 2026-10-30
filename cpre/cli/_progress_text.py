@@ -35,6 +35,33 @@ class Snapshot:
     running: float  # seconds the current file has been running
     done_bytes: int
     total_bytes: int
+    # Where the current file's macro analysis stands (all zero or ``None`` outside it).
+    macros_done: int = 0
+    macros_total: int = 0
+    macro: str | None = None  # the macro being analyzed now
+    macro_running: float = 0.0  # seconds that macro has been running
+    current_bytes: int = 0  # size of the current file
+
+
+def inner_fraction(snapshot: Snapshot) -> float:
+    """How far through the current file's macros the run is, 0 to 1 (0 when unknown)."""
+    if snapshot.current is None or snapshot.macros_total <= 0:
+        return 0.0
+    return min(1.0, snapshot.macros_done / snapshot.macros_total)
+
+
+def overall_fraction(snapshot: Snapshot) -> float:
+    """How far through the whole run it is, counting the part of the current file done."""
+    if not snapshot.total:
+        return 1.0
+    return min(1.0, (snapshot.done + inner_fraction(snapshot)) / snapshot.total)
+
+
+def macro_text(snapshot: Snapshot) -> str | None:
+    """``12/80 macros`` while a file's macros are being analyzed, else ``None``."""
+    if snapshot.current is None or snapshot.macros_total <= 0:
+        return None
+    return f"{snapshot.macros_done:,}/{snapshot.macros_total:,} macros"
 
 
 def format_duration(seconds: float, *, precise: bool = False) -> str:
@@ -77,12 +104,15 @@ def strip_ansi(text: str) -> str:
 
 def eta_seconds(snapshot: Snapshot) -> float | None:
     """Estimated seconds left, weighted by file size; ``None`` until it would mean something."""
-    if snapshot.total == 0 or snapshot.done == 0 or snapshot.done >= snapshot.total:
+    inner = inner_fraction(snapshot)
+    if snapshot.total == 0 or snapshot.done >= snapshot.total:
         return None
-    if snapshot.total_bytes and snapshot.done_bytes:
-        fraction = snapshot.done_bytes / snapshot.total_bytes
+    if snapshot.done == 0 and inner == 0:
+        return None
+    if snapshot.total_bytes and (snapshot.done_bytes or inner):
+        fraction = (snapshot.done_bytes + snapshot.current_bytes * inner) / snapshot.total_bytes
     else:
-        fraction = snapshot.done / snapshot.total
+        fraction = (snapshot.done + inner) / snapshot.total
     if snapshot.analysis_elapsed < ETA_MIN_SECONDS or fraction < ETA_MIN_FRACTION:
         return None
     return snapshot.analysis_elapsed * (1 - fraction) / fraction
@@ -97,14 +127,29 @@ def status_text(snapshot: Snapshot, style: Style, columns: int) -> str:
             f"  {format_duration(snapshot.elapsed)}"
         )
         return text[:width]
-    fraction = snapshot.done / snapshot.total if snapshot.total else 1.0
-    pieces = [f"{snapshot.done}/{snapshot.total}"]
+    fraction = overall_fraction(snapshot)
+    counter = macro_text(snapshot)
+    # One file has no file count worth showing; its macros are the progress.
+    single = snapshot.total == 1 and counter is not None
+    pieces = [counter if single and counter else f"{snapshot.done}/{snapshot.total}"]
     if width >= 50:
         pieces.append(style.paint(style.bar(fraction, BAR_WIDTH), "cyan"))
     pieces.append(f"{int(fraction * 100):>3}%")
     eta = eta_seconds(snapshot)
     if eta is not None:
         pieces.append(f"~{format_duration(eta)}")
+    if counter is not None and not single:
+        pieces.append(counter)
+    if snapshot.macro is not None:
+        slow = snapshot.macro_running >= SLOW_FILE_SECONDS
+        pieces.append(
+            style.paint(
+                f"{snapshot.macro} {format_duration(snapshot.macro_running)}"
+                if slow
+                else snapshot.macro,
+                "dim",
+            )
+        )
     if snapshot.findings:
         pieces.append(f"{snapshot.findings:,} found")
     if snapshot.failed:
@@ -129,8 +174,16 @@ def line_text(snapshot: Snapshot) -> str:
     elapsed = format_duration(snapshot.elapsed)
     if snapshot.phase == "scanning":
         return f"scanning, {plural(snapshot.found, 'file')} found, {elapsed}"
-    percent = int(100 * snapshot.done / snapshot.total) if snapshot.total else 100
-    parts = [f"{snapshot.done}/{snapshot.total} files ({percent}%)"]
+    percent = int(100 * overall_fraction(snapshot))
+    counter = macro_text(snapshot)
+    if snapshot.total == 1 and counter is not None:
+        parts = [f"{counter} ({percent}%)"]
+    else:
+        parts = [f"{snapshot.done}/{snapshot.total} files ({percent}%)"]
+        if counter is not None:
+            parts.append(counter)
+    if snapshot.macro is not None:
+        parts.append(f"{snapshot.macro} running {format_duration(snapshot.macro_running)}")
     if snapshot.findings:
         parts.append(plural(snapshot.findings, "finding"))
     if snapshot.failed:
@@ -153,4 +206,7 @@ def summary_text(snapshot: Snapshot) -> str:
 def interrupted_text(snapshot: Snapshot) -> str:
     if snapshot.phase == "scanning":
         return f"interrupted while scanning ({plural(snapshot.found, 'file')} found)"
+    counter = macro_text(snapshot)
+    if snapshot.total == 1 and counter is not None:
+        return f"interrupted after {counter}"
     return f"interrupted after {snapshot.done}/{snapshot.total} files"

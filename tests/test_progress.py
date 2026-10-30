@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 import cpre.cli.analyze as analyze_module
+from cpre import analyze_macros, simplify_macros
 from cpre._style import Style
 from cpre.cli import main
 from cpre.cli._progress import Progress, format_duration, paused, shorten_path
@@ -521,7 +522,7 @@ def test_auto_progress_is_silent_when_stderr_is_not_a_terminal(tree, capsys):
     assert err == ""
 
 
-def test_single_file_never_shows_progress(tree, capsys):
+def test_a_quick_single_file_shows_no_progress(tree, capsys):
     _, _, err = _run(capsys, "--progress", "always", str(tree / "a.c"))
     assert err == ""
 
@@ -770,3 +771,248 @@ def test_simplify_macros_does_not_report_a_rewrite_that_failed_to_write(
     assert "REWRITTEN" not in out
     assert "read-only file" in err
     assert path.read_text(encoding="utf-8") == "#define M (A && A)\n"
+
+
+# --- one slow file ----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("mode", "tty", "env", "kind", "show_after"),
+    [
+        ("auto", True, {}, "live", 0.5),
+        ("always", True, {}, "live", 0.5),
+        ("auto", True, {"TERM": "dumb"}, "lines", 10.0),
+        ("always", False, {}, "lines", 10.0),
+        ("auto", False, {}, "off", None),
+        ("never", True, {}, "off", None),
+    ],
+)
+def test_a_single_file_shows_progress_only_once_it_is_slow(mode, tty, env, kind, show_after):
+    progress = Progress.create(mode, batch=False, within_file=True, stream=Stream(tty=tty), env=env)
+    assert progress._kind == kind
+    if show_after is not None:
+        assert progress._show_after == show_after
+        assert not progress._announce  # a quick file ends with no summary, even with always
+
+
+def test_a_batch_still_announces_and_shows_at_once_with_always():
+    progress = Progress.create("always", batch=True, within_file=True, stream=Stream(), env={})
+    assert progress._show_after == 0 and progress._announce
+
+
+def _last_line(stream):
+    return stream.text.split("\r")[-1].removesuffix("\033[K")
+
+
+def test_live_line_for_one_file_counts_its_macros_instead_of_files(tmp_path):
+    (path,) = _files(tmp_path, 1, size=100)
+    progress, clock, stream = _progress()
+    with progress:
+        progress.begin([path])
+        progress.file_started(path)
+        progress.macros(0, 40, "FEAT_A")
+        line = _last_line(stream)
+        assert "0/40 macros" in line and "  0%" in line and "FEAT_A" in line
+        assert "0/1" not in line
+        clock.advance(4)
+        progress.macros(10, 40, "FEAT_B")
+        line = _last_line(stream)
+        assert "10/40 macros" in line and " 25%" in line and "~12s" in line
+
+
+def test_live_line_names_a_macro_that_is_slow(tmp_path):
+    (path,) = _files(tmp_path, 1)
+    progress, clock, stream = _progress()
+    with progress:
+        progress.begin([path])
+        progress.file_started(path)
+        progress.macros(3, 9, "HEAVY")
+        assert "HEAVY" in _last_line(stream) and "HEAVY 0s" not in _last_line(stream)
+        clock.advance(5)
+        progress.tick()
+        assert "HEAVY 5s" in _last_line(stream)
+
+
+def test_a_slow_file_moves_the_percentage_of_a_batch(tmp_path):
+    paths = _files(tmp_path, 4)
+    progress, clock, stream = _progress()
+    with progress:
+        progress.begin(paths)
+        progress.file_started(paths[0])
+        progress.file_done()
+        progress.file_started(paths[1])
+        progress.macros(1, 2, "M")
+        line = _last_line(stream)
+        assert "1/4" in line and " 37%" in line and "1/2 macros" in line
+
+
+def test_the_macro_count_ends_with_the_file(tmp_path):
+    paths = _files(tmp_path, 2)
+    progress, clock, stream = _progress()
+    with progress:
+        progress.begin(paths)
+        progress.file_started(paths[0])
+        progress.macros(5, 9, "M")
+        progress.file_done()
+        snapshot = progress._snapshot(clock())
+    assert snapshot.macros_total == 0 and snapshot.macro is None
+
+
+def test_heartbeat_lines_for_one_file_say_how_far_it_is_and_what_is_running(tmp_path):
+    (path,) = _files(tmp_path, 1)
+    progress, clock, stream = _progress("lines", interval=10.0)
+    with progress:
+        progress.begin([path])
+        progress.file_started(path)
+        progress.macros(5, 20, "X")
+        assert stream.text == ""
+        clock.advance(11)
+        progress.tick()
+        assert stream.text == "cpre: 5/20 macros (25%), X running 11s, 11s elapsed\n"
+
+
+def test_the_text_of_a_run_with_unknown_macros_is_unchanged():
+    snapshot = Snapshot(
+        phase="analyzing",
+        found=4,
+        total=4,
+        done=1,
+        failed=0,
+        findings=0,
+        elapsed=11.0,
+        analysis_elapsed=11.0,
+        current=Path("a.c"),
+        running=3.0,
+        done_bytes=0,
+        total_bytes=0,
+    )
+    assert line_text(snapshot) == "1/4 files (25%), 11s elapsed"
+    assert interrupted_text(snapshot) == "interrupted after 1/4 files"
+
+
+def test_an_interrupted_single_file_says_how_many_macros_were_done():
+    snapshot = Snapshot(
+        phase="analyzing",
+        found=1,
+        total=1,
+        done=0,
+        failed=0,
+        findings=0,
+        elapsed=5.0,
+        analysis_elapsed=5.0,
+        current=Path("a.c"),
+        running=5.0,
+        done_bytes=0,
+        total_bytes=0,
+        macros_done=7,
+        macros_total=9,
+    )
+    assert interrupted_text(snapshot) == "interrupted after 7/9 macros"
+
+
+def test_the_estimate_counts_the_part_of_a_file_already_done():
+    snapshot = Snapshot(
+        phase="analyzing",
+        found=1,
+        total=1,
+        done=0,
+        failed=0,
+        findings=0,
+        elapsed=8.0,
+        analysis_elapsed=8.0,
+        current=Path("a.c"),
+        running=8.0,
+        done_bytes=0,
+        total_bytes=1000,
+        macros_done=1,
+        macros_total=4,
+        current_bytes=1000,
+    )
+    assert eta_seconds(snapshot) == pytest.approx(24.0)
+
+
+# --- the macro analysis reports where it is ----------------------------------------------
+
+THREE = "#define A (B || C)\n#define E(x) (x)\n#define D (A && C)\n#define F (D && D)\n"
+
+
+def test_analysis_reports_each_object_like_macro_then_the_end():
+    events: list[tuple[int, int, str | None]] = []
+    analyze_macros(THREE, on_progress=lambda *event: events.append(event))
+    assert events == [(0, 3, "A"), (1, 3, "D"), (2, 3, "F"), (3, 3, None)]
+
+
+def test_simplify_macros_passes_the_callback_on():
+    events: list[tuple[int, int, str | None]] = []
+    simplify_macros(THREE, on_progress=lambda *event: events.append(event))
+    assert events[0] == (0, 3, "A") and events[-1] == (3, 3, None)
+
+
+def test_a_source_without_object_like_macros_reports_only_the_end():
+    events: list[tuple[int, int, str | None]] = []
+    analyze_macros("#define E(x) (x)\n", on_progress=lambda *event: events.append(event))
+    assert events == [(0, 0, None)]
+
+
+def test_progress_does_not_change_the_results():
+    assert analyze_macros(THREE, expand_macros=True, on_progress=lambda *_: None) == analyze_macros(
+        THREE, expand_macros=True
+    )
+
+
+def test_an_exception_from_the_callback_stops_the_analysis():
+    def cancel(done, total, name):
+        if done == 1:
+            raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        analyze_macros(THREE, on_progress=cancel)
+
+
+# --- and the commands show it ------------------------------------------------------------
+
+
+def _show_everything(monkeypatch):
+    """Progress that shows every event at once, as a slow run would after its delay."""
+    import sys
+
+    def create(cls, mode, **kwargs):
+        return Progress(sys.stderr, kind="lines", show_after=0.0, interval=0.0, threaded=False)
+
+    monkeypatch.setattr(Progress, "create", classmethod(create))
+
+
+@pytest.fixture
+def slow_progress(monkeypatch):
+    _show_everything(monkeypatch)
+
+
+def test_simplify_macros_shows_progress_inside_one_file(tmp_path, capsys, slow_progress):
+    path = tmp_path / "m.h"
+    path.write_text(THREE, encoding="utf-8")
+    code, out, err = _run(capsys, "simplify-macros", "--expand-macros", str(path))
+    assert code == 0
+    assert "cpre: 0/3 macros (0%), A running " in err
+    assert "cpre: 3/3 macros (100%)" in err
+    assert err.rstrip().splitlines()[-1].startswith("cpre: 1 file in ")
+    assert "(!!C)" in out and "cpre:" not in out  # the report is untouched
+
+
+def test_the_default_command_shows_progress_inside_one_file(tmp_path, capsys, slow_progress):
+    path = tmp_path / "m.h"
+    path.write_text(THREE, encoding="utf-8")
+    code, out, err = _run(capsys, "--no-conditionals", str(path))
+    assert code == 0 and "cpre: 3/3 macros (100%)" in err and "cpre:" not in out
+
+
+def test_output_is_the_same_with_and_without_progress_for_one_file(tmp_path, capsys, monkeypatch):
+    path = tmp_path / "m.h"
+    path.write_text(THREE, encoding="utf-8")
+    _, hidden, quiet_err = _run(
+        capsys, "simplify-macros", "--json", "--progress", "never", str(path)
+    )
+    assert quiet_err == ""
+    _show_everything(monkeypatch)
+    _, shown, err = _run(capsys, "simplify-macros", "--json", str(path))
+    assert "macros" in err
+    assert json.loads(shown) == json.loads(hidden)

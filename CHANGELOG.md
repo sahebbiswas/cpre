@@ -14,6 +14,22 @@ raise that document's schema major version and are listed here (see the
 
 ## [Unreleased]
 
+### Added
+- Progress for a single slow file: `--expand-macros` on a large file no longer runs silently. After
+  about half a second a live `macros done/total` line (or, in a log, a line every ten seconds)
+  names the macro being analysed.
+- Recomposition stage for macro simplification. Other atom orders and forms folded back into the
+  referenced macros are tried, the shortest proven form is chosen, and a suggestion is reported only
+  if it has fewer tokens than the definition.
+
+### Changed
+- **Behaviour change:** macro suggestions that were not shorter than their definition are no longer
+  reported (the macro is reported as already simplest), and some are replaced by shorter forms,
+  including forms naming a referenced macro with `--expand-macros` (report-only).
+- **Behaviour change:** text reports show a multi-line or indented macro replacement or `#if`
+  directive on one line with whitespace runs collapsed (string and character literals untouched).
+  JSON, diffs and rewrites keep the source exactly.
+
 ### Stability
 - **cpre is 1.0.** The development status is Production/Stable and the documented
   surface now follows Semantic Versioning: the top-level Python API, the JSON

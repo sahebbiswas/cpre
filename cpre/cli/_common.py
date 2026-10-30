@@ -41,9 +41,10 @@ def add_presentation_options(parser: argparse.ArgumentParser) -> None:
         default="auto",
         metavar="WHEN",
         help=(
-            "show progress on standard error for several files or a directory: auto (the "
-            "default: a status line on a terminal), always (also plain lines when standard "
-            "error is not a terminal), or never"
+            "show progress on standard error for several files or a directory, and for "
+            "one file that takes long to analyze: auto (the default: a status line on a "
+            "terminal), always (also plain lines when standard error is not a terminal), "
+            "or never"
         ),
     )
 
@@ -54,8 +55,11 @@ def output_style(args: argparse.Namespace) -> Style:
 
 
 def progress_for(args: argparse.Namespace, *, batch: bool) -> Progress:
-    """The progress reporter selected by ``--progress`` (inert for a single file)."""
-    return Progress.create(args.progress, batch=batch)
+    """The progress reporter selected by ``--progress``.
+
+    A single file shows progress only when its macro analysis turns out to be slow.
+    """
+    return Progress.create(args.progress, batch=batch, within_file=True)
 
 
 def add_symbolic_literal_options(parser: argparse.ArgumentParser, analysis: str) -> None:
@@ -216,10 +220,12 @@ def analyze_file_macros(
     symbolic_literals: tuple[int, ...],
     options: AnalysisOptions,
     expand_macros: bool = False,
+    progress: Progress | None = None,
 ) -> tuple[tuple[MacroAnalysisResult, ...], bool]:
     """Analyze one file's macros; also whether any result was cut short by a resource limit.
 
-    Each incomplete result is reported on stderr as it is found.
+    Each incomplete result is reported on stderr as it is found. ``progress`` is told how
+    far through the file's macros the analysis is.
     """
     results = analyze_macros(
         source,
@@ -227,6 +233,7 @@ def analyze_file_macros(
         symbolic_literals=symbolic_literals,
         options=options,
         expand_macros=expand_macros,
+        on_progress=progress.macros if progress is not None else None,
     )
     failed = False
     for result in results:

@@ -228,7 +228,7 @@ def _analyze_files(
             m_results: tuple[MacroAnalysisResult, ...] = ()
             if enable_macros:
                 m_results, failed = analyze_file_macros(
-                    path, source, symbolic_literals, options, expand_macros
+                    path, source, symbolic_literals, options, expand_macros, progress
                 )
                 run.had_errors = run.had_errors or failed
             result = _FileResult(path, tree, m_results, c_result)

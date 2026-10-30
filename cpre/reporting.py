@@ -2,12 +2,28 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 
 from ._style import Style, diff_segments, paint_segments, style_for
 from .expressions import expression_predicates, expressions_differ, format_expression
 from .model import ConditionalBranch, ConditionalGroup, ConditionalTree
+
+# A string or character literal (kept as written) or a run of whitespace (shown as one space).
+# An apostrophe right after a letter or digit separates digits (``1'000``), it opens no literal.
+_LITERAL_OR_SPACE = re.compile(r"""("(?:\\.|[^"\\])*"|(?<![0-9A-Za-z_])'(?:\\.|[^'\\])*')|\s+""")
+
+
+def compact_whitespace(text: str) -> str:
+    """``text`` for display: every run of whitespace is one space, literals are untouched.
+
+    A directive continued over several lines, or indented for readability, joins into one
+    long line with the indentation inside it. Showing it that way hides the code in
+    spaces, so reports show it compacted. This is for display only: JSON, rewrites and
+    diffs keep the source exactly.
+    """
+    return _LITERAL_OR_SPACE.sub(lambda match: match.group(1) or " ", text).strip()
 
 
 def branch_differs_from_source(branch: ConditionalBranch) -> bool:
@@ -245,7 +261,8 @@ def text_lines(
             assert branch.analysis is not None
             analysis = branch.analysis
             label, role = branch_kind(branch)
-            condition = f" {branch.expression_text}" if branch.expression_text else ""
+            shown_text = compact_whitespace(branch.expression_text or "")
+            condition = f" {shown_text}" if shown_text else ""
             yield (
                 f"{guides}{line_label(branch.line, width)} {badge(style, label, role)} "
                 f"{style.paint('#' + branch.directive, 'bold')}{condition}"
