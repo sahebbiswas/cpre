@@ -14,6 +14,12 @@ raise that document's schema major version and are listed here (see the
 
 ## [Unreleased]
 
+### Fixed
+- Macro analysis with `--expand-macros` is much faster on large inputs (#235). The expression algebra
+  (`simplify`, `negate`, sorting keys, node hashes) is now memoized with small, bounded caches, so reading a reduced ROBDD back
+  as an expression no longer re-simplifies shared subtrees. A 25-macro chain that took about 30
+  seconds now takes well under a second. Results are unchanged.
+
 ### Added
 - Progress for a single slow file: `--expand-macros` on a large file no longer runs silently. After
   about half a second a live `macros done/total` line (or, in a log, a line every ten seconds)

@@ -46,15 +46,51 @@ class Predicate:
 class Negation:
     operand: Expression
 
+    def __hash__(self) -> int:
+        # Computed once: hashing walks the whole tree, and the algebra hashes the same
+        # subtrees over and over.
+        value: int | None = getattr(self, "_hash", None)
+        if value is None:
+            value = hash(("Negation", self.operand))
+            try:
+                object.__setattr__(self, "_hash", value)
+            except AttributeError:  # no instance dictionary (slots): just do not remember it
+                pass
+        return value
+
 
 @dataclass(frozen=True)
 class Conjunction:
     operands: tuple[Expression, ...]
 
+    def __hash__(self) -> int:
+        # Computed once: hashing walks the whole tree, and the algebra hashes the same
+        # subtrees over and over.
+        value: int | None = getattr(self, "_hash", None)
+        if value is None:
+            value = hash(("Conjunction", self.operands))
+            try:
+                object.__setattr__(self, "_hash", value)
+            except AttributeError:  # no instance dictionary (slots): just do not remember it
+                pass
+        return value
+
 
 @dataclass(frozen=True)
 class Disjunction:
     operands: tuple[Expression, ...]
+
+    def __hash__(self) -> int:
+        # Computed once: hashing walks the whole tree, and the algebra hashes the same
+        # subtrees over and over.
+        value: int | None = getattr(self, "_hash", None)
+        if value is None:
+            value = hash(("Disjunction", self.operands))
+            try:
+                object.__setattr__(self, "_hash", value)
+            except AttributeError:  # no instance dictionary (slots): just do not remember it
+                pass
+        return value
 
 
 # The public aliases stay typing.Union (not ``X | Y``) so their repr and typing.get_args()

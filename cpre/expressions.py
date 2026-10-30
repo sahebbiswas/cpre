@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterator, Sequence
+from functools import lru_cache
 
 from .model import (
     FALSE,
@@ -21,6 +22,11 @@ from .model import (
     SymbolicLiteral,
     Variable,
 )
+
+# The algebra is pure and runs on the same subtrees over and over; remembering recent results
+# keeps reading a large ROBDD back as an expression from going quadratic. A few thousand
+# entries are enough for that, and they bound what a long-running process keeps alive.
+_CACHE_SIZE = 1 << 12
 
 _TOKEN_RE = re.compile(
     r"\s*(?:"
@@ -237,10 +243,12 @@ def parse_expression(text: str) -> Expression:
     return ExpressionParser(text).parse()
 
 
+@lru_cache(maxsize=_CACHE_SIZE)
 def _sort_key(expression: Expression) -> str:
     return format_expression(expression)
 
 
+@lru_cache(maxsize=_CACHE_SIZE)
 def negate(expression: Expression) -> Expression:
     expression = simplify(expression)
     if isinstance(expression, Constant):
@@ -306,6 +314,7 @@ def disjunction(*expressions: Expression) -> Expression:
     return Disjunction(tuple(sorted(filtered, key=_sort_key)))
 
 
+@lru_cache(maxsize=_CACHE_SIZE)
 def simplify(expression: Expression) -> Expression:
     if isinstance(expression, (Constant, Variable, Predicate)):
         return expression
@@ -425,3 +434,10 @@ __all__ = [
     "simplify",
     "tokens",
 ]
+
+
+def clear_expression_caches() -> None:
+    """Forget the remembered results of the expression algebra, releasing what they hold."""
+    simplify.cache_clear()
+    negate.cache_clear()
+    _sort_key.cache_clear()
