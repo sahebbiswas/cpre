@@ -142,6 +142,7 @@ def _simplify_files(
                 symbolic_literals=symbolic_literals,
                 options=options,
                 expand_macros=args.expand_macros,
+                on_progress=progress.macros if progress is not None else None,
             )
             for r in res.results:
                 if not r.complete and r.incomplete:

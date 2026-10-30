@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from ._lines import line_starts as _line_starts
@@ -16,6 +16,7 @@ from ._macro_inlining import (
     undefined_name,
 )
 from ._precedence import top_level_binary_operators
+from ._recomposition import Expansion, choose_replacement, keeps_value
 from ._types import (
     AnalysisIncomplete,
     AnalysisOptions,
@@ -391,7 +392,7 @@ def _analyze_definition(
             code=ErrorCode.ANALYSIS_FAILURE,
         )
 
-    is_candidate, reason, parsed, _ = classify_macro_candidate(definition)
+    is_candidate, reason, parsed, is_wrapped = classify_macro_candidate(definition)
     if not is_candidate or parsed is None:
         return MacroAnalysisResult(
             name=definition.name,
@@ -447,20 +448,37 @@ def _analyze_definition(
             symbolic_literals=literals,
         )
 
-    # The operators of every candidate yield 0 or 1, but an identifier can hold
-    # any value: keep a lone identifier normalized so the macro's integer value
-    # is unchanged (``!!X`` must not become ``X``). A symbolic literal stands for
-    # the literal itself, which is already 0 or 1.
-    if isinstance(simplified_expr, Variable) and not isinstance(simplified_expr, SymbolicLiteral):
-        simplified_expr = Negation(Negation(simplified_expr))
-
     expanded_text = f"({format_expression(analysis_expr)})" if expanded_from else None
     expanded_expr = analysis_expr if expanded_from else None
 
-    differ = expressions_differ(analysis_expr, simplified_expr)
-    if differ:
-        formatted = format_expression(simplified_expr)
-        simplified_replacement = f"({formatted})"
+    # The suggestion is the shortest proven-equivalent form, and only if it has fewer
+    # tokens than the definition (see cpre/_recomposition.py).
+    original_cost = len(tokens(definition.replacement)) + (0 if is_wrapped else 2)
+    expansion = (
+        _expansion_for(expander, expanded_from, limits.max_work)
+        if expander is not None and expanded_from
+        else None
+    )
+    try:
+        choice = choose_replacement(
+            original=expr,
+            original_cost=original_cost,
+            expanded=analysis_expr,
+            baseline=simplified_expr,
+            baseline_proven=is_eq,
+            bdd=bdd,
+            limits=limits,
+            expansion=expansion,
+        )
+    except AnalysisLimitExceeded:
+        choice = None
+    if choice is not None and not choice.depends_on_expansion:
+        # Found without what the referenced macros stand for: an ordinary result.
+        expanded_from, expanded_text, expanded_expr, notes = (), None, None, ()
+    if choice is not None:
+        # The macro's value stays 0 or 1: a lone identifier is emitted as ``!!X``.
+        chosen = keeps_value(choice.expression)
+        simplified_replacement = f"({format_expression(chosen)})"
         if expanded_from:
             rewritable = False
             reason = _EXPANSION_REASON.format(names=", ".join(expanded_from))
@@ -474,9 +492,9 @@ def _analyze_definition(
             reason=_with_notes(reason, notes),
             original_replacement=definition.replacement,
             original_expression=expr,
-            simplified_expression=simplified_expr,
+            simplified_expression=chosen,
             simplified_replacement=simplified_replacement,
-            is_equivalent=is_eq,
+            is_equivalent=True,
             incomplete=None,
             replacement_range=replacement_range,
             symbolic_literals=literals,
@@ -507,6 +525,25 @@ def _analyze_definition(
     )
 
 
+def _expansion_for(
+    expander: Expander, expanded_from: tuple[str, ...], max_work: int
+) -> Expansion | None:
+    """What the recomposition stage may use of the macros ``expander`` substituted."""
+
+    def vocabulary() -> dict[str, Expression]:
+        bodies: dict[str, Expression] = {}
+        for name in expanded_from:
+            try:
+                inlined = expander(Variable(name), max_work)
+            except AnalysisLimitExceeded:
+                continue  # too large to compare with; the macro just is not offered
+            if name in inlined.expanded:
+                bodies[name] = inlined.expression
+        return bodies
+
+    return Expansion(vocabulary, lambda form: expander(form, max_work).expression)
+
+
 def _to_source_location(loc: object) -> SourceLocation:
     line = getattr(loc, "line", 1) or 1
     column = getattr(loc, "column", None)
@@ -524,6 +561,12 @@ class _PendingObjectMacro:
     context: tuple[tuple[int, int], ...]
 
 
+MacroProgressCallback = Callable[[int, int, "str | None"], None]
+"""``callback(done, total, name)``: ``name`` is about to be analyzed, ``done`` of ``total`` are done.
+
+After the last macro it is called once more with ``done == total`` and ``name`` ``None``."""
+
+
 def analyze_macros(
     source: str,
     *,
@@ -531,11 +574,20 @@ def analyze_macros(
     filename: str | None = None,
     symbolic_literals: Iterable[int] | None = None,
     expand_macros: bool = False,
+    on_progress: MacroProgressCallback | None = None,
 ) -> tuple[MacroAnalysisResult, ...]:
     """Analyze all macro definitions in a source string for Boolean simplification.
 
     ``symbolic_literals`` is forwarded to :func:`analyze_macro`; see that
     function for the opt-in symbolic-literal semantics.
+
+    ``on_progress`` is called as ``on_progress(done, total, name)`` just before each
+    object-like macro is analyzed (the part that can take long, especially with
+    ``expand_macros``): ``done`` of ``total`` macros are finished and ``name`` is the one
+    about to start. After the last one it is called with ``done == total`` and ``name``
+    set to ``None``. Function-like macros are not counted; they are analyzed while the
+    source is scanned and cost almost nothing. An exception raised by the callback
+    propagates, so it can be used to cancel.
 
     ``expand_macros=True`` opts in to expansion: an identifier in a replacement
     list that names another macro defined in ``source`` is replaced by that
@@ -670,7 +722,10 @@ def analyze_macros(
     inliner = (
         Inliner(scope, lambda found: _inlining_body(found, literals)) if expand_macros else None
     )
-    for item in pending:
+    total = len(pending)
+    for done, item in enumerate(pending):
+        if on_progress is not None:
+            on_progress(done, total, item.definition.name)
         results[item.slot] = _analyze_definition(
             item.definition,
             options=resolved_options,
@@ -682,6 +737,8 @@ def analyze_macros(
                 else None
             ),
         )
+    if on_progress is not None:
+        on_progress(total, total, None)
 
     return tuple(result for result in results if result is not None)
 
@@ -845,8 +902,12 @@ def simplify_macros(
     symbolic_literals: Iterable[int] | None = None,
     options: AnalysisOptions | None = None,
     expand_macros: bool = False,
+    on_progress: MacroProgressCallback | None = None,
 ) -> MacroSimplificationResult:
     """Analyze macro definitions for Boolean simplification, and optionally rewrite source.
+
+    ``on_progress`` reports how far the analysis is; see :func:`analyze_macros`. It is not
+    called for the verification that follows a rewrite.
 
     When ``rewrite=False`` (the default), source is never modified.
     When ``rewrite=True``, only transformations proven equivalent under the
@@ -872,6 +933,7 @@ def simplify_macros(
         filename=filename,
         symbolic_literals=literals,
         expand_macros=expand_macros,
+        on_progress=on_progress,
     )
 
     if not rewrite:

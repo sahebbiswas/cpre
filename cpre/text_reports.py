@@ -166,7 +166,7 @@ def render_macro_report(
                 reporting.transformation_lines(
                     style,
                     "   ",
-                    r.original_replacement,
+                    reporting.compact_whitespace(r.original_replacement),
                     [(r.simplified_replacement or "", note)],
                 )
             )
@@ -184,7 +184,8 @@ def render_macro_report(
         elif r.candidate:
             reason = r.reason or "simplest equivalent form"
             header = _macro_header(style, "ok", "ok", width, r)
-            lines.append(f"{header} {r.original_replacement}  {style.paint(f'({reason})', 'dim')}")
+            original = reporting.compact_whitespace(r.original_replacement)
+            lines.append(f"{header} {original}  {style.paint(f'({reason})', 'dim')}")
         else:
             header = _macro_header(style, "skip", "skip", width, r)
             lines.append(f"{header}  {style.paint(str(r.reason), 'dim')}")

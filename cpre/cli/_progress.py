@@ -1,4 +1,10 @@
-"""Progress for commands that work through many files (``--recursive``, several inputs).
+"""Progress for commands that work through many files, or one slow file.
+
+For several inputs (``--recursive``, a directory) the display counts files. A command that
+reports its progress inside a file (the macro analysis of ``cpre`` and ``cpre
+simplify-macros``) also shows how far through the current file it is, so a single large
+file is not silent either. A single file shows progress only once the run turns out to
+be slow, and says nothing about a quick one.
 
 Progress is written to standard error only, so standard output (reports, JSON, SARIF,
 diffs) is byte-for-byte the same with progress on or off. There are three presentations:
@@ -83,6 +89,10 @@ class Progress:
         self._analysis_start = self._start
         self._current: Path | None = None
         self._current_start = self._start
+        self._macros_done = 0
+        self._macros_total = 0
+        self._macro: str | None = None
+        self._macro_start = self._start
         self._last_draw = float("-inf")
         self._last_line = self._start
         self._drawn = False
@@ -97,40 +107,47 @@ class Progress:
         mode: str,
         *,
         batch: bool,
+        within_file: bool = False,
         stream: TextIO | None = None,
         env: Mapping[str, str] | None = None,
         clock: Callable[[], float] = time.monotonic,
         threaded: bool = True,
     ) -> Progress:
-        """The reporter for ``--progress MODE``; inert unless the run is a batch."""
+        """The reporter for ``--progress MODE``.
+
+        Inert unless the run is a batch, or ``within_file`` says the command reports
+        progress inside a file. Such a single-file run is shown only once it is slow (after
+        half a second on a terminal, every ten seconds in a log), and it does not announce
+        a closing summary when it is quick, even with ``always``.
+        """
         target = stream if stream is not None else sys.stderr
-        if mode == "never" or not batch:
+        if mode == "never" or not (batch or within_file):
             return cls(target, kind="off", clock=clock, threaded=threaded)
+        immediate = mode == "always" and batch
         environment = os.environ if env is None else env
         tty = bool(target.isatty())
         dumb = environment.get("TERM") == "dumb"
         style = detect_style(target, "auto", environment)
         if tty and not dumb and ansi_capable(target):
-            show_after = 0.0 if mode == "always" else 0.5
             return cls(
                 target,
                 kind="live",
-                show_after=show_after,
+                show_after=0.0 if immediate else 0.5,
                 clock=clock,
                 style=style,
                 threaded=threaded,
-                announce=mode == "always",
+                announce=immediate,
             )
         if mode == "always" or tty:
             # A log or a dumb terminal: plain lines, never cursor control.
             return cls(
                 target,
                 kind="lines",
-                show_after=0.0 if mode == "always" else 10.0,
+                show_after=0.0 if immediate else 10.0,
                 clock=clock,
                 style=style,
                 threaded=threaded,
-                announce=mode == "always",
+                announce=immediate,
             )
         return cls(target, kind="off", clock=clock, threaded=threaded)
 
@@ -199,7 +216,25 @@ class Progress:
         with self._lock:
             self._current = path
             self._current_start = self._clock()
+            self._reset_macros()
         self.tick()
+
+    def macros(self, done: int, total: int, name: str | None) -> None:
+        """The current file's macro analysis: ``done`` of ``total`` finished, ``name`` starting.
+
+        Matches the ``on_progress`` callback of ``analyze_macros``.
+        """
+        with self._lock:
+            self._macros_done = done
+            self._macros_total = total
+            if name != self._macro:
+                self._macro_start = self._clock()
+            self._macro = name
+        self.tick()
+
+    def _reset_macros(self) -> None:
+        self._macros_done = self._macros_total = 0
+        self._macro = None
 
     def file_done(self, findings: int = 0, *, failed: bool = False) -> None:
         with self._lock:
@@ -210,6 +245,7 @@ class Progress:
             if self._current is not None:
                 self._done_bytes += self._sizes.get(self._current, 0)
             self._current = None
+            self._reset_macros()
         self.tick()
 
     @contextlib.contextmanager
@@ -291,6 +327,11 @@ class Progress:
             running=now - self._current_start,
             done_bytes=self._done_bytes,
             total_bytes=self._total_bytes,
+            macros_done=self._macros_done,
+            macros_total=self._macros_total,
+            macro=self._macro,
+            macro_running=now - self._macro_start,
+            current_bytes=self._sizes.get(self._current, 0) if self._current is not None else 0,
         )
 
 
