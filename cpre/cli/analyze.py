@@ -14,7 +14,7 @@ from .._style import Style
 from .._types import AnalysisOptions, AnalysisResult
 from ..api import analyze_source
 from ..errors import CpreError, ErrorCode
-from ..macro_analysis import MacroAnalysisResult, analyze_macros
+from ..macro_analysis import MacroAnalysisResult
 from ..model import ConditionalTree
 from ..sarif import ToolNotification, sarif_log
 from ..serialization import batch_document, build_file_json, top_level
@@ -31,10 +31,12 @@ from ._common import (
     EXIT_ERROR,
     EXIT_FINDINGS,
     EXIT_OK,
+    add_expand_macros_option,
     add_limit_options,
     add_presentation_options,
     add_symbolic_literal_options,
     analysis_options_from,
+    analyze_file_macros,
     input_paths,
     is_batch,
     output_style,
@@ -102,6 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="exit with status 1 when a dead, redundant, or simplifiable branch/macro is found",
     )
     add_symbolic_literal_options(parser, "macro")
+    add_expand_macros_option(parser)
     parser.add_argument(
         "--no-macros",
         action="store_true",
@@ -160,23 +163,6 @@ def _analyze_conditionals(
     return tree, result
 
 
-def _analyze_macros(
-    path: Path,
-    source: str,
-    symbolic_literals: tuple[int, ...],
-    run: _Run,
-    options: AnalysisOptions,
-) -> tuple[MacroAnalysisResult, ...]:
-    results = analyze_macros(
-        source, filename=str(path), symbolic_literals=symbolic_literals, options=options
-    )
-    for r in results:
-        if not r.complete and r.incomplete:
-            report_failure(path, format_incomplete(r.incomplete))
-            run.had_errors = True
-    return results
-
-
 def _record_failure(path: Path, error: Exception, run: _Run) -> None:
     """Report an unreadable or unanalyzable file on stderr and as a SARIF notification."""
     if isinstance(error, CpreError):
@@ -208,6 +194,7 @@ def _analyze_files(
     enable_macros: bool,
     symbolic_literals: tuple[int, ...],
     options: AnalysisOptions,
+    expand_macros: bool = False,
     telemetry: bool = False,
     echo_telemetry: bool = False,
     progress: Progress | None = None,
@@ -240,7 +227,10 @@ def _analyze_files(
                 )
             m_results: tuple[MacroAnalysisResult, ...] = ()
             if enable_macros:
-                m_results = _analyze_macros(path, source, symbolic_literals, run, options)
+                m_results, failed = analyze_file_macros(
+                    path, source, symbolic_literals, options, expand_macros
+                )
+                run.had_errors = run.had_errors or failed
             result = _FileResult(path, tree, m_results, c_result)
             run.files.append(result)
             findings = file_findings(tree, m_results).total
@@ -266,6 +256,7 @@ def _file_json(
         enable_macros=enable_macros,
         symbolic_literals=literals,
         analysis=file.analysis,
+        expand_macros=args.expand_macros,
     )
 
 
@@ -355,6 +346,10 @@ def analyze_main(argv: Sequence[str] | None = None) -> int:
     symbolic_literals = symbolic_literals_from(parser, args)
     options = analysis_options_from(parser, args)
     enable_macros = not args.no_macros
+    if args.expand_macros and not enable_macros:
+        parser.error("--expand-macros has no effect with --no-macros")
+    if args.expand_macros and args.sarif:
+        parser.error("--expand-macros has no effect with --sarif: SARIF has no macro findings")
     if args.telemetry and args.no_conditionals:
         parser.error(
             "--telemetry describes conditional analysis; it cannot be used with --no-conditionals"
@@ -373,6 +368,7 @@ def analyze_main(argv: Sequence[str] | None = None) -> int:
             enable_macros=enable_macros,
             symbolic_literals=symbolic_literals,
             options=options,
+            expand_macros=args.expand_macros,
             telemetry=args.telemetry,
             echo_telemetry=args.telemetry and not args.json,
             progress=progress,

@@ -9,7 +9,7 @@ cpre --sarif source.c > cpre.sarif
 cpre --recursive --sarif path/to/project > cpre.sarif
 ```
 
-`--sarif` and `--json` are mutually exclusive. JSON remains the structural conditional-tree format; SARIF represents the stable findings produced by the public analysis API.
+`--sarif` and `--json` are mutually exclusive. SARIF carries conditional findings only, so `--expand-macros`, which affects macro findings, is rejected with `--sarif` (usage error, status `2`). JSON remains the structural conditional-tree format; SARIF represents the stable findings produced by the public analysis API.
 
 A single CLI invocation produces one SARIF run, including batch and recursive scans. Findings use these rule IDs:
 

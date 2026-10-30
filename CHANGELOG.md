@@ -24,6 +24,27 @@ raise that document's schema major version and are listed here (see the
   itself.
 
 ### Added
+- Macro simplification can see through other macros. `analyze_macros(..., expand_macros=True)`,
+  `simplify_macros(..., expand_macros=True)`, `analyze_macro(..., expand_macros={name: definition})`
+  and `--expand-macros` on `cpre` and `cpre simplify-macros` replace an identifier that names a
+  Boolean macro defined in the same source by that macro's replacement before simplifying, so
+  `#define D (A && C)` with `#define A (B || C)` reports `(!!C)`. Only Boolean candidates (and bare
+  identifier aliases of them) are expanded; a plain constant such as `#define ENABLED 1`, a
+  function-like macro or any other non-candidate stays an opaque atom, because its value depends on
+  the build configuration. A macro is expanded only when it has one `#define`, no `#undef`, comes
+  before its user and sits in a conditional block that also encloses the user; cycles and
+  over-deep macro nesting stay atoms, and `reason` says why; an expanded expression nested
+  more than 256 levels deep is reported as incomplete (`nesting`). The result is reported but never rewritable,
+  so combining the option with `--rewrite`, `--in-place`, `--diff` or `--check`, or
+  `simplify_macros(rewrite=True, expand_macros=True)`, is an error (usage status `2` on the
+  command line, `AnalysisError` with `ErrorCode.INVALID_CONFIGURATION` in Python), as is
+  `--expand-macros` with `--no-macros` or `--sarif`. A macro whose replacement has a top-level
+  `&&` or `||` outside parentheses is not expanded, because the preprocessor would bind it with
+  the operators around each use. New `MacroAnalysisResult`
+  fields: `expanded_replacement`, `expanded_from`, `expanded_expression`, `expanded`. JSON macro
+  records gain `expanded_from` and `expanded_replacement`, and the file record gains
+  `expand_macros`, only when the option was given, so default output is unchanged
+  ([#233](https://github.com/sahebbiswas/cpre/issues/233)).
 - Evaluated values are checked against GCC and Clang. `tests/test_evaluation_differential.py`
   runs a `#if (EXPR) == VALUE` probe, plus a signedness probe, for every expression cpre
   reports as concrete: operator, boundary, unsigned and macro fixtures and a seeded random

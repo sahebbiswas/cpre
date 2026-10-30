@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from ._lines import line_starts as _line_starts
+from ._macro_inlining import (
+    ConditionalTracker,
+    DefineSite,
+    Expander,
+    Inliner,
+    MacroScope,
+    undefined_name,
+)
 from ._precedence import top_level_binary_operators
 from ._types import (
     AnalysisIncomplete,
@@ -69,6 +77,14 @@ class MacroAnalysisResult:
     replacement_range: SourceRange | None = None
     symbolic_literals: tuple[int, ...] = ()
     rewritable: bool = True
+    expanded_replacement: str | None = None
+    expanded_from: tuple[str, ...] = ()
+    expanded_expression: Expression | None = None
+
+    @property
+    def expanded(self) -> bool:
+        """True if referenced macros were substituted before simplifying (``expand_macros``)."""
+        return bool(self.expanded_from)
 
     @property
     def semantics(self) -> str:
@@ -272,12 +288,57 @@ def _has_top_level_binary_operator(replacement: str) -> bool:
     return any(operator in ("&&", "||") for operator in operators)
 
 
+_EXPANSION_REASON = (
+    "not rewritten: the result depends on {names}; a macro is bound where it is used, so a "
+    "simplification found by expanding other macros is reported but never applied"
+)
+
+
+def _inlining_body(
+    definition: MacroDefinition, literals: tuple[int, ...]
+) -> Expression | str | None:
+    """The expression ``expand_macros`` substitutes for ``definition``'s name.
+
+    Only a Boolean candidate, or a bare identifier alias (``#define ALIAS OTHER``, which
+    keeps the value of what it names), is substituted. Every other macro, notably a plain
+    constant such as ``#define ENABLED 1``, has a configuration-dependent value and stays
+    an opaque atom. A candidate whose replacement has a top-level ``&&`` or ``||`` is
+    not substituted either, and the reason is returned: the preprocessor pastes its
+    text, so it would bind with the operators around each use.
+    """
+    is_candidate, _, parsed, _ = classify_macro_candidate(definition)
+    if is_candidate and parsed is not None:
+        if _has_top_level_binary_operator(definition.replacement):
+            return (
+                f"{definition.name} is not parenthesized, so its replacement binds with the "
+                "operators around each use"
+            )
+        return _symbolize(parsed, literals)
+    if definition.parameters is not None:
+        return None
+    try:
+        toks = tokens(definition.replacement.strip())
+    except Exception:
+        return None
+    if len(toks) == 1 and toks[0].kind == "identifier" and toks[0].text != "defined":
+        return Variable(toks[0].text)
+    return None
+
+
+def _with_notes(reason: str | None, notes: Sequence[str]) -> str | None:
+    if not notes:
+        return reason
+    skipped = "not expanded: " + "; ".join(notes)
+    return skipped if reason is None else f"{reason} ({skipped})"
+
+
 def analyze_macro(
     definition: MacroDefinition,
     *,
     options: AnalysisOptions | None = None,
     replacement_range: SourceRange | None = None,
     symbolic_literals: Iterable[int] | None = None,
+    expand_macros: Mapping[str, MacroDefinition] | None = None,
 ) -> MacroAnalysisResult:
     """Analyze one macro definition for Boolean simplification.
 
@@ -285,14 +346,50 @@ def analyze_macro(
     integer literal (currently ``0`` and ``1``) is treated as a single free
     Boolean atom instead of a fixed truth value. The default keeps ordinary C
     semantics.
+
+    ``expand_macros`` opts in to expansion: a mapping from macro name to the
+    :class:`MacroDefinition` that name has, each taken to be the single,
+    unconditional definition that precedes ``definition``. Identifiers in the
+    replacement list that name a Boolean candidate (or an alias of one) in the
+    mapping are replaced by its replacement before simplifying. The result is
+    reported but never rewritable. Other names stay opaque atoms.
     """
+    literals = _resolve_symbolic_literals(symbolic_literals)
+    expander: Expander | None = None
+    if expand_macros is not None:
+        try:
+            inliner = Inliner.from_definitions(
+                expand_macros, lambda found: _inlining_body(found, literals)
+            )
+        except (TypeError, ValueError, AttributeError) as error:
+            raise AnalysisError(
+                f"expand_macros must map macro names to MacroDefinition objects: {error}",
+                code=ErrorCode.INVALID_CONFIGURATION,
+            ) from error
+        expander = inliner.bind(definition.name, 0, ())
+    return _analyze_definition(
+        definition,
+        options=options,
+        replacement_range=replacement_range,
+        literals=literals,
+        expander=expander,
+    )
+
+
+def _analyze_definition(
+    definition: MacroDefinition,
+    *,
+    options: AnalysisOptions | None,
+    replacement_range: SourceRange | None,
+    literals: tuple[int, ...],
+    expander: Expander | None,
+) -> MacroAnalysisResult:
     resolved_options = options or AnalysisOptions()
     if not isinstance(resolved_options, AnalysisOptions):
         raise AnalysisError(
             "options must be an AnalysisOptions instance",
             code=ErrorCode.ANALYSIS_FAILURE,
         )
-    literals = _resolve_symbolic_literals(symbolic_literals)
 
     is_candidate, reason, parsed, _ = classify_macro_candidate(definition)
     if not is_candidate or parsed is None:
@@ -308,16 +405,24 @@ def analyze_macro(
     expr = _symbolize(parsed, literals)
 
     # Candidate expression: apply bounded ROBDD simplification
-    atoms = tuple(dict.fromkeys(expression_atoms_in_order(expr)))
     limits = resolved_options._resource_limits()
     budget = AnalysisBudget(limits.max_work)
+    analysis_expr = expr
+    expanded_from: tuple[str, ...] = ()
+    notes: tuple[str, ...] = ()
 
     try:
+        if expander is not None:
+            inlined = expander(expr, limits.max_work)
+            expanded_from, notes = inlined.expanded, inlined.notes
+            if expanded_from:
+                analysis_expr = inlined.expression
+        atoms = tuple(dict.fromkeys(expression_atoms_in_order(analysis_expr)))
         if len(atoms) > limits.max_atoms:
             raise AnalysisLimitExceeded("atoms", limits.max_atoms, len(atoms))
         bdd = BDD(atoms, limits=limits, budget=budget)
-        simplified_expr = exact_simplify(expr, bdd)
-        is_eq = bdd.equivalent_under(TRUE, expr, simplified_expr)
+        simplified_expr = exact_simplify(analysis_expr, bdd)
+        is_eq = bdd.equivalent_under(TRUE, analysis_expr, simplified_expr)
     except AnalysisLimitExceeded as error:
         diagnostic = AnalysisIncomplete(
             code=ErrorCode.ANALYSIS_LIMIT_EXCEEDED,
@@ -349,16 +454,24 @@ def analyze_macro(
     if isinstance(simplified_expr, Variable) and not isinstance(simplified_expr, SymbolicLiteral):
         simplified_expr = Negation(Negation(simplified_expr))
 
-    differ = expressions_differ(expr, simplified_expr)
+    expanded_text = f"({format_expression(analysis_expr)})" if expanded_from else None
+    expanded_expr = analysis_expr if expanded_from else None
+
+    differ = expressions_differ(analysis_expr, simplified_expr)
     if differ:
         formatted = format_expression(simplified_expr)
         simplified_replacement = f"({formatted})"
-        rewritable = not _has_top_level_binary_operator(definition.replacement)
+        if expanded_from:
+            rewritable = False
+            reason = _EXPANSION_REASON.format(names=", ".join(expanded_from))
+        else:
+            rewritable = not _has_top_level_binary_operator(definition.replacement)
+            reason = None if rewritable else _UNPARENTHESIZED_REASON
         return MacroAnalysisResult(
             name=definition.name,
             definition=definition,
             candidate=True,
-            reason=None if rewritable else _UNPARENTHESIZED_REASON,
+            reason=_with_notes(reason, notes),
             original_replacement=definition.replacement,
             original_expression=expr,
             simplified_expression=simplified_expr,
@@ -368,22 +481,30 @@ def analyze_macro(
             replacement_range=replacement_range,
             symbolic_literals=literals,
             rewritable=rewritable,
+            expanded_replacement=expanded_text,
+            expanded_from=expanded_from,
+            expanded_expression=expanded_expr,
         )
-    else:
-        return MacroAnalysisResult(
-            name=definition.name,
-            definition=definition,
-            candidate=True,
-            reason="expression is already in simplest equivalent form",
-            original_replacement=definition.replacement,
-            original_expression=expr,
-            simplified_expression=expr,
-            simplified_replacement=None,
-            is_equivalent=is_eq,
-            incomplete=None,
-            replacement_range=replacement_range,
-            symbolic_literals=literals,
-        )
+    reason = "expression is already in simplest equivalent form"
+    if expanded_from:
+        reason += f" after expanding {', '.join(expanded_from)}"
+    return MacroAnalysisResult(
+        name=definition.name,
+        definition=definition,
+        candidate=True,
+        reason=_with_notes(reason, notes),
+        original_replacement=definition.replacement,
+        original_expression=expr,
+        simplified_expression=analysis_expr,
+        simplified_replacement=None,
+        is_equivalent=is_eq,
+        incomplete=None,
+        replacement_range=replacement_range,
+        symbolic_literals=literals,
+        expanded_replacement=expanded_text,
+        expanded_from=expanded_from,
+        expanded_expression=expanded_expr,
+    )
 
 
 def _to_source_location(loc: object) -> SourceLocation:
@@ -392,23 +513,54 @@ def _to_source_location(loc: object) -> SourceLocation:
     return SourceLocation(line=line, column=column)
 
 
+@dataclass(frozen=True)
+class _PendingObjectMacro:
+    """An object-like definition found in the scan, analyzed once the scope is complete."""
+
+    slot: int
+    definition: MacroDefinition
+    replacement_range: SourceRange | None
+    order: int
+    context: tuple[tuple[int, int], ...]
+
+
 def analyze_macros(
     source: str,
     *,
     options: AnalysisOptions | None = None,
     filename: str | None = None,
     symbolic_literals: Iterable[int] | None = None,
+    expand_macros: bool = False,
 ) -> tuple[MacroAnalysisResult, ...]:
     """Analyze all macro definitions in a source string for Boolean simplification.
 
     ``symbolic_literals`` is forwarded to :func:`analyze_macro`; see that
     function for the opt-in symbolic-literal semantics.
+
+    ``expand_macros=True`` opts in to expansion: an identifier in a replacement
+    list that names another macro defined in ``source`` is replaced by that
+    macro's replacement before simplifying, so ``#define D (A && C)`` with
+    ``#define A (B || C)`` simplifies to ``(!!C)``. Only a Boolean candidate (or a
+    bare identifier alias of one) is expanded, never a plain constant or other
+    non-candidate, because such a macro's value depends on the build
+    configuration. A macro is expanded only when it has exactly one ``#define``
+    and no ``#undef`` in ``source``, is defined before the macro that uses it, and
+    is defined in a conditional block that also encloses that macro; otherwise it
+    stays an atom and the result's ``reason`` says why. A result found by
+    expansion is reported but never rewritable.
     """
     resolved_options = options or AnalysisOptions()
     literals = _resolve_symbolic_literals(symbolic_literals)
-    results: list[MacroAnalysisResult] = []
+    results: list[MacroAnalysisResult | None] = []
+    pending: list[_PendingObjectMacro] = []
+    scope = MacroScope()
+    tracker = ConditionalTracker()
 
     for line in logical_lines(source):
+        tracker.feed(line)
+        undefined = undefined_name(line)
+        if undefined is not None:
+            scope.undefined.add(undefined)
         directive = line.directive
         if directive is None or directive.name != "define":
             continue
@@ -449,8 +601,16 @@ def analyze_macros(
                 variadic=variadic,
                 location=name_location,
             )
-            result = analyze_macro(definition, options=resolved_options, symbolic_literals=literals)
-            results.append(result)
+            scope.add_define(DefineSite(definition, line.index, tracker.context))
+            results.append(
+                _analyze_definition(
+                    definition,
+                    options=resolved_options,
+                    replacement_range=None,
+                    literals=literals,
+                    expander=None,
+                )
+            )
             continue
 
         # Object-like macro
@@ -460,6 +620,7 @@ def analyze_macros(
                 replacement=tail.strip(),
                 location=name_location,
             )
+            scope.add_define(DefineSite(definition, line.index, tracker.context))
             results.append(
                 MacroAnalysisResult(
                     name=name,
@@ -492,15 +653,37 @@ def analyze_macros(
             parameters=None,
             location=name_location,
         )
-        result = analyze_macro(
-            definition,
-            options=resolved_options,
-            replacement_range=replacement_range,
-            symbolic_literals=literals,
+        scope.add_define(DefineSite(definition, line.index, tracker.context))
+        pending.append(
+            _PendingObjectMacro(
+                slot=len(results),
+                definition=definition,
+                replacement_range=replacement_range,
+                order=line.index,
+                context=tracker.context,
+            )
         )
-        results.append(result)
+        results.append(None)
 
-    return tuple(results)
+    # Object-like definitions are analyzed once every #define and #undef is known, so
+    # expansion can tell whether a referenced macro is defined exactly once.
+    inliner = (
+        Inliner(scope, lambda found: _inlining_body(found, literals)) if expand_macros else None
+    )
+    for item in pending:
+        results[item.slot] = _analyze_definition(
+            item.definition,
+            options=resolved_options,
+            replacement_range=item.replacement_range,
+            literals=literals,
+            expander=(
+                inliner.bind(item.definition.name, item.order, item.context)
+                if inliner is not None
+                else None
+            ),
+        )
+
+    return tuple(result for result in results if result is not None)
 
 
 @dataclass(frozen=True)
@@ -661,6 +844,7 @@ def simplify_macros(
     rewrite: bool = False,
     symbolic_literals: Iterable[int] | None = None,
     options: AnalysisOptions | None = None,
+    expand_macros: bool = False,
 ) -> MacroSimplificationResult:
     """Analyze macro definitions for Boolean simplification, and optionally rewrite source.
 
@@ -668,7 +852,18 @@ def simplify_macros(
     When ``rewrite=True``, only transformations proven equivalent under the
     selected semantic mode are applied, and the result is verified by
     re-parsing and re-analyzing the rewritten source.
+
+    ``expand_macros=True`` reports simplifications found by expanding referenced
+    Boolean macros (see :func:`analyze_macros`). Those results are never applied,
+    so combining it with ``rewrite=True`` raises :class:`AnalysisError` with
+    ``ErrorCode.INVALID_CONFIGURATION``.
     """
+    if expand_macros and rewrite:
+        raise AnalysisError(
+            "expand_macros cannot be combined with rewrite: a simplification found by "
+            "expanding other macros is reported but never applied",
+            code=ErrorCode.INVALID_CONFIGURATION,
+        )
     resolved_options = options or AnalysisOptions()
     literals = _resolve_symbolic_literals(symbolic_literals)
     results = analyze_macros(
@@ -676,6 +871,7 @@ def simplify_macros(
         options=resolved_options,
         filename=filename,
         symbolic_literals=literals,
+        expand_macros=expand_macros,
     )
 
     if not rewrite:
