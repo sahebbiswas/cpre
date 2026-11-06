@@ -87,7 +87,7 @@ def test_a_run_of_three_is_one_finding_listing_both_later_blocks():
     (finding,) = _merges(source)
 
     assert _lines(finding) == (1, (5, 9))
-    assert "lines 5, 9" in finding.reason
+    assert "lines 5 and 9" in finding.reason
 
 
 def test_a_run_stops_at_a_block_with_another_condition():
@@ -550,10 +550,10 @@ def test_sarif_has_a_rule_and_related_locations(tmp_path, capsys):
     assert result["properties"]["kind"] == "mergeable_blocks"
     assert result["properties"]["fixConfidence"] == "exact"
     assert result["message"]["text"] == (
-        "the same condition is tested again at lines 5, 8; the blocks can be merged"
+        "the same condition is tested again at lines 5 and 8; the blocks can be merged"
     )
     (fix,) = result["fixes"]
-    assert fix["description"]["text"] == "Merge the blocks starting at lines 5, 8 into this one"
+    assert fix["description"]["text"] == "Merge the blocks starting at lines 5 and 8 into this one"
     (replacement,) = fix["artifactChanges"][0]["replacements"]
     assert replacement["deletedRegion"] == {
         "startLine": 3,
@@ -659,3 +659,49 @@ def test_a_long_definition_chain_is_walked_once_per_name_not_once_per_pair():
 
     assert [f.kind for f in result.findings] == [MERGEABLE]
     assert len(result.findings[0].related_locations) == 399
+
+
+# --- Conditions the rewrite must not move or repeat ------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # A name built by token pasting could form __LINE__ or __COUNTER__.
+        "#define P(a, b) a##b\n#if P(__LI, NE__)\n#endif\n#if P(__LI, NE__)\n#endif\n",
+        # A condition that expands to _Pragma would run it once instead of twice.
+        '#define PR _Pragma("once")\n#define M PR\n#if M\n#endif\n#if M\n#endif\n',
+        # A condition after the merged blocks tests its own line number, which the merge moves.
+        "#if A\n#endif\n#if A\n#endif\n#if __LINE__ > 100\n#endif\n",
+        "#define N __LINE__\n#if A\n#endif\n#if A\n#endif\n#if N > 100\n#endif\n",
+        "#if A\n#endif\n#if A\n#endif\n#if X\n#if __LINE__ > 100\n#endif\n#endif\n",
+        # A later condition that reaches a token-pasting macro could form __LINE__.
+        "#define P(a, b) a##b\n#if A\n#endif\n#if A\n#endif\n#if P(__LI, NE__) > 100\n#endif\n",
+    ],
+)
+def test_conditions_that_a_rewrite_would_move_or_repeat_are_not_reported(source):
+    assert _merges(source) == []
+
+
+def test_a_line_test_before_the_blocks_does_not_matter():
+    assert len(_merges("#if __LINE__ > 100\n#endif\n#if A\n#endif\n#if A\n#endif\n")) == 1
+
+
+def test_a_long_run_proves_each_pair_once_and_not_the_first_twice(monkeypatch):
+    # A run of three blocks has two pairs. The first pair's proof also starts the run, so
+    # it is not repeated to grow it.
+    from cpre import _block_rewrites
+
+    calls = []
+    original = _block_rewrites._Finder._relation
+
+    def counting(self, left, right):
+        calls.append((left, right))
+        return original(self, left, right)
+
+    monkeypatch.setattr(_block_rewrites._Finder, "_relation", counting)
+
+    result = cpre.analyze_source("#if A && B\n#endif\n#if B && A\n#endif\n#if A && B\n#endif\n")
+
+    assert [f.kind for f in result.findings] == [MERGEABLE]
+    assert len(calls) == 2

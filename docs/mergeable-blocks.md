@@ -42,11 +42,11 @@ A run is two or more sibling blocks (blocks in the same parent branch, or all at
 - **Plain blocks.** Each is an `#if`, `#ifdef` or `#ifndef` with no `#elif`, `#elifdef`, `#elifndef` or `#else`. A block with another branch is not a simple concatenation, so it is never reported.
 - **Only blank lines between.** The `#endif` of the first block is followed by the opening directive of the second with nothing but blank lines (spaces, tabs, form feeds and line breaks) in between. Any comment, code, or directive between them means the pair is not reported. So does a comment on that `#endif` line or on the second block's opening line: a merge would delete both directives and with them the comment. A comment on the *first* block's opening line, on the *last* block's `#endif`, or inside a body does not matter, because a merge keeps those.
 - **Equivalent conditions.** The two conditions are Boolean-equivalent. `A && B` matches `B && A`, `!(A || B)` matches `!A && !B`, and `#ifdef A` matches `#if defined(A)`. A name's *value* and its *definedness* are different tests, so `#if A` does not match `#ifdef A`.
-- **Only names and Boolean operators.** The conditions use names, `defined`, `!`, `&&` and `||`, and the names are only compared when the two conditions share at least one. A condition cpre treats as an opaque predicate (`A > 1`, `FOO(1)`, `__has_include(<x.h>)`) is not compared, and neither are `__LINE__` and `__COUNTER__`, whose value changes from one use to the next.
+- **Only names and Boolean operators.** The conditions use names, `defined`, `!`, `&&` and `||`, and the names are only compared when the two conditions share at least one. A condition cpre treats as an opaque predicate (`A > 1`, `FOO(1)`, `__has_include(<x.h>)`) is not compared, and neither are `__LINE__` and `__COUNTER__`, whose value changes from one use to the next, a name that a macro of the file builds with `##` (it could form one of them), or a `_Pragma` that expanding the condition would run.
 - **Reachable.** The opening branch of every block in the run is reachable. A dead or redundant block is reported as `DEAD` or `REDUNDANT` instead, and a block of a conditional that was [not analyzed](api.md#partial-results-and-incomplete-components) is never part of a run.
 - **A body that cannot change the condition.** The body of every block but the last holds no `#include`, `#include_next`, `#import`, `#pragma` or digraph directive (`%:`), no `_Pragma` operator (written directly or reached through a macro defined in the file), and no `#define` or `#undef` of a name the condition uses or that those names expand to in this file. Nested blocks count as part of the body. A header or a `push_macro`/`pop_macro` pragma can change any macro, and a `#define` or `#undef` of a name in the condition could make the second test come out differently than the first, so merging would change what the program means. A `#define` of an unrelated macro is fine.
 
-A run of three or more blocks is one finding that lists every later block.
+A run of three or more blocks is one finding that lists every later block. Adjacent blocks that test a condition and its *opposite* are a different finding; see [Complementary blocks](complementary-blocks.md).
 
 ### Macros defined in this file
 
@@ -58,7 +58,7 @@ Macros defined in a header or on the command line are not followed, as in the re
 
 ### Assumptions
 
-Macro assumptions can only remove a finding. A run found with assumptions is also found without them, so `depends_on_assumptions` is always `False`; a block that assumptions make dead or redundant is reported as `DEAD` or `REDUNDANT` instead.
+Macro assumptions can only remove a finding, and a run is reported only if its blocks are also reachable in the analysis without assumptions. A run found with assumptions is also found without them, so `depends_on_assumptions` is always `False`; a block that assumptions make dead or redundant is reported as `DEAD` or `REDUNDANT` instead.
 
 ## Output
 
@@ -99,3 +99,9 @@ line 1: merge with lines [5]
 | the condition contains a comparison or a function-like macro | It is an opaque predicate; cpre cannot show the two copies are equal. |
 | a block was reported as `DEAD` or `REDUNDANT` | Fix that first; it takes precedence. |
 | the file also reports an incomplete conditional | Blocks of an unanalyzed conditional are never reported. Raise the [limits](cli.md#resource-limits). |
+
+## Line numbers
+
+Applying the edit deletes lines, so the lines after it move up. That changes `__LINE__` in the code that follows and the line numbers in later compiler diagnostics. cpre treats the meaning of a rewrite as the preprocessed output apart from those numbers, so this alone does not stop a finding, but a project that depends on exact line numbers should review the diff.
+
+The one case that does stop it is a condition after the edit that depends on `__LINE__`, directly, through a macro of the file, or through a macro of the file that builds names by token pasting (which could form `__LINE__`): moving it could select another branch, so a finding before such a condition is not reported.

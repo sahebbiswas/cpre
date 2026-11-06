@@ -6,8 +6,9 @@ import re
 from collections.abc import Iterable, Iterator, Mapping
 from typing import TYPE_CHECKING
 
-from ._merging import MergeableRun as _MergeableRun
-from ._merging import find_mergeable_runs as _find_mergeable_runs
+from ._block_notes import block_note as _block_note
+from ._block_rewrites import BlockRewrite as _BlockRewrite
+from ._block_rewrites import find_block_rewrites as _find_block_rewrites
 from ._types import (
     AnalysisIncomplete,
     AnalysisOptions,
@@ -47,7 +48,14 @@ from .expressions import (
     format_expression,
 )
 from .lexer import logical_lines
-from .model import TRUE, ConditionalBranch, ConditionalGroup, ConditionalTree, Expression
+from .model import (
+    TRUE,
+    BlockSuggestion,
+    ConditionalBranch,
+    ConditionalGroup,
+    ConditionalTree,
+    Expression,
+)
 from .model import ConditionError as ModelConditionError
 from .parser import parse_source
 from .robdd import BDD
@@ -236,35 +244,76 @@ def _finding_for_branch(
     return tuple(findings)
 
 
-def _merge_findings(runs: list[_MergeableRun]) -> tuple[Finding, ...]:
-    """One finding per run of adjacent blocks that could be a single block."""
+def _baseline_groups(
+    groups: list[ConditionalGroup],
+    baseline: list[ConditionalGroup],
+    found: dict[int, ConditionalGroup],
+) -> dict[int, ConditionalGroup]:
+    """Pair each group with the group of the same place in the analysis without assumptions."""
+    for group, base in zip(groups, baseline, strict=False):
+        found[id(group)] = base
+        for branch, base_branch in zip(group.branches, base.branches, strict=False):
+            _baseline_groups(branch.children, base_branch.children, found)
+    return found
+
+
+def _holds_without_assumptions(
+    rewrite: _BlockRewrite, baseline: dict[int, ConditionalGroup]
+) -> bool:
+    """Whether every block a rewrite is about is reachable without the assumptions too.
+
+    The assumptions may only remove a rewrite. Without them ``defined(X)`` and ``X`` are one
+    test, so a block that is reachable only because the assumptions told them apart (and a
+    rewrite that rests on it) would be found with assumptions and not without.
+    """
+    for group in (rewrite.first, *rewrite.related):
+        base = baseline.get(id(group))
+        if base is None:
+            return False
+        opener = base.branches[0].analysis
+        if opener is None or opener.status != "reachable":
+            return False
+    return True
+
+
+def _rewrite_findings(rewrites: list[_BlockRewrite]) -> tuple[Finding, ...]:
+    """One finding per group of adjacent blocks that could be written with fewer blocks."""
     findings = []
-    for run in runs:
-        opener = run.first.branches[0]
-        lines = ", ".join(str(group.line) for group in run.later)
-        where = f"line {lines}" if len(run.later) == 1 else f"lines {lines}"
+    for rewrite in rewrites:
+        opener = rewrite.first.branches[0]
+        lines = tuple(group.line for group in rewrite.related)
         edit = SuggestedEdit(
             SourceRange(
-                start=SourceLocation(run.edit_start.line, run.edit_start.column),
-                end=SourceLocation(run.edit_end.line, run.edit_end.column),
+                start=SourceLocation(rewrite.edit_start.line, rewrite.edit_start.column),
+                end=SourceLocation(rewrite.edit_end.line, rewrite.edit_end.column),
             ),
-            run.replacement,
+            rewrite.replacement,
             FixConfidence.EXACT,
         )
         findings.append(
             Finding(
-                kind=FindingKind.MERGEABLE_BLOCKS,
-                location=SourceLocation(run.first.line),
+                kind=rewrite.kind,
+                location=SourceLocation(rewrite.first.line),
                 directive=opener.directive,
                 original_condition=opener.expression_text,
                 exact_simplification=None,
                 contextual_simplification=None,
-                reason=f"the same condition is tested again at {where}; the blocks can be merged",
+                reason=_block_note(rewrite.kind, lines),
                 edit=edit,
-                related_locations=tuple(SourceLocation(group.line) for group in run.later),
+                related_locations=tuple(SourceLocation(line) for line in lines),
             )
         )
     return tuple(findings)
+
+
+def _record_rewrites(rewrites: list[_BlockRewrite]) -> None:
+    """Mark the first block of each rewrite in the tree, for the text and JSON reports."""
+    for rewrite in rewrites:
+        lines = tuple(group.line for group in rewrite.related)
+        if rewrite.kind is FindingKind.MERGEABLE_BLOCKS:
+            rewrite.first.merge_with = lines
+        else:
+            rewrite.first.suggestions += (BlockSuggestion(rewrite.kind.value, lines),)
 
 
 def _incomplete_diagnostic(
@@ -447,9 +496,11 @@ def analyze_source(
         for index, group in enumerate(tree.groups):
             if main.group_components[index] in failures:
                 _engine_clear_analysis([group])
-        runs = _find_mergeable_runs(source, tree, limits=limits, budget=budget)
-        for run in runs:
-            run.first.merge_with = tuple(group.line for group in run.later)
+        rewrites = _find_block_rewrites(source, tree, limits=limits, budget=budget)
+        if baseline is not None:
+            paired = _baseline_groups(tree.groups, baseline.tree.groups, {})
+            rewrites = [item for item in rewrites if _holds_without_assumptions(item, paired)]
+        _record_rewrites(rewrites)
     except _AnalysisLimitExceeded as error:
         return _incomplete_result(
             source,
@@ -474,7 +525,7 @@ def analyze_source(
                     if main.group_components[index] not in failures
                     for finding in found
                 ),
-                *_merge_findings(runs),
+                *_rewrite_findings(rewrites),
             ),
             key=lambda finding: finding.location.line,
         )

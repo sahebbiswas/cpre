@@ -101,7 +101,7 @@ Without an output-format flag, cpre writes a human-readable report to stdout.
 cpre source.c
 ```
 
-The default report is filtered to branches that are dead, redundant, mergeable, or simplifiable. Use `--verbose` to include unchanged branches as well:
+The default report is filtered to branches that are dead, redundant, mergeable, complementary, or simplifiable. Use `--verbose` to include unchanged branches as well:
 
 ```bash
 cpre --verbose source.c
@@ -139,13 +139,14 @@ Summary  1 dead · 1 redundant · 1 simplifiable macro
 | --- | --- |
 | `DEAD` | The branch can never be selected. |
 | `REDUNDANT` | The condition is always true where it sits. |
+| `ELSE` | The block is followed directly by a block that tests the opposite condition, so the two could be one `#if`/`#else`. See [Complementary blocks](complementary-blocks.md). |
 | `MERGE` | The block is followed directly by one or more blocks that test the same condition, so they could be one block. See [Mergeable blocks](mergeable-blocks.md). |
 | `SIMPLIFY` | The branch (or macro) can be taken or used as is, and its condition has a shorter equivalent form. |
 | `REWRITTEN` | A macro that `simplify-macros --rewrite` rewrote. |
 | `INCOMPLETE` | A conditional that was not analyzed because a [resource limit](#resource-limits) was reached. |
 | `ok`, `skip` | Shown only with `--verbose`: an unchanged branch or macro, and a definition that is not a candidate for simplification. |
 
-The `│` guides show nesting: an entry indented under one belongs to the conditional above it, and an `ok` entry is listed only because a finding is nested inside it. Conditions in the `-` and `+` lines use cpre's normalized notation, in which `defined(X)` is written `X`. A `why` line gives the reason for a `DEAD` or `REDUNDANT` verdict, `opaque` lists comparisons cpre treats as opaque predicates, and with `--verbose` an `effective` line gives the condition together with everything that enclosing branches already imply. The closing `Summary` line totals the findings and is omitted when there are none. `--fail-on-findings` acts on dead and redundant branches, mergeable blocks and simplifiable macros; a `SIMPLIFY` condition is reported but never fails the run.
+The `│` guides show nesting: an entry indented under one belongs to the conditional above it, and an `ok` entry is listed only because a finding is nested inside it. Conditions in the `-` and `+` lines use cpre's normalized notation, in which `defined(X)` is written `X`. A `why` line gives the reason for a `DEAD` or `REDUNDANT` verdict, `opaque` lists comparisons cpre treats as opaque predicates, and with `--verbose` an `effective` line gives the condition together with everything that enclosing branches already imply. The closing `Summary` line totals the findings and is omitted when there are none. `--fail-on-findings` acts on dead and redundant branches, mergeable and complementary blocks and simplifiable macros; a `SIMPLIFY` condition is reported but never fails the run.
 
 When both conditionals and macros are reported, they are listed under `Conditionals` and `Macros` headings.
 
@@ -156,7 +157,7 @@ On a terminal the report is colored, with one meaning per color:
 | Color | Meaning |
 | --- | --- |
 | red | `DEAD`, and the "before" (`-`) side of a transformation |
-| yellow | `REDUNDANT`, `MERGE` and `INCOMPLETE` |
+| yellow | `REDUNDANT`, `MERGE`, `ELSE` and `INCOMPLETE` |
 | green | `SIMPLIFY`, `REWRITTEN`, and the "after" (`+`) side of a transformation; green is used for nothing else |
 | bold | the tokens that actually changed between the `-` and `+` lines |
 | cyan | headings, opaque predicates and the unresolved parts of a symbolic value |
@@ -190,7 +191,7 @@ cpre --recursive --json src
 Every `--json` document starts with a `schema` identifier (`cpre.analysis/1` here) and follows the conventions in [json-contract.md](json-contract.md), which also defines the compatibility policy.
 
 For a single non-directory input, stdout contains an object with:
-- `groups`: structural conditional-tree groups (or empty array if none/disabled). Each has `line`, `end_line`, `merge_with` (the opening lines of the blocks that can be merged into it, `[]` when none; see [Mergeable blocks](mergeable-blocks.md)) and `branches`. Groups of an incomplete component are not listed here.
+- `groups`: structural conditional-tree groups (or empty array if none/disabled). Each has `line`, `end_line`, `merge_with` (the opening lines of the blocks that can be merged into it, `[]` when none; see [Mergeable blocks](mergeable-blocks.md)), `suggestions` (other ways to write the block with fewer blocks, each `{kind, lines}`; see [Complementary blocks](complementary-blocks.md)) and `branches`. Groups of an incomplete component are not listed here.
 - `macros`: array of macro analysis results, each with `name`, `line`, `column`, `candidate`, `simplified`, `original` (the original replacement), `replacement` (the simplified replacement, or `null`), `equivalent`, `rewritable`, `reason`, `semantics`, and `symbolic_literals`.
 - The completeness of conditional analysis (all four fields are `null` when conditional analysis is disabled with `--no-conditionals`, because completeness is then unknown):
   - `complete`: `true` only if every conditional was analyzed.
@@ -220,7 +221,7 @@ See [SARIF output](sarif.md) for rule descriptors, fixes, notifications, and cod
 
 ## CI usage
 
-By default, findings do not make a successful analysis fail the process. Add `--fail-on-findings` when dead branches, redundant branches, mergeable blocks, or simplifiable macros should fail CI:
+By default, findings do not make a successful analysis fail the process. Add `--fail-on-findings` when dead branches, redundant branches, mergeable or complementary blocks, or simplifiable macros should fail CI:
 
 ```bash
 cpre --fail-on-findings source.c
@@ -242,7 +243,7 @@ The CLI uses these process statuses:
 | Status | Meaning |
 | --- | --- |
 | `0` | Normal completion. Findings may exist unless `--fail-on-findings` was requested. |
-| `1` | Normal completion with `--fail-on-findings`, and at least one dead or redundant branch, mergeable block, or simplifiable macro was found. For `cpre evaluate`: normal completion, and at least one item is unevaluable. |
+| `1` | Normal completion with `--fail-on-findings`, and at least one dead or redundant branch, mergeable or complementary block, or simplifiable macro was found. For `cpre evaluate`: normal completion, and at least one item is unevaluable. |
 | `2` | Source ingestion failed, analysis/preprocessing reasoning was incomplete for a source, or command-line/path validation failed. |
 | `3` | `cpre evaluate` only: normal completion, no item is unevaluable, and at least one item is symbolic (its value depends on a name the configuration does not settle). |
 | `130` | The run was interrupted with Ctrl-C. |

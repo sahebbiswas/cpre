@@ -1,28 +1,33 @@
-"""Adjacent conditional blocks that test one condition and could be a single block.
+"""Adjacent conditional blocks that could be written as fewer blocks.
 
 ``#if A ... #endif`` followed by ``#if A ... #endif`` with nothing but blank lines
-between them is one block written twice. This module finds such runs. It is deliberately
-conservative: a pair is only reported when merging it provably keeps the meaning, and
-anything it cannot prove (an opaque condition, a limit, a body that may change the
-condition) is left alone.
+between them is one block written twice, and ``#if A ... #endif`` followed by
+``#if !A ... #endif`` is one ``#if``/``#else`` block. This module finds both. It is
+deliberately conservative: a pair is only reported when rewriting it provably keeps the
+meaning, and anything it cannot prove (an opaque condition, a limit, a body that may
+change the condition) is left alone.
 
-Two sibling blocks are a mergeable pair when all of these hold:
+Two sibling blocks are a candidate pair when all of these hold:
 
 * each is a plain ``#if``/``#ifdef``/``#ifndef`` block, with no ``#elif`` or ``#else``;
 * both were analyzed and their opening branch is reachable (a dead or redundant block is
   reported as such, not as mergeable);
 * their conditions are built only from names, ``defined`` tests and ``!``/``&&``/``||``
-  (no opaque predicate) and are Boolean-equivalent, with ``X`` and ``defined(X)`` kept
-  apart because they are different tests;
+  (no opaque predicate), with ``X`` and ``defined(X)`` kept apart because they are
+  different tests, and are either Boolean-equivalent (the pair can be merged) or exact
+  complements (the pair can be one ``#if``/``#else``);
 * only blank lines separate the first block's ``#endif`` from the second block's opening
   directive, and neither of those two directives carries a comment;
 * the first block's body cannot change the condition: it holds no ``#include``,
   ``#pragma``, ``_Pragma``, digraph directive, or ``#define``/``#undef`` of a name the
   condition depends on (a nested block counts as part of the body);
-* nothing the condition depends on is volatile (``__LINE__``, ``__COUNTER__``), and when
-  the two conditions are written differently, no name they use is defined in this file
-  as anything but a single token or a parenthesized expression, because a replacement
-  list such as ``X || Y`` would change how the rewritten condition groups.
+* nothing the condition depends on is volatile (``__LINE__``, ``__COUNTER__``, a name built
+  by token pasting, or a ``_Pragma``), no condition after the rewrite depends on
+  ``__LINE__`` (the edit moves it), and when
+  the two conditions are written differently (always, for complements), no name they use
+  is defined in this file as anything but a single token or a parenthesized expression,
+  because a replacement list such as ``X || Y`` would change how a negated or regrouped
+  condition reads.
 
 "Depends on" follows the ``#define`` directives of this file: a name is replaced by the
 names its replacement list mentions, repeatedly. Macros defined elsewhere (a header, a
@@ -38,6 +43,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import cached_property
 
+from ._types import FindingKind
 from .expressions import expression_atoms_in_order
 from .lexer import lex, macro_name, strip_comments
 from .model import (
@@ -80,17 +86,22 @@ _SINGLE_TOKEN = re.compile(r"(?:[A-Za-z_]\w*|[0-9][\w']*)?\Z")
 
 
 @dataclass(frozen=True)
-class MergeableRun:
-    """Two or more sibling blocks that could be one block.
+class BlockRewrite:
+    """A group of adjacent sibling blocks that can be written with fewer blocks.
 
-    ``first`` is the block the others would be merged into; ``later`` are the blocks that
-    follow it, in source order. Merging replaces the physical range from ``edit_start`` to
-    ``edit_end`` (the first block's ``#endif`` through the last block's opening directive)
-    with ``replacement``, the bodies of the blocks in between.
+    ``kind`` says which rewrite applies. ``first`` is the block the rewrite is anchored at;
+    ``related`` are the other blocks involved, in source order. The rewrite replaces the
+    physical range from ``edit_start`` to ``edit_end`` with ``replacement``:
+
+    * ``MERGEABLE_BLOCKS``: from the first block's ``#endif`` through the last block's
+      opening directive, with the bodies of the blocks in between;
+    * ``COMPLEMENTARY_BLOCKS``: from the first block's ``#endif`` through the second
+      block's opening directive (and its line break), with ``#else`` and that line break.
     """
 
+    kind: FindingKind
     first: ConditionalGroup
-    later: tuple[ConditionalGroup, ...]
+    related: tuple[ConditionalGroup, ...]
     edit_start: StructuralSourceLocation
     edit_end: StructuralSourceLocation
     replacement: str
@@ -187,9 +198,10 @@ class _Finder:
         budget: AnalysisBudget,
     ) -> None:
         self._source = source
+        self._line_sensitive: int | None = None
         self._limits = limits
         self._budget = budget
-        self.runs: list[MergeableRun] = []
+        self.rewrites: list[BlockRewrite] = []
 
     # These are needed only once a pair has passed the cheaper checks, and most sources have
     # no such pair, so they are computed on first use.
@@ -252,6 +264,53 @@ class _Finder:
         """The union of each name's closure; each closure is computed once per file."""
         return frozenset().union(*(self._closure(name) for name in names))
 
+    def _inert(self, depends_on: frozenset[str]) -> bool:
+        """Whether testing these names once, twice or on another line cannot matter.
+
+        That fails for the built-ins whose value changes from use to use, for a name that a
+        macro of this file builds by token pasting (it could form one of them), and for a
+        ``_Pragma`` that expanding the names would run.
+        """
+        if not depends_on.isdisjoint(_VOLATILE_NAMES):
+            return False
+        if _PRAGMA_OPERATOR in depends_on or not depends_on.isdisjoint(self._pragma_macros):
+            return False
+        _, definitions, _ = self._directives
+        return not any("##" in text for name in depends_on for text in definitions.get(name, ()))
+
+    def _last_line_sensitive_offset(self, structure: ConditionalStructureTree) -> int:
+        """The offset of the last condition whose value could depend on its line number.
+
+        That is a condition reaching ``__LINE__`` through the macros of this file, or one
+        reaching a macro this file builds by token pasting (it could form ``__LINE__``).
+        Computed once per file; -1 when there is none.
+        """
+        if self._line_sensitive is None:
+            _, definitions, _ = self._directives
+            last = -1
+            for directive in structure.directives:
+                names = frozenset(_IDENTIFIER.findall(directive.logical_condition or ""))
+                depends_on = self._dependencies(names)
+                pastes = any(
+                    "##" in text for name in depends_on for text in definitions.get(name, ())
+                )
+                if "__LINE__" in depends_on or pastes:
+                    last = max(last, directive.source_range.start.offset)
+            self._line_sensitive = last
+        return self._line_sensitive
+
+    def shifts_a_line_test(
+        self, rewrite: BlockRewrite, structure: ConditionalStructureTree
+    ) -> bool:
+        """Whether a condition after the rewrite could depend on its own line number.
+
+        A rewrite that deletes lines moves everything after it up, so a later ``#if`` that
+        tests ``__LINE__`` could select another branch. The check also stops at a later
+        condition that reaches a token-pasting macro of this file, since that could form
+        ``__LINE__``. (Other uses of ``__LINE__`` change only the numbers in the output.)
+        """
+        return self._last_line_sensitive_offset(structure) > rewrite.edit_start.offset
+
     # --- evidence about one pair -----------------------------------------------------
 
     def _gap_is_blank(self, earlier: ConditionalBlock, later: ConditionalBlock) -> bool:
@@ -293,24 +352,30 @@ class _Finder:
             identifier in pragma for identifier in _IDENTIFIER.findall(self._plain[start:end])
         )
 
-    def _equivalent(self, left: Expression, right: Expression) -> bool:
+    def _relation(self, left: Expression, right: Expression) -> FindingKind | None:
+        """How ``right`` relates to ``left``: the same test, its complement, or neither."""
         if left == right:
-            return True
+            return FindingKind.MERGEABLE_BLOCKS
+        if Negation(left) == right or left == Negation(right):
+            return FindingKind.COMPLEMENTARY_BLOCKS
         left_atoms = list(dict.fromkeys(expression_atoms_in_order(left)))
         right_atoms = list(dict.fromkeys(expression_atoms_in_order(right)))
         if set(left_atoms).isdisjoint(right_atoms):
             # Neither condition is constant (a constant block is dead or redundant), so two
-            # conditions that share no test cannot be equal. This also keeps unrelated
-            # neighbours from spending the shared analysis work.
-            return False
+            # conditions that share no test cannot be equal or complementary. This also
+            # keeps unrelated neighbours from spending the shared analysis work.
+            return None
         atoms = list(dict.fromkeys([*left_atoms, *right_atoms]))
         try:
             bdd = BDD(atoms, limits=self._limits, budget=self._budget)
-            return bdd.equivalent_under(TRUE, left, right)
+            if bdd.equivalent_under(TRUE, left, right):
+                return FindingKind.MERGEABLE_BLOCKS
+            if bdd.equivalent_under(TRUE, left, Negation(right)):
+                return FindingKind.COMPLEMENTARY_BLOCKS
         except AnalysisLimitExceeded as error:
             if error.resource == "work":
                 raise
-            return False
+        return None
 
     # --- one sibling list --------------------------------------------------------------
 
@@ -323,45 +388,50 @@ class _Finder:
             return None
         return opener
 
-    def _pair_is_mergeable(
+    def _pair_relation(
         self,
         first: tuple[ConditionalGroup, ConditionalBlock],
         second: tuple[ConditionalGroup, ConditionalBlock],
-    ) -> bool:
+    ) -> FindingKind | None:
+        """Which rewrite, if any, the two adjacent blocks allow."""
         (first_group, first_block), (second_group, second_block) = first, second
         if first_block.endif is None or second_block.endif is None:
-            return False
+            return None
         if len(first_block.branches) != 1 or len(second_block.branches) != 1:
-            return False
+            return None
         if self._opener(first_group) is None or self._opener(second_group) is None:
-            return False
+            return None
         first_directive = first_block.branches[0].directive
         second_directive = second_block.branches[0].directive
         left, right = first_directive.condition, second_directive.condition
         if left is None or right is None:
-            return False
+            return None
         left_names, right_names = _boolean_names(left), _boolean_names(right)
         if left_names is None or right_names is None:
-            return False
+            return None
         if not self._gap_is_blank(first_block, second_block):
-            return False
+            return None
         if not self._junction_is_comment_free(first_block, second_block):
-            return False
+            return None
         depends_on = self._dependencies(left_names | right_names)
-        if not depends_on.isdisjoint(_VOLATILE_NAMES):
-            return False
+        if not self._inert(depends_on):
+            return None
+        if not self._body_is_safe(first_block, depends_on):
+            return None
         same_text = " ".join((first_directive.logical_condition or "").split()) == " ".join(
             (second_directive.logical_condition or "").split()
         )
+        # Two different conditions are regrouped by a rewrite (equal text cannot be a
+        # complement), so none may depend on a name that is unsafe to regroup. Deciding that
+        # first spares the equivalence check for a pair that could never be reported.
         if not same_text and not depends_on.isdisjoint(self._directives[2]):
-            return False
-        if not self._body_is_safe(first_block, depends_on):
-            return False
-        return self._equivalent(left, right)
+            return None
+        relation = self._relation(left, right)
+        return relation
 
-    def _run(
+    def _merge_rewrite(
         self, groups: Sequence[ConditionalGroup], blocks: Sequence[ConditionalBlock]
-    ) -> MergeableRun:
+    ) -> BlockRewrite:
         """The run of ``groups`` and the single edit that merges it."""
         first, last = blocks[0], blocks[-1]
         assert first.endif is not None
@@ -376,7 +446,29 @@ class _Finder:
             for block in blocks[1:-1]
             if block.endif is not None
         )
-        return MergeableRun(groups[0], tuple(groups[1:]), start, end, replacement)
+        return BlockRewrite(
+            FindingKind.MERGEABLE_BLOCKS, groups[0], tuple(groups[1:]), start, end, replacement
+        )
+
+    def _else_rewrite(
+        self, groups: Sequence[ConditionalGroup], blocks: Sequence[ConditionalBlock]
+    ) -> BlockRewrite:
+        """The pair of ``groups`` and the edit that turns it into one ``#if``/``#else``."""
+        first, second = blocks
+        assert first.endif is not None
+        # The edit starts at the line start of the first ``#endif`` and keeps that line's
+        # indentation and line break for the ``#else`` that stands in its place.
+        text = first.endif.source_range.text(self._source)
+        newline = next((mark for mark in ("\r\n", "\n", "\r") if text.endswith(mark)), "")
+        indent = text[: len(text) - len(text.lstrip())]
+        return BlockRewrite(
+            FindingKind.COMPLEMENTARY_BLOCKS,
+            groups[0],
+            (groups[1],),
+            first.endif.source_range.start,
+            second.branches[0].directive.source_range.end,
+            f"{indent}#else{newline}",
+        )
 
     def _scan_siblings(
         self,
@@ -387,14 +479,33 @@ class _Finder:
             return  # The two parsers disagree about the shape; report nothing here.
         start = 0
         while start < len(groups):
-            end = start
-            while end + 1 < len(groups) and self._pair_is_mergeable(
-                (groups[end], blocks[end]), (groups[end + 1], blocks[end + 1])
-            ):
-                end += 1
-            if end > start:
-                self.runs.append(self._run(groups[start : end + 1], blocks[start : end + 1]))
-            start = end + 1
+            relation = (
+                self._pair_relation(
+                    (groups[start], blocks[start]), (groups[start + 1], blocks[start + 1])
+                )
+                if start + 1 < len(groups)
+                else None
+            )
+            if relation is FindingKind.COMPLEMENTARY_BLOCKS:
+                self.rewrites.append(
+                    self._else_rewrite(groups[start : start + 2], blocks[start : start + 2])
+                )
+                start += 2
+            elif relation is FindingKind.MERGEABLE_BLOCKS:
+                end = start + 1  # The first pair was just proved; only the next ones are new.
+                while end + 1 < len(groups) and (
+                    self._pair_relation(
+                        (groups[end], blocks[end]), (groups[end + 1], blocks[end + 1])
+                    )
+                    is FindingKind.MERGEABLE_BLOCKS
+                ):
+                    end += 1
+                self.rewrites.append(
+                    self._merge_rewrite(groups[start : end + 1], blocks[start : end + 1])
+                )
+                start = end + 1
+            else:
+                start += 1
         for group, block in zip(groups, blocks, strict=True):
             self._scan_branches(group, block)
 
@@ -405,18 +516,19 @@ class _Finder:
             self._scan_siblings(branch.children, structural.children)
 
 
-def find_mergeable_runs(
+def find_block_rewrites(
     source: str,
     tree: ConditionalTree,
     *,
     limits: ResourceLimits,
     budget: AnalysisBudget,
     structure: ConditionalStructureTree | None = None,
-) -> list[MergeableRun]:
-    """The runs of adjacent sibling blocks in ``tree`` that could each be one block.
+) -> list[BlockRewrite]:
+    """The adjacent sibling blocks in ``tree`` that could be written with fewer blocks.
 
     ``tree`` must be the analyzed tree of ``source``. Blocks that were not analyzed (a
-    resource limit stopped their component) are never part of a run. Exhausting the shared
+    resource limit stopped their component) are never part of a run. A rewrite is dropped
+    when a condition after it depends on ``__LINE__``. Exhausting the shared
     work budget raises :class:`AnalysisLimitExceeded`; any other limit only means that one
     pair is not reported.
     """
@@ -425,7 +537,7 @@ def find_mergeable_runs(
         return []
     finder = _Finder(source, limits, budget)
     finder._scan_siblings(tree.groups, structure.blocks)
-    return finder.runs
+    return [item for item in finder.rewrites if not finder.shifts_a_line_test(item, structure)]
 
 
-__all__ = ["MergeableRun", "find_mergeable_runs"]
+__all__ = ["BlockRewrite", "find_block_rewrites"]

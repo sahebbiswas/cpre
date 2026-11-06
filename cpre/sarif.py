@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
 
+from ._block_notes import where as block_where
 from ._types import (
     AnalysisIncomplete,
     AnalysisResult,
@@ -66,6 +67,16 @@ _RULES: tuple[dict[str, object], ...] = (
         },
         "defaultConfiguration": {"level": "warning"},
     },
+    {
+        "id": "CPRE006",
+        "name": "complementary-blocks",
+        "shortDescription": {"text": "Adjacent conditional blocks can be one #if/#else"},
+        "fullDescription": {
+            "text": "Adjacent conditional blocks test a condition and its opposite with only "
+            "blank lines between them, so they can be one block with an #else."
+        },
+        "defaultConfiguration": {"level": "warning"},
+    },
 )
 
 _RULE_INDEX = {str(rule["id"]): index for index, rule in enumerate(_RULES)}
@@ -75,6 +86,15 @@ _RULE_FOR_KIND = {
     FindingKind.SIMPLIFIABLE_CONDITION: ("CPRE003", "note"),
     FindingKind.CONTEXTUAL_SIMPLIFICATION: ("CPRE004", "note"),
     FindingKind.MERGEABLE_BLOCKS: ("CPRE005", "warning"),
+    FindingKind.COMPLEMENTARY_BLOCKS: ("CPRE006", "warning"),
+}
+
+# Findings about several adjacent blocks: located at the first block, with the others as
+# related locations, rather than at the edit.
+_BLOCK_KINDS = frozenset({FindingKind.MERGEABLE_BLOCKS, FindingKind.COMPLEMENTARY_BLOCKS})
+_RELATED_MESSAGES = {
+    FindingKind.MERGEABLE_BLOCKS: "Block that can be merged into the first one",
+    FindingKind.COMPLEMENTARY_BLOCKS: "Block that can become the #else of the first one",
 }
 
 _NOTIFICATION_DESCRIPTIONS = {
@@ -137,7 +157,7 @@ def _region(source_range: SourceRange) -> dict[str, int]:
 
 
 def _finding_region(finding: Finding) -> dict[str, int]:
-    if finding.edit is not None and finding.kind is not FindingKind.MERGEABLE_BLOCKS:
+    if finding.edit is not None and finding.kind not in _BLOCK_KINDS:
         return _region(finding.edit.range)
     region = {"startLine": finding.location.line}
     if finding.location.column is not None:
@@ -146,7 +166,7 @@ def _finding_region(finding: Finding) -> dict[str, int]:
 
 
 def _message(finding: Finding) -> str:
-    if finding.kind is FindingKind.MERGEABLE_BLOCKS:
+    if finding.kind in _BLOCK_KINDS:
         return finding.reason
     replacement = None
     if finding.edit is not None:
@@ -162,9 +182,10 @@ def _message(finding: Finding) -> str:
 
 def _fix_description(finding: Finding) -> str:
     assert finding.edit is not None
-    if finding.kind is FindingKind.MERGEABLE_BLOCKS:
-        lines = ", ".join(str(item.line) for item in finding.related_locations)
-        where = f"line {lines}" if len(finding.related_locations) == 1 else f"lines {lines}"
+    if finding.kind in _BLOCK_KINDS:
+        where = block_where([item.line for item in finding.related_locations])
+        if finding.kind is FindingKind.COMPLEMENTARY_BLOCKS:
+            return f"Make the block starting at {where} the #else of this one"
         return f"Merge the blocks starting at {where} into this one"
     return f"Replace condition with {finding.edit.replacement}"
 
@@ -224,7 +245,7 @@ def _finding_result(finding: Finding, filename: str | None) -> dict[str, object]
                     "artifactLocation": {"uri": uri},
                     "region": {"startLine": location.line},
                 },
-                "message": {"text": "Block that can be merged into the first one"},
+                "message": {"text": _RELATED_MESSAGES[finding.kind]},
             }
             for index, location in enumerate(finding.related_locations)
         ]

@@ -11,6 +11,7 @@ Use this index to choose the guide that matches your integration surface.
 - [Python API integration](api.md) — the public API index and typical setups, public symbolic expressions/algebra/interchange, `analyze_source()`, structured findings, simplifications, edits, errors, resource limits, and compatibility expectations.
 - [Exact Boolean queries and witnesses](boolean-queries.md) — satisfiability, implication/equivalence proofs, exact simplification, deterministic witnesses, and explicit incomplete-result semantics.
 - [Macro Boolean simplification](macro-simplification.md) — bounded ROBDD reasoning for object-like `#define` replacement lists, conservative candidate classification, opt-in symbolic-literal mode, opt-in expansion of referenced macros, and semantic equivalence proofs.
+- [Complementary blocks](complementary-blocks.md) — the `ELSE` finding for adjacent blocks that test a condition and its opposite, which are one `#if`/`#else` block, with the suggested edit.
 - [Mergeable blocks](mergeable-blocks.md) — the `MERGE` finding for adjacent blocks that test the same condition: what counts, what blocks it, and how it appears in text, JSON, SARIF and the Python API.
 - [Lossless conditional structure](conditional-structure.md) — `parse_conditionals()`, exact physical ranges, nested branches, recovery diagnostics, and source-preserving downstream integration.
 - [Concrete preprocessing](preprocessing.md) — `preprocess_source()`, canonical output, source mappings, macro state, compact output, deterministic context, and downstream parser integration.

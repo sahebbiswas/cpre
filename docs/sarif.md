@@ -20,8 +20,9 @@ A single CLI invocation produces one SARIF run, including batch and recursive sc
 | `CPRE003` | globally simplifiable condition |
 | `CPRE004` | contextually simplifiable condition |
 | `CPRE005` | adjacent blocks that test the same condition and could be merged ([details](mergeable-blocks.md)) |
+| `CPRE006` | adjacent blocks that test a condition and its opposite and could be one `#if`/`#else` ([details](complementary-blocks.md)) |
 
-Dead branches, redundant branches and mergeable blocks are emitted at SARIF `warning` level. Simplification findings are emitted at `note` level. A `CPRE005` result is located at the first block's opening directive and carries a `relatedLocations` entry for the opening directive of each block that can be merged into it. Each result's `ruleIndex` is derived from the matching descriptor position in `tool.driver.rules`, so rule references remain consistent if descriptor ordering changes.
+Dead branches, redundant branches, mergeable blocks and complementary blocks are emitted at SARIF `warning` level. Simplification findings are emitted at `note` level. A `CPRE005` or `CPRE006` result is located at the first block's opening directive and carries a `relatedLocations` entry for the opening directive of each block that can be merged into it (or that can become its `#else`). Each result's `ruleIndex` is derived from the matching descriptor position in `tool.driver.rules`, so rule references remain consistent if descriptor ordering changes.
 
 When a `Finding` contains a structured `SuggestedEdit`, the SARIF result includes a corresponding `fix` with the precise physical source range and replacement text. A `CPRE005` result has such a fix: it deletes the junction between the blocks and joins their bodies. Dead and redundant branches do not receive synthesized deletion fixes.
 

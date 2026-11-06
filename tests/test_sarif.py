@@ -27,6 +27,7 @@ def test_sarif_log_has_github_compatible_shape_and_rules():
         "CPRE003",
         "CPRE004",
         "CPRE005",
+        "CPRE006",
     ]
     assert run["invocations"] == [{"executionSuccessful": True}]
 
