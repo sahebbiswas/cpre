@@ -6,6 +6,8 @@ import re
 from collections.abc import Iterable, Iterator, Mapping
 from typing import TYPE_CHECKING
 
+from ._merging import MergeableRun as _MergeableRun
+from ._merging import find_mergeable_runs as _find_mergeable_runs
 from ._types import (
     AnalysisIncomplete,
     AnalysisOptions,
@@ -234,6 +236,37 @@ def _finding_for_branch(
     return tuple(findings)
 
 
+def _merge_findings(runs: list[_MergeableRun]) -> tuple[Finding, ...]:
+    """One finding per run of adjacent blocks that could be a single block."""
+    findings = []
+    for run in runs:
+        opener = run.first.branches[0]
+        lines = ", ".join(str(group.line) for group in run.later)
+        where = f"line {lines}" if len(run.later) == 1 else f"lines {lines}"
+        edit = SuggestedEdit(
+            SourceRange(
+                start=SourceLocation(run.edit_start.line, run.edit_start.column),
+                end=SourceLocation(run.edit_end.line, run.edit_end.column),
+            ),
+            run.replacement,
+            FixConfidence.EXACT,
+        )
+        findings.append(
+            Finding(
+                kind=FindingKind.MERGEABLE_BLOCKS,
+                location=SourceLocation(run.first.line),
+                directive=opener.directive,
+                original_condition=opener.expression_text,
+                exact_simplification=None,
+                contextual_simplification=None,
+                reason=f"the same condition is tested again at {where}; the blocks can be merged",
+                edit=edit,
+                related_locations=tuple(SourceLocation(group.line) for group in run.later),
+            )
+        )
+    return tuple(findings)
+
+
 def _incomplete_diagnostic(
     error: _AnalysisLimitExceeded, component: int | None = None
 ) -> AnalysisIncomplete:
@@ -410,6 +443,13 @@ def analyze_source(
                     raise
                 failures[component] = error
                 group_findings.append(())
+        # Blocks of a failed component are cleared first: they are never part of a run.
+        for index, group in enumerate(tree.groups):
+            if main.group_components[index] in failures:
+                _engine_clear_analysis([group])
+        runs = _find_mergeable_runs(source, tree, limits=limits, budget=budget)
+        for run in runs:
+            run.first.merge_with = tuple(group.line for group in run.later)
     except _AnalysisLimitExceeded as error:
         return _incomplete_result(
             source,
@@ -426,10 +466,18 @@ def analyze_source(
         raise _translate_parse_error(error, filename) from error
 
     findings = tuple(
-        finding
-        for index, found in enumerate(group_findings)
-        if main.group_components[index] not in failures
-        for finding in found
+        sorted(
+            (
+                *(
+                    finding
+                    for index, found in enumerate(group_findings)
+                    if main.group_components[index] not in failures
+                    for finding in found
+                ),
+                *_merge_findings(runs),
+            ),
+            key=lambda finding: finding.location.line,
+        )
     )
     failed_groups: dict[int, list[ConditionalGroup]] = {}
     for index, group in enumerate(tree.groups):

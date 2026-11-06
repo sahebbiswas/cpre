@@ -56,6 +56,16 @@ _RULES: tuple[dict[str, object], ...] = (
         },
         "defaultConfiguration": {"level": "note"},
     },
+    {
+        "id": "CPRE005",
+        "name": "mergeable-blocks",
+        "shortDescription": {"text": "Adjacent conditional blocks can be merged"},
+        "fullDescription": {
+            "text": "Adjacent conditional blocks test the same condition with only blank lines "
+            "between them, so they can be one block."
+        },
+        "defaultConfiguration": {"level": "warning"},
+    },
 )
 
 _RULE_INDEX = {str(rule["id"]): index for index, rule in enumerate(_RULES)}
@@ -64,6 +74,7 @@ _RULE_FOR_KIND = {
     FindingKind.REDUNDANT_BRANCH: ("CPRE002", "warning"),
     FindingKind.SIMPLIFIABLE_CONDITION: ("CPRE003", "note"),
     FindingKind.CONTEXTUAL_SIMPLIFICATION: ("CPRE004", "note"),
+    FindingKind.MERGEABLE_BLOCKS: ("CPRE005", "warning"),
 }
 
 _NOTIFICATION_DESCRIPTIONS = {
@@ -126,7 +137,7 @@ def _region(source_range: SourceRange) -> dict[str, int]:
 
 
 def _finding_region(finding: Finding) -> dict[str, int]:
-    if finding.edit is not None:
+    if finding.edit is not None and finding.kind is not FindingKind.MERGEABLE_BLOCKS:
         return _region(finding.edit.range)
     region = {"startLine": finding.location.line}
     if finding.location.column is not None:
@@ -135,6 +146,8 @@ def _finding_region(finding: Finding) -> dict[str, int]:
 
 
 def _message(finding: Finding) -> str:
+    if finding.kind is FindingKind.MERGEABLE_BLOCKS:
+        return finding.reason
     replacement = None
     if finding.edit is not None:
         replacement = finding.edit.replacement
@@ -147,12 +160,21 @@ def _message(finding: Finding) -> str:
     return f"{finding.reason}. Suggested condition: {replacement}"
 
 
+def _fix_description(finding: Finding) -> str:
+    assert finding.edit is not None
+    if finding.kind is FindingKind.MERGEABLE_BLOCKS:
+        lines = ", ".join(str(item.line) for item in finding.related_locations)
+        where = f"line {lines}" if len(finding.related_locations) == 1 else f"lines {lines}"
+        return f"Merge the blocks starting at {where} into this one"
+    return f"Replace condition with {finding.edit.replacement}"
+
+
 def _fix(finding: Finding, uri: str) -> list[dict[str, object]] | None:
     if finding.edit is None:
         return None
     return [
         {
-            "description": {"text": f"Replace condition with {finding.edit.replacement}"},
+            "description": {"text": _fix_description(finding)},
             "artifactChanges": [
                 {
                     "artifactLocation": {"uri": uri},
@@ -194,6 +216,18 @@ def _finding_result(finding: Finding, filename: str | None) -> dict[str, object]
     }
     if finding.original_condition is not None:
         properties["originalCondition"] = finding.original_condition
+    if finding.related_locations:
+        result["relatedLocations"] = [
+            {
+                "id": index,
+                "physicalLocation": {
+                    "artifactLocation": {"uri": uri},
+                    "region": {"startLine": location.line},
+                },
+                "message": {"text": "Block that can be merged into the first one"},
+            }
+            for index, location in enumerate(finding.related_locations)
+        ]
     if finding.edit is not None:
         properties["fixConfidence"] = finding.edit.confidence.value
         result["fixes"] = _fix(finding, uri)

@@ -40,6 +40,15 @@ def branch_is_notable(branch: ConditionalBranch) -> bool:
     return branch.analysis.status in {"dead", "redundant"} or branch_differs_from_source(branch)
 
 
+def merge_note(group: ConditionalGroup) -> str:
+    """Why ``group`` is reported as mergeable: where the following blocks start."""
+    lines = group.merge_with
+    if len(lines) == 1:
+        return f"the same condition is tested again at line {lines[0]}; the blocks can be merged"
+    where = ", ".join(str(line) for line in lines[:-1]) + f" and {lines[-1]}"
+    return f"the same condition is tested again at lines {where}; the blocks can be merged"
+
+
 def analyzed(group: ConditionalGroup) -> bool:
     """Whether ``group`` was analyzed; groups of an incomplete component are not."""
     return all(branch.analysis is not None for branch in group.branches)
@@ -62,8 +71,8 @@ def compute_visibility(tree: ConditionalTree, verbose: bool) -> Visibility:
         if not analyzed(group):
             return False
         group_visible = False
-        for branch in group.branches:
-            notable = branch_is_notable(branch)
+        for index, branch in enumerate(group.branches):
+            notable = branch_is_notable(branch) or (index == 0 and bool(group.merge_with))
             child_visible = False
             for child in branch.children:
                 child_visible = visit_group(child) or child_visible
@@ -128,6 +137,7 @@ def group_dict(group: ConditionalGroup, visibility: Visibility) -> dict[str, obj
     return {
         "line": group.line,
         "end_line": group.end_line,
+        "merge_with": list(group.merge_with),
         "branches": [
             branch_dict(branch, visibility)
             for branch in group.branches
@@ -255,12 +265,15 @@ def text_lines(
     guides = style.paint(style.guide * depth, "dim")
     detail = guides + "  "
     for group in groups:
-        for branch in group.branches:
+        for index, branch in enumerate(group.branches):
             if id(branch) not in visibility.branches:
                 continue
             assert branch.analysis is not None
             analysis = branch.analysis
             label, role = branch_kind(branch)
+            merges = index == 0 and bool(group.merge_with)
+            if merges and role in {"ok", "simplify"}:
+                label, role = "MERGE", "merge"
             shown_text = compact_whitespace(branch.expression_text or "")
             condition = f" {shown_text}" if shown_text else ""
             yield (
@@ -274,6 +287,8 @@ def text_lines(
                 continue
             if analysis.reason:
                 yield f"{detail}{style.paint('why', 'dim')}  {analysis.reason}"
+            if merges:
+                yield f"{detail}{style.paint('merge', 'dim')}  {merge_note(group)}"
             source = format_expression(branch.expression) if branch.expression is not None else None
             shown = source
             if source is not None and analysis.simplified is not None:
@@ -335,12 +350,15 @@ class FindingCounts:
 
     ``failing`` is what ``--fail-on-findings`` acts on; ``simplifiable`` counts reachable
     conditions that have a shorter equivalent form, which are reported but never fail a run.
+    ``mergeable`` counts runs of adjacent blocks that test one condition and could be a
+    single block.
     """
 
     dead: int = 0
     redundant: int = 0
     simplifiable: int = 0
     macros: int = 0
+    mergeable: int = 0
 
     def __add__(self, other: FindingCounts) -> FindingCounts:
         return FindingCounts(
@@ -348,11 +366,12 @@ class FindingCounts:
             self.redundant + other.redundant,
             self.simplifiable + other.simplifiable,
             self.macros + other.macros,
+            self.mergeable + other.mergeable,
         )
 
     @property
     def failing(self) -> int:
-        return self.dead + self.redundant + self.macros
+        return self.dead + self.redundant + self.macros + self.mergeable
 
     @property
     def total(self) -> int:
@@ -365,6 +384,8 @@ def count_findings(tree: ConditionalTree) -> FindingCounts:
     for group in tree.groups:
         if not analyzed(group):
             continue
+        if group.merge_with:
+            counts += FindingCounts(mergeable=1)
         for branch in group.branches:
             assert branch.analysis is not None
             status = branch.analysis.status
@@ -382,6 +403,8 @@ def has_findings(tree: ConditionalTree) -> bool:
     for group in tree.groups:
         if not analyzed(group):
             continue
+        if group.merge_with:
+            return True
         for branch in group.branches:
             assert branch.analysis is not None
             if branch.analysis.status in {"dead", "redundant"}:
@@ -407,6 +430,7 @@ __all__ = [
     "format_report",
     "has_findings",
     "label_width",
+    "merge_note",
     "line_label",
     "render_report",
     "text_lines",

@@ -39,6 +39,7 @@ class FindingKind(str, Enum):
     REDUNDANT_BRANCH = "redundant_branch"
     SIMPLIFIABLE_CONDITION = "simplifiable_condition"
     CONTEXTUAL_SIMPLIFICATION = "contextual_simplification"
+    MERGEABLE_BLOCKS = "mergeable_blocks"
 
 
 class FixConfidence(str, Enum):
@@ -283,6 +284,11 @@ class Finding:
     materially changed the status or simplification proof that produced this
     finding. This lets downstream analyzers distinguish universal diagnostics
     from configuration-specific ones.
+
+    ``related_locations`` lists further locations the finding is about. A
+    :attr:`FindingKind.MERGEABLE_BLOCKS` finding sits at the opening directive of
+    the first block of a run and lists the opening directive of every block that
+    could be merged into it; it is empty for every other kind.
     """
 
     kind: FindingKind
@@ -295,6 +301,7 @@ class Finding:
     opaque_predicates: tuple[str, ...] = ()
     edit: SuggestedEdit | None = None
     depends_on_assumptions: bool = False
+    related_locations: tuple[SourceLocation, ...] = ()
 
     @property
     def simplified_condition(self) -> str | None:

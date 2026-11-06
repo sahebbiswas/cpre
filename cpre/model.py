@@ -179,9 +179,18 @@ class ConditionalBranch:
 
 @dataclass
 class ConditionalGroup:
+    """One ``#if`` ... ``#endif`` block with its ``#elif``/``#else`` branches.
+
+    ``merge_with`` holds the opening lines of the sibling blocks that directly follow this
+    one with only blank lines between them and test an equivalent condition, so the whole
+    run could be one block. It is set by :func:`cpre.analyze_source`, on the first block
+    of a run, and is empty everywhere else.
+    """
+
     line: int
     end_line: int | None = None
     branches: list[ConditionalBranch] = field(default_factory=list)
+    merge_with: tuple[int, ...] = ()
 
 
 @dataclass
