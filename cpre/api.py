@@ -270,18 +270,36 @@ def _holds_without_assumptions(
         base = baseline.get(id(group))
         if base is None:
             return False
+        if rewrite.branches:
+            continue  # A join is about its own branches (below), not the block's opener.
         opener = base.branches[0].analysis
         if opener is None or opener.status != "reachable":
             return False
+    if rewrite.branches:
+        base = baseline[id(rewrite.first)]
+        for branch in rewrite.branches:
+            index = rewrite.first.branches.index(branch)
+            analysis = base.branches[index].analysis if index < len(base.branches) else None
+            if analysis is None or analysis.status != "reachable":
+                return False
     return True
 
 
+def _rewrite_lines(rewrite: _BlockRewrite) -> tuple[int, ...]:
+    """The lines a rewrite involves besides its anchor: later blocks, or all joined branches."""
+    if rewrite.branches:
+        return tuple(branch.line for branch in rewrite.branches)
+    return tuple(group.line for group in rewrite.related)
+
+
 def _rewrite_findings(rewrites: list[_BlockRewrite]) -> tuple[Finding, ...]:
-    """One finding per group of adjacent blocks that could be written with fewer blocks."""
+    """One finding per group of adjacent blocks or branches that could be written with fewer."""
     findings = []
     for rewrite in rewrites:
-        opener = rewrite.first.branches[0]
-        lines = tuple(group.line for group in rewrite.related)
+        # Joined branches are anchored at the first of them; blocks at their opening directive.
+        anchor = rewrite.branches[0] if rewrite.branches else rewrite.first.branches[0]
+        lines = _rewrite_lines(rewrite)
+        related = lines[1:] if rewrite.branches else lines
         edit = SuggestedEdit(
             SourceRange(
                 start=SourceLocation(rewrite.edit_start.line, rewrite.edit_start.column),
@@ -293,14 +311,14 @@ def _rewrite_findings(rewrites: list[_BlockRewrite]) -> tuple[Finding, ...]:
         findings.append(
             Finding(
                 kind=rewrite.kind,
-                location=SourceLocation(rewrite.first.line),
-                directive=opener.directive,
-                original_condition=opener.expression_text,
+                location=SourceLocation(anchor.line),
+                directive=anchor.directive,
+                original_condition=anchor.expression_text,
                 exact_simplification=None,
                 contextual_simplification=None,
                 reason=_block_note(rewrite.kind, lines),
                 edit=edit,
-                related_locations=tuple(SourceLocation(line) for line in lines),
+                related_locations=tuple(SourceLocation(line) for line in related),
             )
         )
     return tuple(findings)
@@ -309,7 +327,7 @@ def _rewrite_findings(rewrites: list[_BlockRewrite]) -> tuple[Finding, ...]:
 def _record_rewrites(rewrites: list[_BlockRewrite]) -> None:
     """Mark the first block of each rewrite in the tree, for the text and JSON reports."""
     for rewrite in rewrites:
-        lines = tuple(group.line for group in rewrite.related)
+        lines = _rewrite_lines(rewrite)
         if rewrite.kind is FindingKind.MERGEABLE_BLOCKS:
             rewrite.first.merge_with = lines
         else:

@@ -41,6 +41,7 @@ class FindingKind(str, Enum):
     CONTEXTUAL_SIMPLIFICATION = "contextual_simplification"
     MERGEABLE_BLOCKS = "mergeable_blocks"
     COMPLEMENTARY_BLOCKS = "complementary_blocks"
+    JOINABLE_BRANCHES = "joinable_branches"
 
 
 class FixConfidence(str, Enum):
@@ -290,7 +291,9 @@ class Finding:
     :attr:`FindingKind.MERGEABLE_BLOCKS` finding sits at the opening directive of
     the first block of a run and lists the opening directive of every block that
     could be merged into it; a :attr:`FindingKind.COMPLEMENTARY_BLOCKS` finding lists
-    the opening directive of the block whose condition is the opposite. It is empty for
+    the opening directive of the block whose condition is the opposite, and a
+    :attr:`FindingKind.JOINABLE_BRANCHES` finding sits at the first branch of a run and
+    lists the later branches that have the same body. It is empty for
     every other kind.
     """
 

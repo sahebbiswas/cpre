@@ -61,10 +61,12 @@ from .model import (
 from .robdd import BDD, AnalysisBudget, AnalysisLimitExceeded, ResourceLimits
 from .structure import (
     ConditionalBlock,
+    ConditionalDirective,
     ConditionalStructureTree,
     StructuralSourceLocation,
     parse_conditionals,
 )
+from .structure import ConditionalBranch as _StructuralBranch
 
 # Whitespace that may fill the gap between two blocks: what the lexer treats as horizontal
 # whitespace, plus the line breaks.
@@ -82,6 +84,27 @@ _OPAQUE_DIRECTIVES = frozenset({"include", "include_next", "import", "pragma"})
 _PRAGMA_OPERATOR = "_Pragma"
 
 _IDENTIFIER = re.compile(r"[A-Za-z_]\w*")
+_WHOLE_IDENTIFIER = re.compile(r"[A-Za-z_]\w*\Z")
+_CALL = re.compile(r"([A-Za-z_]\w*)\s*\(")
+_TOKEN = re.compile(
+    r"""\s*(?:
+        (?P<number>(?:0[xX][0-9A-Fa-f]+|\d+)[uUlL]*)
+        |(?P<char>(?:[uUL]|u8)?'(?:[^'\\\n]|\\.)+')
+        |(?P<name>[A-Za-z_]\w*)
+        |(?P<operator><<|>>|<=|>=|==|!=|&&|\|\||[-+*/%<>&|^?:,])
+        |(?P<unary>[!~])
+        |(?P<open>\()
+        |(?P<close>\))
+    )""",
+    re.VERBOSE,
+)
+_HAS_INCLUDE = re.compile(r"\b__has_include(?:_next)?\s*\([^()]*\)")
+# A test that needs no parentheses when it is joined to another with ``||``: a name, a
+# ``defined`` test, or the negation of either.
+_SIMPLE_TEST = re.compile(
+    r"!?\s*(?:defined\s*\(\s*[A-Za-z_]\w*\s*\)|defined\s+[A-Za-z_]\w*|[A-Za-z_]\w*)\Z"
+)
+_DIRECTIVE_START = re.compile(r"[ \t\f\v]*#")
 _SINGLE_TOKEN = re.compile(r"(?:[A-Za-z_]\w*|[0-9][\w']*)?\Z")
 
 
@@ -96,7 +119,11 @@ class BlockRewrite:
     * ``MERGEABLE_BLOCKS``: from the first block's ``#endif`` through the last block's
       opening directive, with the bodies of the blocks in between;
     * ``COMPLEMENTARY_BLOCKS``: from the first block's ``#endif`` through the second
-      block's opening directive (and its line break), with ``#else`` and that line break.
+      block's opening directive (and its line break), with ``#else`` and that line break;
+    * ``JOINABLE_BRANCHES``: from the first joined branch's directive through the end of
+      the last joined branch's body, with one directive that tests the conditions joined
+      by ``||`` and the body once. Here ``branches`` holds the joined branches of
+      ``first``, and ``related`` is empty.
     """
 
     kind: FindingKind
@@ -105,6 +132,7 @@ class BlockRewrite:
     edit_start: StructuralSourceLocation
     edit_end: StructuralSourceLocation
     replacement: str
+    branches: tuple[ConditionalBranch, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -509,9 +537,217 @@ class _Finder:
         for group, block in zip(groups, blocks, strict=True):
             self._scan_branches(group, block)
 
+    # --- adjacent branches of one block with the same body ---------------------------
+
+    def _branch_test(self, directive: ConditionalDirective) -> str | None:
+        """The branch's test written as an ``#if`` expression, or ``None``."""
+        text = (directive.condition_text or "").strip()
+        if not text or "\n" in text or "\r" in text:
+            return None
+        if directive.kind in {"if", "elif"}:
+            return text
+        if directive.kind in {"ifdef", "elifdef", "ifndef", "elifndef"}:
+            if _WHOLE_IDENTIFIER.match(text) is None:
+                return None
+            negated = directive.kind in {"ifndef", "elifndef"}
+            return f"!defined({text})" if negated else f"defined({text})"
+        return None
+
+    def _is_expression(self, text: str) -> bool:
+        """Whether ``text`` is a well-formed ``#if`` expression, whatever its macros are.
+
+        This is a conservative check of the shape only (operands and operators alternate,
+        parentheses and ``?:`` pair up, calls have well-formed arguments). A branch after
+        the first of a run was not read when an earlier branch was taken, so text such as
+        ``B C`` was harmless there and would stop a joined condition from preprocessing.
+        """
+        tokens: list[tuple[str, str]] = []
+        position = 0
+        text = _HAS_INCLUDE.sub(
+            "1", text
+        ).strip()  # Its operand is a header name, not an expression.
+        while position < len(text):
+            match = _TOKEN.match(text, position)
+            if match is None or match.lastgroup is None:
+                return False
+            tokens.append((match.lastgroup, match.group(match.lastgroup)))
+            position = match.end()
+        return self._parse_expression(tokens, 0, ends_at_close=False) == len(tokens)
+
+    def _parse_expression(
+        self, tokens: list[tuple[str, str]], start: int, *, ends_at_close: bool
+    ) -> int:
+        """The index after the expression at ``start``, or -1 when it is malformed."""
+        index = start
+        questions = 0
+        expect_operand = True
+        while index < len(tokens):
+            kind, value = tokens[index]
+            if expect_operand:
+                if kind == "unary" or (kind == "operator" and value in "+-"):
+                    index += 1
+                elif kind in {"number", "char"}:
+                    index, expect_operand = index + 1, False
+                elif kind == "open":
+                    index = self._parse_expression(tokens, index + 1, ends_at_close=True)
+                    if index < 0 or index >= len(tokens) or tokens[index][0] != "close":
+                        return -1
+                    index, expect_operand = index + 1, False
+                elif kind == "name":
+                    index = self._parse_name(tokens, index)
+                    if index < 0:
+                        return -1
+                    expect_operand = False
+                else:
+                    return -1
+            elif kind == "operator":
+                questions += value == "?"
+                questions -= value == ":"
+                if questions < 0:
+                    return -1
+                index, expect_operand = index + 1, True
+            elif kind == "close" and ends_at_close:
+                break
+            else:
+                return -1
+        if expect_operand or questions != 0:
+            return -1
+        return index
+
+    def _parse_name(self, tokens: list[tuple[str, str]], index: int) -> int:
+        """The index after the name (and its call or ``defined`` operand) at ``index``."""
+        name = tokens[index][1]
+        after = index + 1
+        if name == "defined":
+            if after < len(tokens) and tokens[after][0] == "name":
+                return after + 1
+            if (
+                after + 2 < len(tokens)
+                and tokens[after][0] == "open"
+                and tokens[after + 1][0] == "name"
+                and tokens[after + 2][0] == "close"
+            ):
+                return after + 3
+            return -1
+        if after >= len(tokens) or tokens[after][0] != "open":
+            return after
+        position = after + 1
+        if position < len(tokens) and tokens[position][0] == "close":
+            return position + 1
+        position = self._parse_expression(tokens, position, ends_at_close=True)
+        if 0 <= position < len(tokens) and tokens[position][0] == "close":
+            return position + 1
+        return -1
+
+    def _calls_are_known(self, test: str) -> bool:
+        """Whether every call in ``test`` is to ``defined``, a ``__has_*`` operator or a macro of this file.
+
+        A branch after the first one was not evaluated when an earlier branch was taken, so an
+        invalid expression there (``FOO(1)`` with no macro ``FOO``) was harmless. In a joined
+        condition it is always read and would fail to preprocess.
+        """
+        _, definitions, _ = self._directives
+        for match in _CALL.finditer(test):
+            name = match.group(1)
+            if name != "defined" and not name.startswith("__has_") and name not in definitions:
+                return False
+        return True
+
+    def _branch_is_joinable(
+        self, branch: ConditionalBranch, structural: _StructuralBranch, *, later: bool = False
+    ) -> bool:
+        """Whether this branch's directive can be rewritten as part of a joined condition.
+
+        ``later`` is set for a branch that would follow the first one of the run.
+        """
+        directive = structural.directive
+        if branch.analysis is None or branch.analysis.status != "reachable":
+            return False
+        test = self._branch_test(directive)
+        if test is None or (
+            later and not (self._is_expression(test) and self._calls_are_known(test))
+        ):
+            return False
+        span = directive.source_range
+        raw = self._source[span.start.offset : span.end.offset]
+        if raw != self._plain[span.start.offset : span.end.offset]:
+            return False  # A comment on the line would be lost.
+        if (
+            "\n" in raw.rstrip("\r\n")
+            or "\r" in raw.rstrip("\r\n")
+            or _DIRECTIVE_START.match(raw) is None
+        ):
+            return False  # A line continuation or a digraph; keep it simple.
+        depends_on = self._dependencies(frozenset(_IDENTIFIER.findall(test)))
+        return self._inert(depends_on)
+
+    def _operand(self, test: str) -> str:
+        """``test`` ready to sit next to ``||``: bare when that cannot change its meaning."""
+        if _SIMPLE_TEST.match(test) is not None:
+            _, definitions, _ = self._directives
+            names = self._dependencies(frozenset(_IDENTIFIER.findall(test)))
+            if not any(
+                "?" in text or "," in text for name in names for text in definitions.get(name, ())
+            ):
+                return test
+        return f"({test})"
+
+    def _join_rewrite(
+        self,
+        group: ConditionalGroup,
+        block: ConditionalBlock,
+        first: int,
+        last: int,
+    ) -> BlockRewrite:
+        """The edit that joins branches ``first`` to ``last`` (both included) of ``block``."""
+        directive = block.branches[first].directive
+        raw = directive.source_range.text(self._source)
+        indent = raw[: len(raw) - len(raw.lstrip())]
+        newline = next((mark for mark in ("\r\n", "\n", "\r") if raw.endswith(mark)), "")
+        keyword = "if" if directive.kind in {"if", "ifdef", "ifndef"} else "elif"
+        tests = [self._branch_test(block.branches[i].directive) for i in range(first, last + 1)]
+        condition = " || ".join(self._operand(test) for test in tests if test is not None)
+        body = block.branches[first].body_range.text(self._source)
+        return BlockRewrite(
+            FindingKind.JOINABLE_BRANCHES,
+            group,
+            (),
+            directive.source_range.start,
+            block.branches[last].body_range.end,
+            f"{indent}#{keyword} {condition}{newline}{body}",
+            tuple(group.branches[first : last + 1]),
+        )
+
+    def _same_lines(self, branch: _StructuralBranch) -> str:
+        """The branch's body with every line ending written as ``\\n``, for comparison."""
+        return branch.body_range.text(self._source).replace("\r\n", "\n").replace("\r", "\n")
+
+    def _scan_chain(self, group: ConditionalGroup, block: ConditionalBlock) -> None:
+        """Report each run of adjacent branches whose bodies are the same text."""
+        count = len(block.branches)
+        index = 0
+        while index < count:
+            if not self._branch_is_joinable(group.branches[index], block.branches[index]):
+                index += 1
+                continue
+            body = self._same_lines(block.branches[index])
+            end = index
+            while (
+                end + 1 < count
+                and self._branch_is_joinable(
+                    group.branches[end + 1], block.branches[end + 1], later=True
+                )
+                and self._same_lines(block.branches[end + 1]) == body
+            ):
+                end += 1
+            if end > index:
+                self.rewrites.append(self._join_rewrite(group, block, index, end))
+            index = end + 1
+
     def _scan_branches(self, group: ConditionalGroup, block: ConditionalBlock) -> None:
         if len(group.branches) != len(block.branches):
             return
+        self._scan_chain(group, block)
         for branch, structural in zip(group.branches, block.branches, strict=True):
             self._scan_siblings(branch.children, structural.children)
 

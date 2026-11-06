@@ -26,7 +26,7 @@ cpre --recursive --fail-on-findings src include
 | Status | CI meaning |
 | --- | --- |
 | `0` | Clean: analysis finished and nothing needs attention. |
-| `1` | Findings: a dead, redundant, mergeable or complementary branch, or a simplifiable macro, exists. |
+| `1` | Findings: a dead, redundant, mergeable, complementary or joinable branch, or a simplifiable macro, exists. |
 | `2` | Could not decide: unreadable file, malformed directive, or an analysis limit was hit. Treat as a failure. |
 
 Status `2` outranks `1` and is never a pass. A common first-week surprise is a generated or vendored file that hits the analysis limit; exclude it from the command, or raise the limit for that run with `--max-atoms` (see [Analysis limits](troubleshooting.md#analysis-limit-exceeded)).

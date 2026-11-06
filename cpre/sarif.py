@@ -77,6 +77,16 @@ _RULES: tuple[dict[str, object], ...] = (
         },
         "defaultConfiguration": {"level": "warning"},
     },
+    {
+        "id": "CPRE007",
+        "name": "joinable-branches",
+        "shortDescription": {"text": "Adjacent branches have the same body and can be joined"},
+        "fullDescription": {
+            "text": "Adjacent #if/#elif branches have identical bodies, so they can be one "
+            "branch that tests their conditions joined with ||."
+        },
+        "defaultConfiguration": {"level": "warning"},
+    },
 )
 
 _RULE_INDEX = {str(rule["id"]): index for index, rule in enumerate(_RULES)}
@@ -87,14 +97,22 @@ _RULE_FOR_KIND = {
     FindingKind.CONTEXTUAL_SIMPLIFICATION: ("CPRE004", "note"),
     FindingKind.MERGEABLE_BLOCKS: ("CPRE005", "warning"),
     FindingKind.COMPLEMENTARY_BLOCKS: ("CPRE006", "warning"),
+    FindingKind.JOINABLE_BRANCHES: ("CPRE007", "warning"),
 }
 
 # Findings about several adjacent blocks: located at the first block, with the others as
 # related locations, rather than at the edit.
-_BLOCK_KINDS = frozenset({FindingKind.MERGEABLE_BLOCKS, FindingKind.COMPLEMENTARY_BLOCKS})
+_BLOCK_KINDS = frozenset(
+    {
+        FindingKind.MERGEABLE_BLOCKS,
+        FindingKind.COMPLEMENTARY_BLOCKS,
+        FindingKind.JOINABLE_BRANCHES,
+    }
+)
 _RELATED_MESSAGES = {
     FindingKind.MERGEABLE_BLOCKS: "Block that can be merged into the first one",
     FindingKind.COMPLEMENTARY_BLOCKS: "Block that can become the #else of the first one",
+    FindingKind.JOINABLE_BRANCHES: "Branch with the same body that can be joined into the first one",
 }
 
 _NOTIFICATION_DESCRIPTIONS = {
@@ -186,6 +204,8 @@ def _fix_description(finding: Finding) -> str:
         where = block_where([item.line for item in finding.related_locations])
         if finding.kind is FindingKind.COMPLEMENTARY_BLOCKS:
             return f"Make the block starting at {where} the #else of this one"
+        if finding.kind is FindingKind.JOINABLE_BRANCHES:
+            return f"Join the branches starting at {where} into this one with ||"
         return f"Merge the blocks starting at {where} into this one"
     return f"Replace condition with {finding.edit.replacement}"
 

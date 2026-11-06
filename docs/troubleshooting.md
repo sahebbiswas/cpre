@@ -183,6 +183,8 @@ What to do, in order:
 
 **"Why does `defined(X)` differ from `X`?"** They are different atoms: `defined(X)` is definedness, `X` is the value (true when defined as non-zero). cpre relates them with the C rule that a true value implies defined.
 
+**"Why are my `#elif` branches with the same body not reported as `JOIN`?"** The bodies must be the same text character for character (a different comment or indentation counts), the branches must be adjacent and reachable, an `#else` is never joined, and a directive with a comment or a line continuation is skipped. See [Joinable branches](joinable-branches.md).
+
 **"Why are my `#if FLAG` and `#if !FLAG` blocks not reported as `ELSE`?"** The same rules apply as for `MERGE`, with an opposite condition instead of an equal one, and `#if A` followed by `#ifndef A` is never a pair because a value test and a definedness test are different tests. See [Complementary blocks](complementary-blocks.md).
 
 **"Why are my two adjacent `#if FLAG` blocks not reported as `MERGE`?"** Only plain blocks with equivalent, comment-free, purely Boolean conditions and nothing but blank lines between them are reported, and only when the first body cannot change the condition. [Mergeable blocks](mergeable-blocks.md#why-a-pair-was-not-reported) lists each reason.

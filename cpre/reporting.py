@@ -47,6 +47,7 @@ def branch_is_notable(branch: ConditionalBranch) -> bool:
 _BLOCK_SUGGESTION_LABELS = {
     FindingKind.MERGEABLE_BLOCKS.value: ("MERGE", "merge"),
     FindingKind.COMPLEMENTARY_BLOCKS.value: ("ELSE", "else"),
+    FindingKind.JOINABLE_BRANCHES.value: ("JOIN", "join"),
 }
 
 
@@ -61,6 +62,22 @@ def block_suggestions(group: ConditionalGroup) -> list[BlockSuggestion]:
         found.append(BlockSuggestion(FindingKind.MERGEABLE_BLOCKS.value, group.merge_with))
     found.extend(item for item in group.suggestions if item.kind in _BLOCK_SUGGESTION_LABELS)
     return found
+
+
+# Suggestions about a run of branches are shown at the first branch of the run; the others
+# are about the whole block and are shown at its first branch.
+_BRANCH_ANCHORED = frozenset({FindingKind.JOINABLE_BRANCHES.value})
+
+
+def branch_suggestions(
+    group: ConditionalGroup, branch: ConditionalBranch, index: int
+) -> list[BlockSuggestion]:
+    """The suggestions the text report shows at ``branch``, the ``index``-th of ``group``."""
+    return [
+        item
+        for item in block_suggestions(group)
+        if (item.lines[0] == branch.line if item.kind in _BRANCH_ANCHORED else index == 0)
+    ]
 
 
 def merge_note(group: ConditionalGroup) -> str:
@@ -91,7 +108,7 @@ def compute_visibility(tree: ConditionalTree, verbose: bool) -> Visibility:
             return False
         group_visible = False
         for index, branch in enumerate(group.branches):
-            notable = branch_is_notable(branch) or (index == 0 and bool(block_suggestions(group)))
+            notable = branch_is_notable(branch) or bool(branch_suggestions(group, branch, index))
             child_visible = False
             for child in branch.children:
                 child_visible = visit_group(child) or child_visible
@@ -293,7 +310,7 @@ def text_lines(
             assert branch.analysis is not None
             analysis = branch.analysis
             label, role = branch_kind(branch)
-            suggestions = block_suggestions(group) if index == 0 else []
+            suggestions = branch_suggestions(group, branch, index)
             if suggestions and role in {"ok", "simplify"}:
                 label, role = _BLOCK_SUGGESTION_LABELS[suggestions[0].kind][0], "merge"
             shown_text = compact_whitespace(branch.expression_text or "")
@@ -376,7 +393,8 @@ class FindingCounts:
     conditions that have a shorter equivalent form, which are reported but never fail a run.
     ``mergeable`` counts runs of adjacent blocks that test one condition and could be a
     single block; ``complementary`` counts pairs of adjacent blocks that test a condition
-    and its opposite and could be one ``#if``/``#else`` block.
+    and its opposite and could be one ``#if``/``#else`` block; ``joinable`` counts runs of adjacent branches
+    with the same body that could be one branch.
     """
 
     dead: int = 0
@@ -385,6 +403,7 @@ class FindingCounts:
     macros: int = 0
     mergeable: int = 0
     complementary: int = 0
+    joinable: int = 0
 
     def __add__(self, other: FindingCounts) -> FindingCounts:
         return FindingCounts(
@@ -394,11 +413,19 @@ class FindingCounts:
             self.macros + other.macros,
             self.mergeable + other.mergeable,
             self.complementary + other.complementary,
+            self.joinable + other.joinable,
         )
 
     @property
     def failing(self) -> int:
-        return self.dead + self.redundant + self.macros + self.mergeable + self.complementary
+        return (
+            self.dead
+            + self.redundant
+            + self.macros
+            + self.mergeable
+            + self.complementary
+            + self.joinable
+        )
 
     @property
     def total(self) -> int:
@@ -416,6 +443,8 @@ def count_findings(tree: ConditionalTree) -> FindingCounts:
         for suggestion in block_suggestions(group):
             if suggestion.kind == FindingKind.COMPLEMENTARY_BLOCKS.value:
                 counts += FindingCounts(complementary=1)
+            elif suggestion.kind == FindingKind.JOINABLE_BRANCHES.value:
+                counts += FindingCounts(joinable=1)
         for branch in group.branches:
             assert branch.analysis is not None
             status = branch.analysis.status
@@ -461,6 +490,7 @@ __all__ = [
     "has_findings",
     "label_width",
     "block_suggestions",
+    "branch_suggestions",
     "merge_note",
     "line_label",
     "render_report",
