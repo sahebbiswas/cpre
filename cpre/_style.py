@@ -41,6 +41,7 @@ _SGR: dict[str, str] = {
     "redundant": "1;33",
     "incomplete": "1;33",
     "simplify": "1;32",
+    "merge": "1;33",
     "ok": "2",
     "skip": "2",
     "before": "31",

@@ -14,6 +14,26 @@ raise that document's schema major version and are listed here (see the
 
 ## [Unreleased]
 
+### Added
+- Adjacent blocks that test the same condition are reported as mergeable (#239). Two plain
+  `#if`/`#ifdef`/`#ifndef` blocks with equivalent conditions and nothing but blank lines between
+  them could be one block; a run of three or more is one finding. A pair is reported only when
+  merging keeps the meaning: no comment on or between the `#endif` and the next opening directive,
+  no `#else`/`#elif`, only Boolean conditions over names (no opaque predicate, `__LINE__` or
+  `__COUNTER__`), and a first body with no `#include`, `#pragma`, or `#define`/`#undef` of a name
+  in the condition (or in what it expands to in the same file). Each finding carries an exact
+  suggested edit. See [Mergeable blocks](docs/mergeable-blocks.md).
+  - Text: a `MERGE` badge and a `merge` line, counted as `mergeable block runs` in the summary.
+  - JSON: every group of `cpre.analysis/1` has `merge_with`, the opening lines of the blocks that
+    can be merged into it (`[]` when none). A compatible addition.
+  - SARIF: rule `CPRE005` (`mergeable-blocks`, `warning`) with a `relatedLocations` entry per later
+    block, plus a `fix` that merges them.
+  - Python: `FindingKind.MERGEABLE_BLOCKS` and `Finding.related_locations` (empty for every other
+    kind).
+- **Behaviour change:** a mergeable run counts as a finding for `--fail-on-findings`, so a source that
+  used to exit `0` can now exit `1`. The `--fail-on-findings` help text now names what the option
+  acts on: dead and redundant branches, mergeable blocks and simplifiable macros.
+
 ### Fixed
 - Macro analysis with `--expand-macros` is much faster on large inputs (#235). The expression algebra
   (`simplify`, `negate`, sorting keys, node hashes) is now memoized with small, bounded caches, so reading a reduced ROBDD back

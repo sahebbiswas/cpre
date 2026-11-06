@@ -183,6 +183,8 @@ What to do, in order:
 
 **"Why does `defined(X)` differ from `X`?"** They are different atoms: `defined(X)` is definedness, `X` is the value (true when defined as non-zero). cpre relates them with the C rule that a true value implies defined.
 
+**"Why are my two adjacent `#if FLAG` blocks not reported as `MERGE`?"** Only plain blocks with equivalent, comment-free, purely Boolean conditions and nothing but blank lines between them are reported, and only when the first body cannot change the condition. [Mergeable blocks](mergeable-blocks.md#why-a-pair-was-not-reported) lists each reason.
+
 **Dead and redundant are not instructions to delete.** cpre never suggests removing a dead branch mechanically; apply only edits it provides as a structured `SuggestedEdit`.
 
 ## Macro simplification

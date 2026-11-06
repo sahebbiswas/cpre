@@ -104,6 +104,7 @@ How to read it:
 - **`SIMPLIFY`** means the branch can be taken and its condition has a shorter equivalent: `TURBO || TURBO` is just `TURBO`.
 - **`DEAD`** means the branch can never be selected. The `#elif` on line 7 is dead because an earlier branch already covers every case where `TURBO` is defined, so its condition is `+ 0`.
 - **`REDUNDANT`** means the condition is always true where it sits (`+ 1`). The inner `#ifdef DEBUG` is already guaranteed by the outer one. The `ok` line and the `│` guide show that it is nested inside line 13, which is listed only to give that context.
+- **`MERGE`** (not in this sample) means a block is followed directly by another that tests the same condition, so the two could be one block; see [Mergeable blocks](mergeable-blocks.md).
 - The `Macros` entry is a macro finding: the replacement list can be simplified, but cpre will not rewrite it because the added parentheses could change what its uses mean (the `hint` line says so).
 - The `Summary` line totals the findings.
 - `#if LEVEL >= 2` is not reported. cpre treats comparisons it cannot decide symbolically as opaque predicates; `--verbose` shows them.
@@ -119,7 +120,7 @@ cpre --fail-on-findings src/driver.c; echo $?     # 1: dead or redundant branch 
 | Exit status | Meaning |
 | --- | --- |
 | `0` | Completed. Findings may exist (unless `--fail-on-findings`). |
-| `1` | `--fail-on-findings` and a dead, redundant or simplifiable item was found. |
+| `1` | `--fail-on-findings` and a dead, redundant or mergeable branch, or a simplifiable macro, was found. |
 | `2` | A file could not be read, analysis could not finish, or the command line was invalid. |
 
 Status `2` is never "clean". If cpre could not finish, an empty report does not mean the file is fine; it prints why on stderr. See [Exit status contract](cli.md#exit-status-contract).

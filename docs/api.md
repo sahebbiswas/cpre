@@ -28,7 +28,7 @@ Every name in `cpre.__all__`, by purpose, with the guide that owns its contract.
 | --- | --- | --- |
 | Version | `__version__` (also `cpre --version`) | [CLI](cli.md#version) |
 | Conditional analysis | `analyze_source`, `AnalysisOptions`, `AnalysisResult`, `AnalysisIncomplete`, `IncompleteComponent`, `IncompleteGroup`, `AnalysisTelemetry`, `ComponentTelemetry` | this guide |
-| Findings and edits | `Finding`, `FindingKind`, `ExactSimplification`, `ContextualSimplification`, `SuggestedEdit`, `FixConfidence`, `SourceLocation`, `SourceRange` | this guide |
+| Findings and edits | `Finding` (with `related_locations`), `FindingKind`, `ExactSimplification`, `ContextualSimplification`, `SuggestedEdit`, `FixConfidence`, `SourceLocation`, `SourceRange` | this guide |
 | Conditional tree (analysis result) | `ConditionalTree` | this guide |
 | Lossless structure | `parse_conditionals`, `ConditionalStructureTree`, `ConditionalBlock`, `ConditionalBranch`, `ConditionalDirective`, `DirectiveToken`, `StructuralSourceLocation`, `StructuralSourceRange`, `StructureDiagnostic`, `StructureDiagnosticCode` | [Conditional structure](conditional-structure.md) |
 | Symbolic expressions | `Variable`, `DefinedVariable`, `Predicate`, `Constant`, `TRUE`, `FALSE`, `Negation`, `Conjunction`, `Disjunction`, `Expression`, `BooleanAtom`, `conjunction`, `disjunction`, `negate`, `normalize`, `simplify`, `format_expression`, `ordered_atoms`, `expression_predicates`, `expression_to_dict`, `expression_from_dict` | this guide |
@@ -270,9 +270,15 @@ for finding in result.findings:
             report_exact_simplification(finding)
         case cpre.FindingKind.CONTEXTUAL_SIMPLIFICATION:
             report_contextual_simplification(finding)
+        case cpre.FindingKind.MERGEABLE_BLOCKS:
+            report_mergeable_blocks(finding)
 ```
 
 Findings carry physical source location, directive/condition context, a human-readable reason, and structured simplification/edit fields where applicable. `depends_on_assumptions` identifies proofs that materially depend on caller-supplied macro assumptions.
+
+A `MERGEABLE_BLOCKS` finding is about a run of adjacent blocks rather than one branch. Its `location` is the first block's opening directive and `related_locations` holds the opening directive of each later block that could be merged into it; `related_locations` is `()` for every other kind. Its `edit` merges the run (`FixConfidence.EXACT`); it has no simplification and does not depend on assumptions. See [Mergeable blocks](mergeable-blocks.md).
+
+Treat the set of kinds as open: a new release may add a `FindingKind` member, so a consumer that matches on kind should have a default branch rather than assume the four original kinds are all there is.
 
 Treat human-readable messages as presentation. Use enum values and structured fields for automation.
 

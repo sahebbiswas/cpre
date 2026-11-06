@@ -320,7 +320,7 @@ def count_macro_findings(results: Sequence[MacroAnalysisResult]) -> FindingCount
 def file_findings(
     tree: ConditionalTree | None, macros: Sequence[MacroAnalysisResult]
 ) -> FindingCounts:
-    """Every dead, redundant and simplifiable entry one source produced."""
+    """Every dead, redundant, mergeable and simplifiable entry one source produced."""
     counts = count_macro_findings(macros)
     if tree is not None:
         counts += reporting.count_findings(tree)
@@ -339,6 +339,8 @@ def summary_line(counts: FindingCounts, style: Style | None = None) -> str:
         parts.append(style.paint(f"{counts.dead:,} dead", "dead"))
     if counts.redundant:
         parts.append(style.paint(f"{counts.redundant:,} redundant", "redundant"))
+    if counts.mergeable:
+        parts.append(style.paint(plural(counts.mergeable, "mergeable block run"), "merge"))
     if counts.simplifiable:
         parts.append(style.paint(plural(counts.simplifiable, "simplifiable condition"), "simplify"))
     if counts.macros:
