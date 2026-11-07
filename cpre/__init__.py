@@ -26,6 +26,7 @@ from .api import (
     SuggestedEdit,
     analyze_source,
 )
+from .block_rewrite import BlockRewriteResult, rewrite_blocks
 from .configuration import MacroConfiguration, UnknownNamePolicy
 from .coverage import (
     BranchCoverageResult,
@@ -120,7 +121,7 @@ from .unknown_macros import MacroUse, UnknownMacro, unknown_macros, unknown_macr
 
 # Single source of truth for the package version (Semantic Versioning 2.0.0).
 # Every pull request merged to main bumps it once; see CONTRIBUTING.md.
-__version__ = "1.13.0"
+__version__ = "1.14.0"
 
 __all__ = [
     "AnalysisError",
@@ -128,6 +129,7 @@ __all__ = [
     "AnalysisOptions",
     "AnalysisResult",
     "AnalysisTelemetry",
+    "BlockRewriteResult",
     "BooleanAtom",
     "BranchCoverageResult",
     "BranchOutcome",
@@ -222,6 +224,7 @@ __all__ = [
     "ordered_atoms",
     "parse_conditionals",
     "preprocess_source",
+    "rewrite_blocks",
     "rewrite_macros",
     "satisfiable",
     "simplify",

@@ -33,6 +33,7 @@ Every name in `cpre.__all__`, by purpose, with the guide that owns its contract.
 | Lossless structure | `parse_conditionals`, `ConditionalStructureTree`, `ConditionalBlock`, `ConditionalBranch`, `ConditionalDirective`, `DirectiveToken`, `StructuralSourceLocation`, `StructuralSourceRange`, `StructureDiagnostic`, `StructureDiagnosticCode` | [Conditional structure](conditional-structure.md) |
 | Symbolic expressions | `Variable`, `DefinedVariable`, `Predicate`, `Constant`, `TRUE`, `FALSE`, `Negation`, `Conjunction`, `Disjunction`, `Expression`, `BooleanAtom`, `conjunction`, `disjunction`, `negate`, `normalize`, `simplify`, `format_expression`, `ordered_atoms`, `expression_predicates`, `expression_to_dict`, `expression_from_dict` | this guide |
 | Exact Boolean queries | `satisfiable`, `implies`, `equivalent`, `exact_simplify`, `witness_assignment`, `SatisfiabilityResult`, `ProofResult`, `SimplificationResult`, `WitnessResult`, `WitnessAssignment`, `WitnessAtomKind` | [Boolean queries](boolean-queries.md) |
+| Block rewriting | `rewrite_blocks`, `BlockRewriteResult` | [Command-line interface](cli.md#applying-block-edits-simplify-blocks) |
 | Macro simplification | `analyze_macro`, `analyze_macros`, `simplify_macros`, `rewrite_macros`, `MacroAnalysisResult`, `MacroSimplificationResult` | [Macro simplification](macro-simplification.md) |
 | Macro state and configuration | `MacroAssumptions`, `MacroConfiguration`, `MacroDefinition`, `MacroState`, `MacroEnvironment`, `UnknownNamePolicy`, `PreprocessingContext` | [Concrete configuration](concrete-configuration.md) |
 | Unknown macros | `unknown_macros`, `unknown_macros_in_source`, `UnknownMacro`, `MacroUse` | [below](#unknown-macro-dependencies) |
@@ -332,7 +333,7 @@ if edit is not None:
     confidence = edit.confidence
 ```
 
-The edits of one result can overlap: a [collapsible nesting](collapsible-nesting.md#edits-can-overlap) or a [joinable branch](joinable-branches.md) edit covers a body that holds other findings. Apply them one at a time, outermost first, analyzing again in between, rather than all together.
+The edits of one result can overlap: a [collapsible nesting](collapsible-nesting.md#edits-can-overlap) or a [joinable branch](joinable-branches.md) edit covers a body that holds other findings. Do not apply them all together. `cpre.rewrite_blocks()` and `cpre simplify-blocks` apply, in one batch, every edit whose range does not overlap an earlier one (the outermost, earliest range wins), analyze the result and repeat until nothing applies; the findings of one batch all refer to the source as it was before that batch, not to successive texts.
 
 `SourceRange.end` is exclusive. Locations are physical, one-based source positions. Backslash-continued directives retain physical line/column provenance.
 
