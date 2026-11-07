@@ -51,7 +51,7 @@ The edit replaces the whole outermost block, including the innermost body, and c
 
 The result is always an `#if`. `#ifdef A` becomes `defined(A)` and `#ifndef A` becomes `!defined(A)`. A test that is a bare name, a `defined` test or the negation of either is used as it is. Any other test is wrapped in parentheses, unless it already is one parenthesized group: `A && (B || C)`, `(A > 1) && B`. A bare name is also wrapped when a `#define` in the file gives it a replacement list that is not a single token or a parenthesized expression.
 
-A macro defined in a header or on the command line is not followed. If such a macro expands to something with a top-level `||`, `X && Y` can group differently from the two tests it replaces. Read the edit before applying it when a condition names a macro you cannot see.
+A macro defined in a header or on the command line is not followed unless you supply it with `-D`/`-U`, `--config-from` or `configuration=` (see [Mergeable blocks](mergeable-blocks.md#macros-defined-elsewhere)). Without it, if such a macro expands to something with a top-level `||`, `X && Y` can group differently from the two tests it replaces. Read the edit before applying it when a condition names a macro you cannot see.
 
 The innermost body keeps its text, including its indentation. cpre does not re-indent it one level out.
 

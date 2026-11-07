@@ -59,7 +59,7 @@ Macro assumptions can only remove a finding: a block that assumptions make dead 
 
 ## Macros defined elsewhere
 
-As for merging, macros defined in a header or on the command line are not followed. If a header defines `FEATURE` as something that depends on `LEVEL` and the first body does `#undef LEVEL`, cpre cannot see it. Read the pair before accepting the edit when a body defines macros.
+As for merging, macros defined in a header or on the command line are not followed unless you supply them with `-D`/`-U`, `--config-from` or `configuration=`, or ask for `--strict-merge`; see [Mergeable blocks](mergeable-blocks.md#macros-defined-elsewhere). Without them, if a header defines `FEATURE` as something that depends on `LEVEL` and the first body does `#undef LEVEL`, cpre cannot see it, so read the pair before accepting the edit when a body defines macros. `--strict-merge` does not change this for replacement text it cannot see: an unseen `#define A X || Y` makes `A` and `!A` both true, so review such a pair even when strict mode is on.
 
 ## Line numbers
 

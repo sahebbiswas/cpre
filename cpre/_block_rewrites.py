@@ -29,10 +29,12 @@ Two sibling blocks are a candidate pair when all of these hold:
   because a replacement list such as ``X || Y`` would change how a negated or regrouped
   condition reads.
 
-"Depends on" follows the ``#define`` directives of this file: a name is replaced by the
-names its replacement list mentions, repeatedly. Macros defined elsewhere (a header, a
-command-line ``-D``) are not visible, so for those only the names the condition itself
-uses are checked.
+"Depends on" follows the ``#define`` directives of this file and, when one is supplied,
+the definitions of a :class:`~cpre.MacroConfiguration`: a name is replaced by the names
+its replacement list mentions, repeatedly. Macros defined anywhere else (a header that was
+not turned into a configuration) are not visible, so for those only the names the
+condition itself uses are checked, unless ``strict_merge`` is set: then a name nothing
+defines is assumed to depend on whatever a body between two blocks changes.
 """
 
 from __future__ import annotations
@@ -44,6 +46,7 @@ from dataclasses import dataclass
 from functools import cached_property
 
 from ._types import FindingKind
+from .configuration import MacroConfiguration, UnknownNamePolicy
 from .expressions import expression_atoms_in_order, expressions_differ
 from .lexer import lex, macro_name, strip_comments
 from .model import (
@@ -84,7 +87,9 @@ _OPAQUE_DIRECTIVES = frozenset({"include", "include_next", "import", "pragma"})
 _PRAGMA_OPERATOR = "_Pragma"
 
 _DEFINED_OPERAND = re.compile(r"\bdefined\s*(?:\(\s*[A-Za-z_]\w*\s*\)|[A-Za-z_]\w*)")
-_IDENTIFIER = re.compile(r"[A-Za-z_]\w*")
+# Not preceded by a word character or a dot, so the ``U`` of ``1U`` or ``f`` of ``1.5f`` is
+# part of a number, not a name.
+_IDENTIFIER = re.compile(r"(?<![\w.])[A-Za-z_]\w*")
 _WHOLE_IDENTIFIER = re.compile(r"[A-Za-z_]\w*\Z")
 _CALL = re.compile(r"([A-Za-z_]\w*)\s*\(")
 _TOKEN = re.compile(
@@ -217,18 +222,27 @@ def _is_atomic(replacement: str) -> bool:
 
 
 def _scan_directives(
-    source: str,
-) -> tuple[list[_Mutation], dict[str, list[str]], set[str]]:
+    source: str, configuration: MacroConfiguration | None = None
+) -> tuple[list[_Mutation], dict[str, list[str]], set[str], set[str]]:
     """What the directives of ``source`` can do to macros.
 
     Returns the directives that may change a macro, in source order; each name's
     replacement lists from the ``#define`` lines of this file; and the names defined as
     something other than a single token or a parenthesized expression (a function-like
-    macro, or a list such as ``X || Y`` that regroups when the text around it changes).
+    macro, or a list such as ``X || Y`` that regroups when the text around it changes);
+    and the names defined as function-like macros.
+    The definitions of ``configuration`` come first: they are in force before the file.
     """
     found: list[_Mutation] = []
     definitions: dict[str, list[str]] = {}
     unsafe_to_regroup: set[str] = set()
+    function_like: set[str] = set()
+    for definition in configuration.definitions if configuration is not None else ():
+        definitions.setdefault(definition.name, []).append(definition.replacement)
+        if definition.parameters is not None:
+            function_like.add(definition.name)
+        if definition.parameters is not None or not _is_atomic(definition.replacement):
+            unsafe_to_regroup.add(definition.name)
     for line in lex(source).lines:
         directive = line.directive
         if directive is None:
@@ -246,11 +260,13 @@ def _scan_directives(
             if directive.name == "define" and name is not None:
                 replacement = operand.lstrip()[len(name) :]
                 definitions.setdefault(name, []).append(replacement)
+                if replacement.startswith("("):
+                    function_like.add(name)
                 if replacement.startswith("(") or not _is_atomic(replacement):
                     unsafe_to_regroup.add(name)
         elif directive.name in _OPAQUE_DIRECTIVES:
             found.append(_Mutation(line.start_offset, directive.name, None))
-    return found, definitions, unsafe_to_regroup
+    return found, definitions, unsafe_to_regroup, function_like
 
 
 class _Finder:
@@ -259,8 +275,12 @@ class _Finder:
         source: str,
         limits: ResourceLimits,
         budget: AnalysisBudget,
+        configuration: MacroConfiguration | None = None,
+        strict_merge: bool = False,
     ) -> None:
         self._source = source
+        self._configuration = configuration
+        self._strict_merge = strict_merge
         self._line_sensitive: int | None = None
         self._limits = limits
         self._budget = budget
@@ -276,8 +296,28 @@ class _Finder:
         return strip_comments(self._source)
 
     @cached_property
+    def _scanned(
+        self,
+    ) -> tuple[list[_Mutation], dict[str, list[str]], set[str], set[str]]:
+        return _scan_directives(self._source, self._configuration)
+
+    @property
     def _directives(self) -> tuple[list[_Mutation], dict[str, list[str]], set[str]]:
-        return _scan_directives(self._source)
+        mutations, definitions, unsafe, _ = self._scanned
+        return mutations, definitions, unsafe
+
+    @property
+    def _function_like(self) -> set[str]:
+        return self._scanned[3]
+
+    @cached_property
+    def _first_seen(self) -> dict[str, int]:
+        """The offset of the first ``#define`` or ``#undef`` of each name in the file."""
+        seen: dict[str, int] = {}
+        for item in self._scanned[0]:
+            if item.macro is not None and item.name in {"define", "undef"}:
+                seen.setdefault(item.macro, item.offset)
+        return seen
 
     @cached_property
     def _mutation_offsets(self) -> list[int]:
@@ -397,6 +437,24 @@ class _Finder:
                 return False
         return True
 
+    def _has_unseen_name(self, names: frozenset[str], at: int) -> bool:
+        """Whether some name has no definition before offset ``at`` in the file or the configuration.
+
+        Such a name may be defined by a header cpre never read, as anything, including a
+        name a body changes. A name the configuration marks undefined is known. A name the
+        file defines only after ``at`` is still unknown at ``at``.
+        """
+        configuration = self._configuration
+        if configuration is not None and configuration.unknown_names is UnknownNamePolicy.UNDEFINED:
+            return False  # Closed world: a name nothing defines is undefined.
+        configured = (
+            {item.name for item in configuration.definitions} | configuration.undefined
+            if configuration is not None
+            else set()
+        )
+        first = self._first_seen
+        return any(name not in configured and first.get(name, at) >= at for name in names)
+
     def _body_is_safe(self, block: ConditionalBlock, depends_on: frozenset[str]) -> bool:
         """Whether nothing in the block's body can change what ``depends_on`` mean."""
         start = block.branches[0].directive.source_range.end.offset
@@ -405,11 +463,12 @@ class _Finder:
         mutations = self._directives[0]
         offsets = self._mutation_offsets
         index = bisect_left(offsets, start)
+        unseen = self._strict_merge and self._has_unseen_name(depends_on, start)
         while index < len(offsets) and offsets[index] < end:
             item = mutations[index]
             if item.name in _OPAQUE_DIRECTIVES or item.name == "digraph":
                 return False
-            if item.macro is None or item.macro in depends_on:
+            if item.macro is None or item.macro in depends_on or unseen:
                 return False
             index += 1
         # ``_Pragma`` can do what ``#pragma`` does, directly or through a macro of this file.
@@ -977,16 +1036,19 @@ class _Finder:
         return -1
 
     def _calls_are_known(self, test: str) -> bool:
-        """Whether every call in ``test`` is to ``defined``, a ``__has_*`` operator or a macro of this file.
+        """Whether every call in ``test`` is to ``defined``, a ``__has_*`` operator or a function-like macro.
 
         A branch after the first one was not evaluated when an earlier branch was taken, so an
         invalid expression there (``FOO(1)`` with no macro ``FOO``) was harmless. In a joined
         condition it is always read and would fail to preprocess.
         """
-        _, definitions, _ = self._directives
         for match in _CALL.finditer(test):
             name = match.group(1)
-            if name != "defined" and not name.startswith("__has_") and name not in definitions:
+            if (
+                name != "defined"
+                and not name.startswith("__has_")
+                and name not in self._function_like
+            ):
                 return False
         return True
 
@@ -1098,6 +1160,8 @@ def find_block_rewrites(
     limits: ResourceLimits,
     budget: AnalysisBudget,
     structure: ConditionalStructureTree | None = None,
+    configuration: MacroConfiguration | None = None,
+    strict_merge: bool = False,
 ) -> list[BlockRewrite]:
     """The adjacent sibling blocks in ``tree`` that could be written with fewer blocks.
 
@@ -1110,7 +1174,7 @@ def find_block_rewrites(
     structure = structure or parse_conditionals(source)
     if structure.diagnostics:
         return []
-    finder = _Finder(source, limits, budget)
+    finder = _Finder(source, limits, budget, configuration, strict_merge)
     finder._scan_siblings(tree.groups, structure.blocks)
     return [item for item in finder.rewrites if not finder.shifts_a_line_test(item, structure)]
 

@@ -14,8 +14,13 @@ from ..preprocessing import PreprocessDiagnostic, PreprocessingContext
 from ..text_reports import format_error, format_incomplete
 
 
-def add_configuration_options(parser: argparse.ArgumentParser) -> None:
-    """The options that build the external macro configuration, shared by ``preprocess`` and ``evaluate``."""
+def add_configuration_options(parser: argparse.ArgumentParser, *, analysis: bool = False) -> None:
+    """The options that build the external macro configuration.
+
+    Shared by ``preprocess`` and ``evaluate``. The default command (``analysis=True``) uses
+    the macros only to follow definitions, so it takes neither a name policy nor standard
+    macros.
+    """
     parser.add_argument(
         "--define",
         "-D",
@@ -23,7 +28,13 @@ def add_configuration_options(parser: argparse.ArgumentParser) -> None:
         action="append",
         default=[],
         metavar="NAME[=VALUE]",
-        help="define an external object-like macro; NAME alone defines an empty macro",
+        help=(
+            "macro definition the adjacent-block checks follow (not used to evaluate "
+            "conditions); NAME alone defines an empty macro, which --strict-merge counts as known and "
+            "which keeps a condition that expands to nothing from being deleted"
+            if analysis
+            else "define an external object-like macro; NAME alone defines an empty macro"
+        ),
     )
     parser.add_argument(
         "--undef",
@@ -32,7 +43,11 @@ def add_configuration_options(parser: argparse.ArgumentParser) -> None:
         action="append",
         default=[],
         metavar="NAME",
-        help="explicitly mark an external macro as undefined",
+        help=(
+            "mark NAME as undefined for the adjacent-block checks (not used to evaluate conditions)"
+            if analysis
+            else "explicitly mark an external macro as undefined"
+        ),
     )
     parser.add_argument(
         "--config-from",
@@ -42,10 +57,16 @@ def add_configuration_options(parser: argparse.ArgumentParser) -> None:
         type=Path,
         metavar="PATH",
         help=(
-            "derive the initial macro configuration from the final macro state of a seed "
-            "file such as flags.h; repeatable, applied in order with the last definition "
-            "winning; -D/-U are visible while seeds are evaluated and always take precedence"
-        ),
+            (
+                "follow the macros a seed file such as config.h defines in the adjacent-block "
+                "checks (conditions are still analyzed as before); "
+            )
+            if analysis
+            else "derive the initial macro configuration from the final macro state of a seed "
+            "file such as flags.h; "
+        )
+        + "repeatable, applied in order with the last definition winning; -D/-U are visible "
+        "while seeds are evaluated and always take precedence",
     )
     parser.add_argument(
         "--config-exclude",
@@ -59,12 +80,26 @@ def add_configuration_options(parser: argparse.ArgumentParser) -> None:
             "sees its own definition, and -D/-U of the same name still win"
         ),
     )
-    parser.add_argument(
-        "--unknown-names",
-        choices=[policy.value for policy in UnknownNamePolicy],
-        default=UnknownNamePolicy.OPEN.value,
-        help=("policy for names absent from the external configuration (default: open)"),
-    )
+    if analysis:
+        parser.set_defaults(unknown_names=UnknownNamePolicy.OPEN.value, standard_macro=[])
+        parser.add_argument(
+            "--closed-world",
+            dest="unknown_names",
+            action="store_const",
+            const=UnknownNamePolicy.UNDEFINED.value,
+            help=(
+                "treat every name that the file, -D/-U and --config-from do not define as "
+                "undefined, so --strict-merge only guards names those define "
+                "(--config-from-unknown-names still sets the policy for the seeds)"
+            ),
+        )
+    else:
+        parser.add_argument(
+            "--unknown-names",
+            choices=[policy.value for policy in UnknownNamePolicy],
+            default=UnknownNamePolicy.OPEN.value,
+            help=("policy for names absent from the external configuration (default: open)"),
+        )
     parser.add_argument(
         "--config-from-unknown-names",
         dest="config_from_unknown_names",
@@ -76,13 +111,14 @@ def add_configuration_options(parser: argparse.ArgumentParser) -> None:
             "flags header with normal C semantics without making the target closed-world"
         ),
     )
-    parser.add_argument(
-        "--standard-macro",
-        action="append",
-        default=[],
-        metavar="NAME=VALUE",
-        help="supply a deterministic value for a supported standard predefined macro",
-    )
+    if not analysis:
+        parser.add_argument(
+            "--standard-macro",
+            action="append",
+            default=[],
+            metavar="NAME=VALUE",
+            help="supply a deterministic value for a supported standard predefined macro",
+        )
 
 
 def parse_name_value(value: str, option: str) -> tuple[str, str]:
