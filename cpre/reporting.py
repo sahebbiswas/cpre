@@ -6,9 +6,11 @@ import re
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 
+from ._block_notes import block_note
 from ._style import Style, diff_segments, paint_segments, style_for
+from ._types import FindingKind
 from .expressions import expression_predicates, expressions_differ, format_expression
-from .model import ConditionalBranch, ConditionalGroup, ConditionalTree
+from .model import BlockSuggestion, ConditionalBranch, ConditionalGroup, ConditionalTree
 
 # A string or character literal (kept as written) or a run of whitespace (shown as one space).
 # An apostrophe right after a letter or digit separates digits (``1'000``), it opens no literal.
@@ -40,13 +42,30 @@ def branch_is_notable(branch: ConditionalBranch) -> bool:
     return branch.analysis.status in {"dead", "redundant"} or branch_differs_from_source(branch)
 
 
+# What the text report shows for each way a block can be written with fewer blocks:
+# the badge, and the label of the detail line under it.
+_BLOCK_SUGGESTION_LABELS = {
+    FindingKind.MERGEABLE_BLOCKS.value: ("MERGE", "merge"),
+    FindingKind.COMPLEMENTARY_BLOCKS.value: ("ELSE", "else"),
+}
+
+
+def block_suggestions(group: ConditionalGroup) -> list[BlockSuggestion]:
+    """Every way ``group`` could be written with fewer blocks, mergeable runs first.
+
+    A suggestion of a kind this version does not know is left out of the text report and
+    the counts, as a consumer of the JSON is told to do; it is still listed in the JSON.
+    """
+    found = []
+    if group.merge_with:
+        found.append(BlockSuggestion(FindingKind.MERGEABLE_BLOCKS.value, group.merge_with))
+    found.extend(item for item in group.suggestions if item.kind in _BLOCK_SUGGESTION_LABELS)
+    return found
+
+
 def merge_note(group: ConditionalGroup) -> str:
     """Why ``group`` is reported as mergeable: where the following blocks start."""
-    lines = group.merge_with
-    if len(lines) == 1:
-        return f"the same condition is tested again at line {lines[0]}; the blocks can be merged"
-    where = ", ".join(str(line) for line in lines[:-1]) + f" and {lines[-1]}"
-    return f"the same condition is tested again at lines {where}; the blocks can be merged"
+    return block_note(FindingKind.MERGEABLE_BLOCKS, group.merge_with)
 
 
 def analyzed(group: ConditionalGroup) -> bool:
@@ -72,7 +91,7 @@ def compute_visibility(tree: ConditionalTree, verbose: bool) -> Visibility:
             return False
         group_visible = False
         for index, branch in enumerate(group.branches):
-            notable = branch_is_notable(branch) or (index == 0 and bool(group.merge_with))
+            notable = branch_is_notable(branch) or (index == 0 and bool(block_suggestions(group)))
             child_visible = False
             for child in branch.children:
                 child_visible = visit_group(child) or child_visible
@@ -138,6 +157,9 @@ def group_dict(group: ConditionalGroup, visibility: Visibility) -> dict[str, obj
         "line": group.line,
         "end_line": group.end_line,
         "merge_with": list(group.merge_with),
+        "suggestions": [
+            {"kind": item.kind, "lines": list(item.lines)} for item in group.suggestions
+        ],
         "branches": [
             branch_dict(branch, visibility)
             for branch in group.branches
@@ -271,9 +293,9 @@ def text_lines(
             assert branch.analysis is not None
             analysis = branch.analysis
             label, role = branch_kind(branch)
-            merges = index == 0 and bool(group.merge_with)
-            if merges and role in {"ok", "simplify"}:
-                label, role = "MERGE", "merge"
+            suggestions = block_suggestions(group) if index == 0 else []
+            if suggestions and role in {"ok", "simplify"}:
+                label, role = _BLOCK_SUGGESTION_LABELS[suggestions[0].kind][0], "merge"
             shown_text = compact_whitespace(branch.expression_text or "")
             condition = f" {shown_text}" if shown_text else ""
             yield (
@@ -287,8 +309,10 @@ def text_lines(
                 continue
             if analysis.reason:
                 yield f"{detail}{style.paint('why', 'dim')}  {analysis.reason}"
-            if merges:
-                yield f"{detail}{style.paint('merge', 'dim')}  {merge_note(group)}"
+            for suggestion in suggestions:
+                name = _BLOCK_SUGGESTION_LABELS[suggestion.kind][1]
+                note = block_note(suggestion.kind, suggestion.lines)
+                yield f"{detail}{style.paint(name, 'dim')}  {note}"
             source = format_expression(branch.expression) if branch.expression is not None else None
             shown = source
             if source is not None and analysis.simplified is not None:
@@ -351,7 +375,8 @@ class FindingCounts:
     ``failing`` is what ``--fail-on-findings`` acts on; ``simplifiable`` counts reachable
     conditions that have a shorter equivalent form, which are reported but never fail a run.
     ``mergeable`` counts runs of adjacent blocks that test one condition and could be a
-    single block.
+    single block; ``complementary`` counts pairs of adjacent blocks that test a condition
+    and its opposite and could be one ``#if``/``#else`` block.
     """
 
     dead: int = 0
@@ -359,6 +384,7 @@ class FindingCounts:
     simplifiable: int = 0
     macros: int = 0
     mergeable: int = 0
+    complementary: int = 0
 
     def __add__(self, other: FindingCounts) -> FindingCounts:
         return FindingCounts(
@@ -367,11 +393,12 @@ class FindingCounts:
             self.simplifiable + other.simplifiable,
             self.macros + other.macros,
             self.mergeable + other.mergeable,
+            self.complementary + other.complementary,
         )
 
     @property
     def failing(self) -> int:
-        return self.dead + self.redundant + self.macros + self.mergeable
+        return self.dead + self.redundant + self.macros + self.mergeable + self.complementary
 
     @property
     def total(self) -> int:
@@ -386,6 +413,9 @@ def count_findings(tree: ConditionalTree) -> FindingCounts:
             continue
         if group.merge_with:
             counts += FindingCounts(mergeable=1)
+        for suggestion in block_suggestions(group):
+            if suggestion.kind == FindingKind.COMPLEMENTARY_BLOCKS.value:
+                counts += FindingCounts(complementary=1)
         for branch in group.branches:
             assert branch.analysis is not None
             status = branch.analysis.status
@@ -403,7 +433,7 @@ def has_findings(tree: ConditionalTree) -> bool:
     for group in tree.groups:
         if not analyzed(group):
             continue
-        if group.merge_with:
+        if block_suggestions(group):
             return True
         for branch in group.branches:
             assert branch.analysis is not None
@@ -430,6 +460,7 @@ __all__ = [
     "format_report",
     "has_findings",
     "label_width",
+    "block_suggestions",
     "merge_note",
     "line_label",
     "render_report",

@@ -15,6 +15,19 @@ raise that document's schema major version and are listed here (see the
 ## [Unreleased]
 
 ### Added
+- Adjacent blocks that test a condition and its opposite are reported as one `#if`/`#else` block
+  (#241). `#if A … #endif` followed by `#if !A … #endif` (blank lines only between them, no
+  comment on either junction directive, no `#else`/`#elif`) carries an exact suggested edit that
+  joins them with an `#else`. The same safety rules as for mergeable blocks apply, and `#if A`
+  followed by `#ifndef A` is never a pair, because a value test and a definedness test differ. A
+  definition such as `#define A X || Y` blocks the pair, since `!A` would regroup it. See
+  [Complementary blocks](docs/complementary-blocks.md).
+  - Text: an `ELSE` badge and an `else` line, counted as `complementary block pairs` in the summary.
+  - JSON: every group of `cpre.analysis/1` has `suggestions`, a list of `{kind, lines}` (`[]` when
+  none). A compatible addition.
+  - SARIF: rule `CPRE006` (`complementary-blocks`, `warning`) with a `relatedLocations` entry and a `fix`.
+  - Python: `FindingKind.COMPLEMENTARY_BLOCKS`.
+  - A pair counts as a finding for `--fail-on-findings`.
 - Adjacent blocks that test the same condition are reported as mergeable (#239). Two plain
   `#if`/`#ifdef`/`#ifndef` blocks with equivalent conditions and nothing but blank lines between
   them could be one block; a run of three or more is one finding. A pair is reported only when

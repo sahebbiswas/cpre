@@ -177,6 +177,18 @@ class ConditionalBranch:
     analysis: BranchAnalysis | None = None
 
 
+@dataclass(frozen=True)
+class BlockSuggestion:
+    """A way to write a block, and the blocks next to it, with fewer blocks.
+
+    ``kind`` is the value of the matching :class:`cpre.FindingKind`; ``lines`` are the
+    lines of the other blocks the suggestion involves, in source order.
+    """
+
+    kind: str
+    lines: tuple[int, ...]
+
+
 @dataclass
 class ConditionalGroup:
     """One ``#if`` ... ``#endif`` block with its ``#elif``/``#else`` branches.
@@ -185,12 +197,16 @@ class ConditionalGroup:
     one with only blank lines between them and test an equivalent condition, so the whole
     run could be one block. It is set by :func:`cpre.analyze_source`, on the first block
     of a run, and is empty everywhere else.
+
+    ``suggestions`` holds every other way the block could be written with fewer blocks
+    (see :class:`BlockSuggestion`); mergeable runs are not repeated there.
     """
 
     line: int
     end_line: int | None = None
     branches: list[ConditionalBranch] = field(default_factory=list)
     merge_with: tuple[int, ...] = ()
+    suggestions: tuple[BlockSuggestion, ...] = ()
 
 
 @dataclass

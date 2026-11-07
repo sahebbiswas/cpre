@@ -10,7 +10,7 @@
 
 cpre has grown beyond a conditional-linting CLI into a set of focused, integration-oriented C/C++ preprocessing primitives. The surfaces are deliberately separate so callers can choose the level of interpretation they need:
 
-- **Symbolic conditional analysis** — finds dead and redundant branches, adjacent blocks that test the same condition and could be one block, and distinguishes exact from contextual simplifications using bounded, deterministic ROBDD-backed reasoning. Known macro assumptions can constrain proofs without silently turning unknown macros into false.
+- **Symbolic conditional analysis** — finds dead and redundant branches, adjacent blocks that test the same condition (or its opposite) and could be one block or one `#if`/`#else`, and distinguishes exact from contextual simplifications using bounded, deterministic ROBDD-backed reasoning. Known macro assumptions can constrain proofs without silently turning unknown macros into false.
 - **Exact Boolean proofs and witnesses** — public APIs support satisfiability, implication, equivalence, exact simplification, and deterministic witness assignments, with explicit incomplete results when proof budgets are exhausted.
 - **Lossless conditional structure** — `parse_conditionals()` exposes source-preserving blocks, directives, tokens, physical ranges, recovery diagnostics, and C23 `#elifdef`/`#elifndef` structure for refactoring and source-aware tools.
 - **Macro Boolean simplification and rewriting** — analyzes object-like `#define` replacements with bounded ROBDD proofs, supporting both ordinary C truth semantics and opt-in symbolic-literal mode for the literals `0` and `1` (`--symbolic-literal N`, repeatable). Opt-in `--expand-macros` simplifies through other macros defined in the same source (`#define D (A && C)` with `#define A (B || C)` becomes `(!!C)`), report-only, so it cannot be combined with `--rewrite`, `--diff` or `--check`. Dedicated `simplify-macros` / `analyze-macros` CLI commands and Python APIs (`simplify_macros()`, `rewrite_macros()`) report and safely apply proven-equivalent simplifications in-place.
@@ -64,7 +64,7 @@ Scan a directory recursively and emit SARIF:
 cpre --recursive --sarif src > cpre.sarif
 ```
 
-Fail CI when dead, redundant, or mergeable branches, or simplifiable macros, are found:
+Fail CI when dead, redundant, mergeable, or complementary branches, or simplifiable macros, are found:
 
 ```bash
 cpre --recursive --fail-on-findings src
