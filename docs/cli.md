@@ -579,7 +579,14 @@ cpre simplify-blocks --check src/*.c          # exit 1, naming each file that wo
 cpre simplify-blocks --rewrite src/config.c   # edit in place (alias --in-place)
 ```
 
-- Each round applies in one batch every edit that does not overlap an earlier one (the outermost, earliest range wins, since [edits can overlap](collapsible-nesting.md#edits-can-overlap)); it analyzes and repeats until nothing more applies (merging two blocks can make a third adjacent), then re-analyzes the result; if a round fails that check (the text no longer analyzes completely, an applied finding is still reported, or a dead, redundant or simplifiable condition appears), nothing is written, an error is printed and the status is `2`. A new block suggestion, such as a block that now holds only one block, is not a failure.
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:3ea019f95fef919b46f1c05d06790e4e55173de468b11debb396b2a48fd39be8 -->
+
+- Each round applies in one batch every edit that does not overlap an earlier one (the outermost, earliest range wins, since [edits can overlap](collapsible-nesting.md#edits-can-overlap)).
+- After every round, cpre analyzes and verifies the result before repeating until no more edits apply (merging two blocks can make a third adjacent). Verification fails if the text no longer analyzes completely, an applied finding is still reported, or the count of any finding kind outside `REWRITE_KINDS` increases, including contextual simplifications. If a round fails verification, nothing is written, an error is printed and the status is `2`. A new block suggestion alone, such as a block that now holds only one block, is not a failure.
+
+<!-- /coderabbit-ai-generated:v1 -->
 - Line endings, a missing final newline and every byte outside the edited ranges are kept.
 - `--collapse-nesting` also applies the [collapsible nesting](collapsible-nesting.md) suggestion, a style change that is off by default.
 - `-D`, `-U`, `--config-from`, `--config-exclude`, `--config-from-unknown-names` and `--strict-merge` mean what they mean for `cpre` (see [Macros defined elsewhere](mergeable-blocks.md#macros-defined-elsewhere)); the limit options and `--recursive` apply too.
