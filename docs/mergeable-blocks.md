@@ -52,9 +52,20 @@ A run of three or more blocks is one finding that lists every later block. Adjac
 
 cpre follows `#define`s in the same file. If a condition names `FEATURE`, the file defines `FEATURE` as `LEVEL`, and the first block holds `#undef LEVEL`, the pair is not reported. A condition that uses a name defined as `__LINE__` or `__COUNTER__` is not reported either, and neither is one whose equivalence depends on regrouping a function-like or unparenthesized definition (`#define A X || Y` makes `A && B` and `B && A` different tokens).
 
-### What is not tracked
+### Macros defined elsewhere
 
-Macros defined in a header or on the command line are not followed, as in the rest of the analysis. If `FEATURE` is defined in a header as depending on `LEVEL` and the first block redefines `LEVEL`, cpre does not see the connection, so read the pair before accepting the edit when a body defines macros.
+A header or a command-line `-D` is not read unless you tell cpre about it. Without a configuration, if `FEATURE` is defined in a header as depending on `LEVEL` and the first block redefines `LEVEL`, cpre does not see the connection, so read the pair before accepting the edit when a body defines macros.
+
+Give the definitions with `-D`/`-U`, `--config-from` (a seed header such as `config.h`) or, in Python, `analyze_source(..., configuration=MacroConfiguration(...))`, and they are followed exactly like `#define`s in the file: `-D FEATURE=LEVEL` keeps the pair from the example above apart, a function-like or unparenthesized definition blocks the rewrites that regroup it, and a definition that reaches `__LINE__`, `__COUNTER__`, `_Pragma` or a `##` is treated as the file's own would be.
+
+```sh
+cpre --config-from config.h src/driver.c
+cpre -D FEATURE=LEVEL src/driver.c
+```
+
+A configuration is not an assumption. It adds definitions that the checks follow, so it removes findings (the one exception: a configured function-like macro makes a call to it in a later `#elif` known, which can allow a [join](joinable-branches.md)), `depends_on_assumptions` stays `False`, and it can be combined with assumptions in the API. It has no other effect on the analysis of the conditions. The options are the same ones `cpre preprocess` takes (`-D`, `-U`, `--config-from`, `--config-exclude`, `--config-from-unknown-names`); `--unknown-names` and `--standard-macro` are not accepted here.
+
+For a header you do not have a configuration for, `--strict-merge` (API: `strict_merge=True`) assumes that a name neither the file nor the configuration defines may depend on anything a block body defines or undefines, and so does not suggest merging (or making an `#else` of) two blocks whose first body defines or undefines any macro when such a name is tested. It removes some true positives, such as a body of unrelated `#define`s. A closed-world configuration (`unknown_names="undefined"`; `--closed-world` on the command line) makes every name known, so strict mode then removes nothing. A `configuration` that is not a `MacroConfiguration` raises `AnalysisError`. The default is unchanged.
 
 ### Assumptions
 

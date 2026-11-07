@@ -15,6 +15,18 @@ raise that document's schema major version and are listed here (see the
 ## [Unreleased]
 
 ### Added
+- The suggestions for rewriting adjacent blocks follow macros from a macro configuration (#246).
+  `analyze_source(configuration=MacroConfiguration(...))` and the default command's `-D`, `-U`,
+  `--config-from`, `--config-exclude`, `--config-from-unknown-names` and `--closed-world` add the configuration's
+  definitions to the dependency closure that the mergeable, complementary, joinable, collapsible
+  and empty-block checks use: a body that changes a macro a header definition uses keeps two
+  blocks apart, and a header macro that is function-like, unparenthesized, volatile (`__LINE__`,
+  `__COUNTER__`, `_Pragma`) or built with `##` is treated like one defined in the file. The
+  configuration is not an assumption, so it only removes findings and `depends_on_assumptions`
+  stays `False`. Without one, results are unchanged. **Behaviour change** only when a
+  configuration is given. New opt-in `--strict-merge` / `strict_merge=True` assumes a name nothing
+  defines may depend on anything a block body changes, which suggests fewer merges. See
+  [Mergeable blocks](docs/mergeable-blocks.md#macros-defined-elsewhere).
 - Blocks with no content and trailing branches with no content are reported (#243). A block whose
   branches hold only blank lines (or empty blocks) is `EMPTY_BLOCK` and carries an exact edit that
   deletes it; the last `#elif`/`#else` branches of a block that have no body are `EMPTY_BRANCH`
