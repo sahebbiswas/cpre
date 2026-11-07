@@ -276,6 +276,8 @@ for finding in result.findings:
             report_complementary_blocks(finding)
         case cpre.FindingKind.JOINABLE_BRANCHES:
             report_joinable_branches(finding)
+        case cpre.FindingKind.COLLAPSIBLE_NESTING:
+            report_collapsible_nesting(finding)
 ```
 
 Findings carry physical source location, directive/condition context, a human-readable reason, and structured simplification/edit fields where applicable. `depends_on_assumptions` identifies proofs that materially depend on caller-supplied macro assumptions.
@@ -285,6 +287,8 @@ A `MERGEABLE_BLOCKS` finding is about a run of adjacent blocks rather than one b
 A `COMPLEMENTARY_BLOCKS` finding is shaped the same way: `location` is the first block's opening directive, `related_locations` holds the opening directive of the block that tests the opposite condition, and `edit` rewrites the pair as one `#if`/`#else` (`FixConfidence.EXACT`). See [Complementary blocks](complementary-blocks.md).
 
 A `JOINABLE_BRANCHES` finding is about adjacent branches of one block: `location` is the first joined branch's directive, `related_locations` holds the later joined branches' directives, and `edit` rewrites the run as one branch tested with `||` (`FixConfidence.EXACT`). See [Joinable branches](joinable-branches.md).
+
+A `COLLAPSIBLE_NESTING` finding is located at the outermost block of a chain of blocks that each hold only the next; `related_locations` holds the inner blocks' opening directives and `edit` replaces the whole outer block with one `#if` that tests the conditions joined with `&&` (`FixConfidence.EXACT`). It is a style suggestion: it does not affect `--fail-on-findings`. See [Collapsible nesting](collapsible-nesting.md).
 
 Treat the set of kinds as open: a new release may add a `FindingKind` member, so a consumer that matches on kind should have a default branch rather than assume the four original kinds are all there is.
 
@@ -321,6 +325,8 @@ if edit is not None:
     replacement = edit.replacement
     confidence = edit.confidence
 ```
+
+The edits of one result can overlap: a [collapsible nesting](collapsible-nesting.md#edits-can-overlap) or a [joinable branch](joinable-branches.md) edit covers a body that holds other findings. Apply them one at a time, outermost first, analyzing again in between, rather than all together.
 
 `SourceRange.end` is exclusive. Locations are physical, one-based source positions. Backslash-continued directives retain physical line/column provenance.
 

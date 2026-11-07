@@ -29,6 +29,12 @@ def block_note(kind: FindingKind | str, lines: Sequence[int]) -> str:
             f"the branches at {where(lines)} have the same body; "
             "they can be joined into one branch with ||"
         )
+    if kind is FindingKind.COLLAPSIBLE_NESTING:
+        noun = "a nested block" if len(lines) == 1 else "nested blocks"
+        return (
+            f"the only content of this block is {noun} at {where(lines)}; "
+            "they can be one #if testing the conditions together with &&"
+        )
     raise ValueError(f"no note for {kind}")
 
 
