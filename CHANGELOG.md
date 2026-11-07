@@ -15,6 +15,7 @@ raise that document's schema major version and are listed here (see the
 ## [Unreleased]
 
 ### Added
+- `cpre simplify-blocks` applies the exact block edits (mergeable, complementary, joinable, empty block and empty branch; `--collapse-nesting` adds the nesting suggestion) with `--rewrite`, `--diff`, `--check` and `--json` (`cpre.simplify-blocks/1`) (#245). The new `cpre.block_rewrite.rewrite_blocks()` repeats analysis and edits until nothing more applies and verifies every round before anything is written.
 - The suggestions for rewriting adjacent blocks follow macros from a macro configuration (#246).
   `analyze_source(configuration=MacroConfiguration(...))` and the default command's `-D`, `-U`,
   `--config-from`, `--config-exclude`, `--config-from-unknown-names` and `--closed-world` add the configuration's
