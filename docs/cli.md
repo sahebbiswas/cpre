@@ -348,6 +348,21 @@ If an integration requires checking only conditional branches or only macro defi
 - `--no-macros`: Disables macro Boolean simplification; only conditional directives are analyzed.
 - `--no-conditionals`: Disables conditional directive analysis; only macro definitions are analyzed.
 
+### Macros defined outside the file
+
+The checks that suggest rewriting adjacent blocks follow `#define`s in the file. To make them follow macros from a header or the command line as well, give the same options `cpre preprocess` takes:
+
+- `-D NAME[=VALUE]`, `-U NAME`: external definitions, as for the compiler.
+- `--config-from PATH` (repeatable): derive definitions from a seed header such as `config.h`; `--config-exclude NAME` and `--config-from-unknown-names {open,undefined}` refine it.
+- `--closed-world`: treat every name the file, `-D`/`-U` and `--config-from` do not define as undefined. With `--strict-merge` this makes strict mode remove nothing, which is right when the configuration is complete. Without it strict mode on the command line is open-world: every other name may come from a header cpre has not read.
+- `--strict-merge`: assume a name that neither the file nor these options define may depend on anything a block body changes, so fewer adjacent blocks are suggested for merging.
+
+```sh
+cpre --config-from build/config.h src/driver.c
+```
+
+These macros are not assumptions: they only add definitions that the rewrite checks follow, so they remove findings (a function-like macro they define can also allow a [join](joinable-branches.md) of a later `#elif` that calls it), and the conditions themselves are analyzed as before. A seed that cannot be read or evaluated is reported on standard error and the run exits with status 2. They have no effect with `--no-conditionals`, which is rejected. See [Mergeable blocks](mergeable-blocks.md#macros-defined-elsewhere).
+
 ### Resource telemetry
 
 `--telemetry` is a diagnostic option that explains how conditional analysis used its resources: distinct atoms, the independent components with their atom, group and node counts, the work consumed, and the limits in force. It never changes findings or exit status. With `--json` each file record gains a `telemetry` object; otherwise the figures go to stderr as `PATH: telemetry: ...` lines, leaving stdout untouched. It cannot be combined with `--no-conditionals` or `--sarif`. Telemetry is diagnostic, not a compatibility contract (see [json-contract.md](json-contract.md#opt-in-diagnostic-data) and [api.md](api.md#resource-telemetry)).
@@ -944,6 +959,16 @@ An incomplete ROBDD computation is never reported as a successful simplification
 
 --no-conditionals
     Disable conditional directive analysis.
+
+-D NAME[=VALUE] / -U NAME / --config-from PATH / --config-exclude NAME
+--config-from-unknown-names {open,undefined}
+    External macro definitions that the block-rewrite checks follow, as for
+    `cpre preprocess`; see "Macros defined outside the file". Not accepted with
+    --no-conditionals.
+
+--strict-merge
+    Assume a name nothing defines may depend on anything a block body changes; fewer
+    merges are suggested.
 
 --telemetry
     Diagnostic only: report atoms, components, nodes and work used by conditional

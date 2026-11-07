@@ -495,3 +495,15 @@ def test_a_valid_macro_operand_is_still_deletable():
     source = "#define V (1 + 2)\n#if A\nx\n#elif V\n#endif\n"
 
     assert len(_branches(source)) == 1
+
+
+def test_a_function_like_macro_with_a_valid_body_does_not_block_the_deletion():
+    source = "#define OK(x) ((x) + 1)\n#if A\nx\n#elif OK(1)\n#endif\n"
+
+    assert len(_branches(source)) == 1
+
+
+def test_a_function_like_macro_with_a_failing_body_blocks_the_deletion():
+    source = "#define BAD(x) x/0\n#if A\nx\n#elif BAD(1)\n#endif\n"
+
+    assert _branches(source) == []

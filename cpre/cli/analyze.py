@@ -13,6 +13,7 @@ from .. import __version__, reporting
 from .._style import Style
 from .._types import AnalysisOptions, AnalysisResult
 from ..api import analyze_source
+from ..configuration import MacroConfiguration, UnknownNamePolicy
 from ..errors import CpreError, ErrorCode
 from ..macro_analysis import MacroAnalysisResult
 from ..model import ConditionalTree
@@ -47,24 +48,12 @@ from ._common import (
     symbolic_literals_from,
 )
 from ._progress import Progress, paused
-
-
-@dataclass
-class _FileResult:
-    path: Path
-    tree: ConditionalTree | None
-    macros: tuple[MacroAnalysisResult, ...]
-    analysis: AnalysisResult | None
-
-
-@dataclass
-class _Run:
-    """Everything the analysis loop collects before any result is written."""
-
-    files: list[_FileResult] = field(default_factory=list)
-    analyses: list[AnalysisResult] = field(default_factory=list)
-    notifications: list[ToolNotification] = field(default_factory=list)
-    had_errors: bool = False
+from .analyze_output import FileResult, Run, TextStreamer, has_findings, write_results
+from .preprocess_configuration import (
+    add_configuration_options,
+    configuration_from_arguments,
+    require_seed_for_seed_options,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -129,6 +118,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_limit_options(parser)
     add_presentation_options(parser)
+    add_configuration_options(parser, analysis=True)
+    parser.add_argument(
+        "--strict-merge",
+        action="store_true",
+        help=(
+            "assume a name that neither the file nor -D/-U/--config-from defines may depend on "
+            "anything a block body changes, so fewer adjacent blocks are suggested for merging"
+        ),
+    )
     parser.add_argument(
         "--macros",
         action="store_true",
@@ -140,13 +138,22 @@ def build_parser() -> argparse.ArgumentParser:
 def _analyze_conditionals(
     path: Path,
     source: str,
-    run: _Run,
+    run: Run,
     *,
     options: AnalysisOptions,
     telemetry: bool,
     echo_telemetry: bool,
+    configuration: MacroConfiguration | None = None,
+    strict_merge: bool = False,
 ) -> tuple[ConditionalTree | None, AnalysisResult]:
-    result = analyze_source(source, filename=str(path), options=options, telemetry=telemetry)
+    result = analyze_source(
+        source,
+        filename=str(path),
+        options=options,
+        telemetry=telemetry,
+        configuration=configuration,
+        strict_merge=strict_merge,
+    )
     run.analyses.append(result)
     if echo_telemetry and result.telemetry is not None:
         for line in telemetry_lines(result.telemetry):
@@ -166,7 +173,7 @@ def _analyze_conditionals(
     return tree, result
 
 
-def _record_failure(path: Path, error: Exception, run: _Run) -> None:
+def _record_failure(path: Path, error: Exception, run: Run) -> None:
     """Report an unreadable or unanalyzable file on stderr and as a SARIF notification."""
     if isinstance(error, CpreError):
         report_failure(path, format_error(error))
@@ -201,20 +208,22 @@ def _analyze_files(
     telemetry: bool = False,
     echo_telemetry: bool = False,
     progress: Progress | None = None,
-    on_file: Callable[[_FileResult], None] | None = None,
-) -> _Run:
+    on_file: Callable[[FileResult], None] | None = None,
+    configuration: MacroConfiguration | None = None,
+    strict_merge: bool = False,
+) -> Run:
     """Analyze each path in order.
 
     ``on_file`` receives every successfully analyzed file as soon as it is done, which is
     how the text report is written while later files are still being analyzed.
     """
-    run = _Run()
+    run = Run()
     for path in paths:
         if progress is not None:
             progress.file_started(path)
         had_errors, run.had_errors = run.had_errors, False
         findings = 0
-        result: _FileResult | None = None
+        result: FileResult | None = None
         try:
             source = read_source(path, newline=None)
             tree: ConditionalTree | None = None
@@ -227,6 +236,8 @@ def _analyze_files(
                     options=options,
                     telemetry=telemetry,
                     echo_telemetry=echo_telemetry,
+                    configuration=configuration,
+                    strict_merge=strict_merge,
                 )
             m_results: tuple[MacroAnalysisResult, ...] = ()
             if enable_macros:
@@ -234,7 +245,7 @@ def _analyze_files(
                     path, source, symbolic_literals, options, expand_macros, progress
                 )
                 run.had_errors = run.had_errors or failed
-            result = _FileResult(path, tree, m_results, c_result)
+            result = FileResult(path, tree, m_results, c_result)
             run.files.append(result)
             findings = file_findings(tree, m_results).total
         except (CpreError, OSError, UnicodeDecodeError) as error:
@@ -246,100 +257,6 @@ def _analyze_files(
         if progress is not None:
             progress.file_done(findings, failed=failed)
     return run
-
-
-def _file_json(
-    file: _FileResult, args: argparse.Namespace, enable_macros: bool, literals: tuple[int, ...]
-) -> tuple[dict[str, object], bool]:
-    return build_file_json(
-        file.path,
-        file.tree,
-        file.macros,
-        verbose=args.verbose,
-        enable_macros=enable_macros,
-        symbolic_literals=literals,
-        analysis=file.analysis,
-        expand_macros=args.expand_macros,
-    )
-
-
-def _combined_report(file: _FileResult, *, verbose: bool, style: Style) -> tuple[str, bool]:
-    return render_combined_report(
-        file.tree,
-        file.macros,
-        verbose=verbose,
-        style=style,
-        incomplete_components=file.analysis.incomplete_components if file.analysis else (),
-    )
-
-
-class _TextStreamer:
-    """Writes each file's text report as the file finishes, then the closing summary.
-
-    The first report needs no separator; every later one is preceded by a blank line, so
-    the output equals the reports joined by blank lines, whenever they are written.
-    """
-
-    def __init__(self, args: argparse.Namespace, style: Style, *, batch: bool) -> None:
-        self._verbose = args.verbose
-        self._style = style
-        self._batch = batch
-        self._written = False
-        self.counts = reporting.FindingCounts()
-
-    def __call__(self, file: _FileResult) -> None:
-        self.counts += file_findings(file.tree, file.macros)
-        report, has_entries = _combined_report(file, verbose=self._verbose, style=self._style)
-        if self._batch and not (self._verbose or has_entries):
-            return
-        heading = f"{self._style.paint(f'== {file.path} ==', 'heading')}\n" if self._batch else ""
-        with paused():
-            if self._written and self._batch:
-                print()
-            print(f"{heading}{report}")
-        self._written = True
-
-    def finish(self) -> None:
-        summary = summary_line(self.counts, self._style)
-        if summary:
-            with paused():
-                print()
-                print(summary)
-
-
-def _write_results(
-    run: _Run,
-    args: argparse.Namespace,
-    *,
-    batch: bool,
-    enable_macros: bool,
-    symbolic_literals: tuple[int, ...],
-) -> None:
-    """Write everything that is not streamed: SARIF and JSON documents."""
-    files = run.files
-    if args.sarif:
-        log = sarif_log(run.analyses, tool_version=__version__, notifications=run.notifications)
-        print(json.dumps(log, indent=2))
-    elif args.json:
-        if batch:
-            documents = []
-            for file in files:
-                f_data, has_visible = _file_json(file, args, enable_macros, symbolic_literals)
-                if args.verbose or has_visible:
-                    documents.append(f_data)
-            print(json.dumps(batch_document("analysis", documents), indent=2))
-        elif files:
-            f_data, _ = _file_json(files[0], args, enable_macros, symbolic_literals)
-            print(json.dumps(top_level("analysis", f_data), indent=2))
-
-
-def _has_findings(files: Sequence[_FileResult]) -> bool:
-    for file in files:
-        if file.tree is not None and reporting.has_findings(file.tree):
-            return True
-        if any(r.simplified for r in file.macros):
-            return True
-    return False
 
 
 def analyze_main(argv: Sequence[str] | None = None) -> int:
@@ -359,9 +276,30 @@ def analyze_main(argv: Sequence[str] | None = None) -> int:
         )
     if args.telemetry and args.sarif:
         parser.error("--telemetry cannot be combined with --sarif")
+    require_seed_for_seed_options(parser, args)
+    configured = bool(
+        args.defines
+        or args.undefined
+        or args.config_from
+        or args.unknown_names != UnknownNamePolicy.OPEN.value
+    )
+    if (configured or args.strict_merge) and args.no_conditionals:
+        parser.error(
+            "-D, -U, --config-from, --closed-world and --strict-merge have no effect with "
+            "--no-conditionals"
+        )
+    configuration: MacroConfiguration | None = None
+    if configured:
+        try:
+            built = configuration_from_arguments(args)
+        except ValueError as error:
+            parser.error(str(error))
+        if built is None:
+            return EXIT_ERROR
+        configuration = built[0]
     batch = is_batch(args)
     text = not (args.json or args.sarif)
-    streamer = _TextStreamer(args, output_style(args), batch=batch) if text else None
+    streamer = TextStreamer(args, output_style(args), batch=batch) if text else None
     with progress_for(args, batch=batch) as progress:
         paths = input_paths(parser, args, progress)
         progress.begin(paths)
@@ -376,11 +314,13 @@ def analyze_main(argv: Sequence[str] | None = None) -> int:
             echo_telemetry=args.telemetry and not args.json,
             progress=progress,
             on_file=streamer,
+            configuration=configuration,
+            strict_merge=args.strict_merge,
         )
     if streamer is not None:
         streamer.finish()
     else:
-        _write_results(
+        write_results(
             run,
             args,
             batch=batch,
@@ -389,6 +329,6 @@ def analyze_main(argv: Sequence[str] | None = None) -> int:
         )
     if run.had_errors:
         return EXIT_ERROR
-    if args.fail_on_findings and _has_findings(run.files):
+    if args.fail_on_findings and has_findings(run.files):
         return EXIT_FINDINGS
     return EXIT_OK

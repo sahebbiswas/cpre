@@ -33,6 +33,7 @@ from .analysis import AnalysisTrace as _AnalysisTrace
 from .analysis import PartialAnalysis as _PartialAnalysis
 from .analysis import _clear_analysis as _engine_clear_analysis
 from .analysis import analyze_tree_partial as _analyze_tree_partial
+from .configuration import MacroConfiguration
 from .errors import (
     AnalysisError,
     CpreError,
@@ -450,8 +451,19 @@ def analyze_source(
     assumptions: MacroAssumptions | Mapping[str, bool] | None = None,
     options: AnalysisOptions | None = None,
     telemetry: bool = False,
+    configuration: MacroConfiguration | None = None,
+    strict_merge: bool = False,
 ) -> AnalysisResult:
     """Analyze source with optional assumptions and deterministic resource limits.
+
+    ``configuration`` supplies macros defined outside the source (command line, a seed
+    header). It is not an assumption: it adds definitions that the checks for
+    rewriting adjacent blocks follow (a body that changes a macro such a definition
+    uses keeps two blocks from being merged), so it removes findings, with one exception: a function-like macro it
+    defines makes a call to that macro in a later ``#elif`` a known call, which can allow a
+    ``JOINABLE_BRANCHES`` finding. ``depends_on_assumptions`` stays ``False``. ``strict_merge=True`` additionally
+    treats a name that neither the file nor the configuration defines as possibly
+    depending on anything a block body changes, which removes more findings.
 
     ``telemetry=True`` additionally fills :attr:`AnalysisResult.telemetry` with
     diagnostic resource figures (see :class:`AnalysisTelemetry`); findings and
@@ -467,6 +479,11 @@ def analyze_source(
     """
 
     normalized = _normalize_assumptions(assumptions)
+    if configuration is not None and not isinstance(configuration, MacroConfiguration):
+        raise AnalysisError(
+            "configuration must be a MacroConfiguration instance",
+            code=ErrorCode.ANALYSIS_FAILURE,
+        )
     resolved_options = options or AnalysisOptions()
     if not isinstance(resolved_options, AnalysisOptions):
         raise AnalysisError(
@@ -522,7 +539,14 @@ def analyze_source(
         for index, group in enumerate(tree.groups):
             if main.group_components[index] in failures:
                 _engine_clear_analysis([group])
-        rewrites = _find_block_rewrites(source, tree, limits=limits, budget=budget)
+        rewrites = _find_block_rewrites(
+            source,
+            tree,
+            limits=limits,
+            budget=budget,
+            configuration=configuration,
+            strict_merge=strict_merge,
+        )
         if baseline is not None:
             paired = _baseline_groups(tree.groups, baseline.tree.groups, {})
             rewrites = [item for item in rewrites if _holds_without_assumptions(item, paired)]
