@@ -140,6 +140,8 @@ For the concrete integer-expression grammar and deterministic implementation-def
 
 ## External macro configuration
 
+The same `MacroConfiguration` can be given to `analyze_source(configuration=...)` and, with `-D`/`-U`/`--config-from`, to the default command, where it makes the suggestions for rewriting adjacent blocks follow the definitions it holds (see [Mergeable blocks](mergeable-blocks.md#macros-defined-elsewhere)).
+
 For build-oriented external macro definitions, prefer `MacroConfiguration` over Boolean `assumptions=`:
 
 ```python
