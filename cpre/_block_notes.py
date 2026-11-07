@@ -35,6 +35,17 @@ def block_note(kind: FindingKind | str, lines: Sequence[int]) -> str:
             f"the only content of this block is {noun} at {where(lines)}; "
             "they can be one #if testing the conditions together with &&"
         )
+    if kind is FindingKind.EMPTY_BLOCK:
+        if lines:
+            return (
+                f"this block has no content, nor do the blocks at {where(lines)}; "
+                "all of it can be deleted"
+            )
+        return "this block has no content; it can be deleted"
+    if kind is FindingKind.EMPTY_BRANCH:
+        if len(lines) == 1:
+            return f"the empty branch at {where(lines)} ends the block; it can be deleted"
+        return f"the empty branches at {where(lines)} end the block; they can be deleted"
     raise ValueError(f"no note for {kind}")
 
 

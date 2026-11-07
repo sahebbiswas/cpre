@@ -83,8 +83,11 @@ def test_crlf_line_endings_are_kept():
     assert rewritten(source, KIND) == "#if A\r\nx;\r\n#else\r\ny;\r\n#endif\r\n"
 
 
-def test_empty_bodies_are_reported():
-    assert rewritten("#if A\n#endif\n#if !A\n#endif\n", KIND) == "#if A\n#else\n#endif\n"
+def test_bodies_that_are_the_same_text_are_kept_in_the_else():
+    assert (
+        rewritten("#if A\nx;\n#endif\n#if !A\nx;\n#endif\n", KIND)
+        == "#if A\nx;\n#else\nx;\n#endif\n"
+    )
 
 
 def test_only_the_first_pair_of_three_blocks_is_reported():
@@ -183,7 +186,7 @@ def test_a_parenthesized_definition_is_fine():
 
 
 def test_a_dead_or_redundant_block_is_reported_as_such_not_as_a_pair():
-    result = cpre.analyze_source("#if A\n#if !A\nx;\n#endif\n#endif\n#if B\n#endif\n")
+    result = cpre.analyze_source("#if A\n#if !A\nx;\n#endif\n#endif\n#if B\nx;\n#endif\n")
 
     assert all(finding.kind is not KIND for finding in result.findings)
     assert [finding.kind for finding in result.findings] == [cpre.FindingKind.DEAD_BRANCH]
@@ -205,8 +208,8 @@ def test_assumptions_can_only_remove_the_finding():
 
 
 def test_a_pair_that_exhausts_the_work_budget_curtails_the_whole_result():
-    pair = "#if A && B\n#endif\n#if !B || !A\n#endif\n"
-    unproven = "#if A && B\n#endif\n// c\n#if !B || !A\n#endif\n"
+    pair = "#if A && B\nx;\n#endif\n#if !B || !A\nx;\n#endif\n"
+    unproven = "#if A && B\nx;\n#endif\n// c\n#if !B || !A\nx;\n#endif\n"
     needed = cpre.analyze_source(unproven, telemetry=True).telemetry.work
 
     starved = cpre.analyze_source(pair, options=cpre.AnalysisOptions(max_work=needed))
@@ -246,18 +249,18 @@ def test_reanalysing_the_rewritten_source_reports_no_pair_and_keeps_other_findin
 
 
 def test_the_tree_records_the_pair_on_its_first_block_only():
-    result = cpre.analyze_source("#if A\n#endif\n#if !A\n#endif\n")
+    result = cpre.analyze_source("#if A\nx;\n#endif\n#if !A\nx;\n#endif\n")
 
     first, second = result.tree.groups
     assert [(item.kind, item.lines) for item in first.suggestions] == [
-        ("complementary_blocks", (3,))
+        ("complementary_blocks", (4,))
     ]
     assert first.merge_with == ()
     assert second.suggestions == ()
 
 
 def test_a_source_without_pairs_has_no_suggestions():
-    result = cpre.analyze_source("#if A\n#endif\n#if B\n#endif\n")
+    result = cpre.analyze_source("#if A\nx;\n#endif\n#if B\nx;\n#endif\n")
 
     assert all(group.suggestions == () for group in result.tree.groups)
 

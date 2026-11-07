@@ -97,6 +97,26 @@ _RULES: tuple[dict[str, object], ...] = (
         },
         "defaultConfiguration": {"level": "note"},
     },
+    {
+        "id": "CPRE009",
+        "name": "empty-block",
+        "shortDescription": {"text": "Conditional block with no content"},
+        "fullDescription": {
+            "text": "A conditional block has no content in any of its branches, so the whole "
+            "block can be deleted."
+        },
+        "defaultConfiguration": {"level": "warning"},
+    },
+    {
+        "id": "CPRE010",
+        "name": "empty-branch",
+        "shortDescription": {"text": "Trailing conditional branch with no content"},
+        "fullDescription": {
+            "text": "The last #elif or #else branches of a block have no content, so they "
+            "can be deleted."
+        },
+        "defaultConfiguration": {"level": "warning"},
+    },
 )
 
 _RULE_INDEX = {str(rule["id"]): index for index, rule in enumerate(_RULES)}
@@ -109,6 +129,8 @@ _RULE_FOR_KIND = {
     FindingKind.COMPLEMENTARY_BLOCKS: ("CPRE006", "warning"),
     FindingKind.JOINABLE_BRANCHES: ("CPRE007", "warning"),
     FindingKind.COLLAPSIBLE_NESTING: ("CPRE008", "note"),
+    FindingKind.EMPTY_BLOCK: ("CPRE009", "warning"),
+    FindingKind.EMPTY_BRANCH: ("CPRE010", "warning"),
 }
 
 # Findings about several adjacent blocks: located at the first block, with the others as
@@ -119,6 +141,8 @@ _BLOCK_KINDS = frozenset(
         FindingKind.COMPLEMENTARY_BLOCKS,
         FindingKind.JOINABLE_BRANCHES,
         FindingKind.COLLAPSIBLE_NESTING,
+        FindingKind.EMPTY_BLOCK,
+        FindingKind.EMPTY_BRANCH,
     }
 )
 _RELATED_MESSAGES = {
@@ -126,6 +150,8 @@ _RELATED_MESSAGES = {
     FindingKind.COMPLEMENTARY_BLOCKS: "Block that can become the #else of the first one",
     FindingKind.JOINABLE_BRANCHES: "Branch with the same body that can be joined into the first one",
     FindingKind.COLLAPSIBLE_NESTING: "Nested block that can be collapsed into the first one",
+    FindingKind.EMPTY_BLOCK: "Empty block inside the first one, deleted with it",
+    FindingKind.EMPTY_BRANCH: "Empty trailing branch that is deleted with the first one",
 }
 
 _NOTIFICATION_DESCRIPTIONS = {
@@ -214,11 +240,16 @@ def _message(finding: Finding) -> str:
 def _fix_description(finding: Finding) -> str:
     assert finding.edit is not None
     if finding.kind in _BLOCK_KINDS:
-        where = block_where([item.line for item in finding.related_locations])
+        lines = [item.line for item in finding.related_locations]
+        where = block_where(lines) if lines else ""
         if finding.kind is FindingKind.COMPLEMENTARY_BLOCKS:
             return f"Make the block starting at {where} the #else of this one"
         if finding.kind is FindingKind.JOINABLE_BRANCHES:
             return f"Join the branches starting at {where} into this one with ||"
+        if finding.kind is FindingKind.EMPTY_BLOCK:
+            return "Delete the empty block"
+        if finding.kind is FindingKind.EMPTY_BRANCH:
+            return "Delete the empty trailing branches"
         if finding.kind is FindingKind.COLLAPSIBLE_NESTING:
             return f"Collapse the nested blocks starting at {where} into this one with &&"
         return f"Merge the blocks starting at {where} into this one"

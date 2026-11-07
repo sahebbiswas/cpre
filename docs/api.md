@@ -278,6 +278,8 @@ for finding in result.findings:
             report_joinable_branches(finding)
         case cpre.FindingKind.COLLAPSIBLE_NESTING:
             report_collapsible_nesting(finding)
+        case cpre.FindingKind.EMPTY_BLOCK | cpre.FindingKind.EMPTY_BRANCH:
+            report_empty(finding)
 ```
 
 Findings carry physical source location, directive/condition context, a human-readable reason, and structured simplification/edit fields where applicable. `depends_on_assumptions` identifies proofs that materially depend on caller-supplied macro assumptions.
@@ -289,6 +291,8 @@ A `COMPLEMENTARY_BLOCKS` finding is shaped the same way: `location` is the first
 A `JOINABLE_BRANCHES` finding is about adjacent branches of one block: `location` is the first joined branch's directive, `related_locations` holds the later joined branches' directives, and `edit` rewrites the run as one branch tested with `||` (`FixConfidence.EXACT`). See [Joinable branches](joinable-branches.md).
 
 A `COLLAPSIBLE_NESTING` finding is located at the outermost block of a chain of blocks that each hold only the next; `related_locations` holds the inner blocks' opening directives and `edit` replaces the whole outer block with one `#if` that tests the conditions joined with `&&` (`FixConfidence.EXACT`). It is a style suggestion: it does not affect `--fail-on-findings`. See [Collapsible nesting](collapsible-nesting.md).
+
+An `EMPTY_BLOCK` finding is located at a block with no content in any branch; `related_locations` holds the opening directives of the empty blocks inside it and `edit` deletes the whole block (`FixConfidence.EXACT`, replacement `""`). An `EMPTY_BRANCH` finding is located at the first of the `#elif`/`#else` branches at the end of a block that have no content; `related_locations` holds the others and `edit` deletes them. Both count for `--fail-on-findings`. See [Empty blocks and branches](empty-blocks.md).
 
 Treat the set of kinds as open: a new release may add a `FindingKind` member, so a consumer that matches on kind should have a default branch rather than assume the four original kinds are all there is.
 

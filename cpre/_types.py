@@ -43,6 +43,8 @@ class FindingKind(str, Enum):
     COMPLEMENTARY_BLOCKS = "complementary_blocks"
     JOINABLE_BRANCHES = "joinable_branches"
     COLLAPSIBLE_NESTING = "collapsible_nesting"
+    EMPTY_BLOCK = "empty_block"
+    EMPTY_BRANCH = "empty_branch"
 
 
 class FixConfidence(str, Enum):
@@ -296,7 +298,10 @@ class Finding:
     :attr:`FindingKind.JOINABLE_BRANCHES` finding sits at the first branch of a run and
     lists the later branches that have the same body; a
     :attr:`FindingKind.COLLAPSIBLE_NESTING` finding sits at the outermost block of a
-    chain and lists the blocks nested directly inside it. It is empty for
+    chain and lists the blocks nested directly inside it; a
+    :attr:`FindingKind.EMPTY_BLOCK` finding sits at a block with no content and lists the
+    empty blocks inside it, and a :attr:`FindingKind.EMPTY_BRANCH` finding sits at the
+    first of the empty trailing branches that can be dropped and lists the others. It is empty for
     every other kind.
     """
 

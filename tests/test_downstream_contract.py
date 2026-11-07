@@ -117,19 +117,25 @@ def test_exact_boolean_query_installed_contract():
 def test_representative_findings_have_stable_kinds_and_ordering():
     source = """\
 #if (A && B) || (A && !B)
+x;
 #endif
 #if ROOT
 #if ROOT && CHILD
+x;
 #endif
 #endif
 #if X || Y
+x;
 #elif X
+x;
 #endif
 #if PARENT
 #if PARENT || OTHER
+x;
 #endif
 #endif
 #if VERSION >= 4 && FLAG && FLAG
+x;
 #endif
 """
 
@@ -155,19 +161,19 @@ def test_representative_findings_have_stable_kinds_and_ordering():
     assert exact.edit.confidence is cpre.FixConfidence.EXACT
     assert exact.depends_on_assumptions is False
 
-    assert contextual.location == cpre.SourceLocation(line=4)
+    assert contextual.location == cpre.SourceLocation(line=5)
     assert contextual.contextual_simplification == cpre.ContextualSimplification(
         original="ROOT && CHILD", replacement="CHILD"
     )
     assert contextual.edit is not None
     assert contextual.edit.confidence is cpre.FixConfidence.CONTEXTUAL
 
-    assert dead.location == cpre.SourceLocation(line=8)
+    assert dead.location == cpre.SourceLocation(line=11)
     assert dead.edit is None
-    assert redundant.location == cpre.SourceLocation(line=11)
+    assert redundant.location == cpre.SourceLocation(line=15)
     assert redundant.edit is None
 
-    assert opaque.location == cpre.SourceLocation(line=14)
+    assert opaque.location == cpre.SourceLocation(line=19)
     assert opaque.opaque_predicates == ("VERSION >= 4",)
 
 

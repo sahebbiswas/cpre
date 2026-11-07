@@ -83,6 +83,7 @@ _OPAQUE_DIRECTIVES = frozenset({"include", "include_next", "import", "pragma"})
 # The operator form of ``#pragma``, which can do the same from inside a body.
 _PRAGMA_OPERATOR = "_Pragma"
 
+_DEFINED_OPERAND = re.compile(r"\bdefined\s*(?:\(\s*[A-Za-z_]\w*\s*\)|[A-Za-z_]\w*)")
 _IDENTIFIER = re.compile(r"[A-Za-z_]\w*")
 _WHOLE_IDENTIFIER = re.compile(r"[A-Za-z_]\w*\Z")
 _CALL = re.compile(r"([A-Za-z_]\w*)\s*\(")
@@ -126,7 +127,10 @@ class BlockRewrite:
       ``first``, and ``related`` is empty;
     * ``COLLAPSIBLE_NESTING``: the whole outermost block, replaced by one block that tests
       the conditions of the whole chain joined by ``&&`` around the innermost body.
-      ``related`` holds the blocks nested inside ``first``.
+      ``related`` holds the blocks nested inside ``first``;
+    * ``EMPTY_BLOCK``: the whole block, deleted. ``related`` holds the empty blocks inside it;
+    * ``EMPTY_BRANCH``: from the first empty trailing branch's directive through the end of
+      the block's last body, deleted. ``branches`` holds the deleted branches of ``first``.
     """
 
     kind: FindingKind
@@ -262,6 +266,8 @@ class _Finder:
         self._budget = budget
         self.rewrites: list[BlockRewrite] = []
         self._collapsed: set[int] = set()  # Groups already part of a reported chain.
+        self._emptied: set[int] = set()  # Groups deleted by an ``EMPTY_BLOCK`` rewrite.
+        self._emptied_branches: set[int] = set()  # Branches deleted by an ``EMPTY_BRANCH`` one.
 
     # These are needed only once a pair has passed the cheaper checks, and most sources have
     # no such pair, so they are computed on first use.
@@ -455,6 +461,8 @@ class _Finder:
     ) -> FindingKind | None:
         """Which rewrite, if any, the two adjacent blocks allow."""
         (first_group, first_block), (second_group, second_block) = first, second
+        if id(first_group) in self._emptied or id(second_group) in self._emptied:
+            return None
         if first_block.endif is None or second_block.endif is None:
             return None
         if len(first_block.branches) != 1 or len(second_block.branches) != 1:
@@ -537,6 +545,8 @@ class _Finder:
     ) -> None:
         if len(groups) != len(blocks):
             return  # The two parsers disagree about the shape; report nothing here.
+        for group, block in zip(groups, blocks, strict=True):
+            self._scan_empty_block(group, block)
         start = 0
         while start < len(groups):
             relation = (
@@ -567,9 +577,196 @@ class _Finder:
             else:
                 start += 1
         for group, block in zip(groups, blocks, strict=True):
+            if id(group) in self._emptied:
+                continue
             if id(group) not in self._collapsed:
                 self._scan_nesting(group, block)
+            self._scan_empty_branches(group, block)
             self._scan_branches(group, block)
+
+    # --- blocks and trailing branches with no content -------------------------------------
+
+    def _empty_inside(
+        self, group: ConditionalGroup, block: ConditionalBlock
+    ) -> list[ConditionalGroup] | None:
+        """The blocks inside ``block`` if nothing in it but blanks and empty blocks, else ``None``."""
+        if block.endif is None or len(group.branches) != len(block.branches):
+            return None
+        nested: list[ConditionalGroup] = []
+        for branch, structural in zip(group.branches, block.branches, strict=True):
+            if len(branch.children) != len(structural.children):
+                return None
+            cursor = structural.body_range.start.offset
+            for child, child_block in zip(branch.children, structural.children, strict=True):
+                if not self._blank_between(cursor, child_block.source_range.start.offset):
+                    return None
+                inside = self._empty_inside(child, child_block)
+                if inside is None:
+                    return None
+                nested.append(child)
+                nested.extend(inside)
+                cursor = child_block.source_range.end.offset
+            if not self._blank_between(cursor, structural.body_range.end.offset):
+                return None
+        return nested
+
+    def _conditions_in(self, block: ConditionalBlock) -> set[str]:
+        """The identifiers tested by every directive of ``block``, nested blocks included."""
+        names: set[str] = set()
+        for branch in block.branches:
+            names.update(_IDENTIFIER.findall(branch.directive.logical_condition or ""))
+            for child in branch.children:
+                names |= self._conditions_in(child)
+        return names
+
+    def _condition_is_harmless(self, directive: ConditionalDirective) -> bool:
+        """Whether deleting ``directive`` cannot hide a preprocessing error in its condition.
+
+        A condition that is not a well-formed expression, calls an unknown function-like macro
+        or divides makes the preprocessor fail when it is evaluated; once the directive is gone
+        nothing evaluates it.
+        """
+        if directive.kind in {"else", "endif"}:
+            return True
+        test = self._branch_test(directive)
+        return (
+            test is not None
+            and self._is_expression(test)
+            and self._calls_are_known(test)
+            and "/" not in test
+            and "%" not in test
+            and self._macros_are_harmless(test)
+        )
+
+    def _macros_are_harmless(self, test: str) -> bool:
+        """Whether no macro ``test`` uses (in this file) makes it fail once expanded.
+
+        A macro that expands to a division, to nothing, or to something that is not a valid
+        ``#if`` operand (``1.5``, a string) breaks the condition that uses it. The operand of ``defined`` is not expanded, so it does not count.
+        """
+        _, definitions, _ = self._directives
+        used = _DEFINED_OPERAND.sub(" ", test)
+        names = self._dependencies(frozenset(_IDENTIFIER.findall(used)))
+        return all(
+            "/" not in text
+            and "%" not in text
+            and text.strip() != ""
+            and self._is_expression(text)
+            and self._calls_are_known(text)
+            for name in names
+            for text in definitions.get(name, ())
+        )
+
+    def _directives_in(self, block: ConditionalBlock) -> list[ConditionalDirective]:
+        found = []
+        for branch in block.branches:
+            found.append(branch.directive)
+            for child in branch.children:
+                found.extend(self._directives_in(child))
+        return found
+
+    def _scan_empty_block(self, group: ConditionalGroup, block: ConditionalBlock) -> None:
+        """Report ``group`` when no branch of it, and nothing in it, has content."""
+        if id(group) in self._collapsed:
+            return  # Part of a collapsible chain, whose edit already covers this block.
+        nested = self._empty_inside(group, block)
+        if nested is None or block.endif is None:
+            return
+        span = block.source_range
+        start, end = span.start.offset, span.end.offset
+        if self._source[start:end] != self._plain[start:end]:
+            return  # A comment would be lost with the block.
+        if any(
+            branch.analysis is None or branch.analysis.status != "reachable"
+            for item in (group, *nested)
+            for branch in item.branches
+        ):
+            return  # A dead or redundant branch, nested ones included, is reported as such.
+        if not self._inert(self._dependencies(frozenset(self._conditions_in(block)))):
+            return  # Deleting the conditions would change a counter or skip a pragma.
+        if not all(self._condition_is_harmless(item) for item in self._directives_in(block)):
+            return  # Deleting a condition that fails to evaluate would hide the error.
+        self._emptied.add(id(group))
+        self._emptied.update(id(item) for item in nested)
+        self.rewrites.append(
+            BlockRewrite(FindingKind.EMPTY_BLOCK, group, tuple(nested), span.start, span.end, "")
+        )
+
+    def _scan_empty_branches(self, group: ConditionalGroup, block: ConditionalBlock) -> None:
+        """Report the last ``#elif`` and ``#else`` branches of ``group`` that have no content.
+
+        Only a run at the end can go: an empty branch in the middle still decides which later
+        branch is skipped when its condition is true.
+        """
+        count = len(block.branches)
+        if count < 2 or block.endif is None or len(group.branches) != count:
+            return
+        cut = count
+        while cut > 1 and self._blank_between(
+            block.branches[cut - 1].body_range.start.offset,
+            block.branches[cut - 1].body_range.end.offset,
+        ):
+            cut -= 1
+        if cut == count:
+            return
+        qualifies = [
+            self._branch_can_go(group.branches[i], block.branches[i]) for i in range(count)
+        ]
+        # Try the longest run of removable branches first, then shorter ones.
+        runs = sorted(
+            (
+                (start, stop)
+                for start in range(cut, count)
+                for stop in range(start + 1, count + 1)
+                if all(qualifies[start:stop])
+            ),
+            key=lambda run: (run[0] - run[1], run[0]),
+        )
+        chosen = next((run for run in runs if self._run_is_safe(block, *run)), None)
+        if chosen is None:
+            return
+        first, last = chosen
+        removed = block.branches[first:last]
+        self._emptied_branches.update(id(item) for item in group.branches[first:last])
+        self.rewrites.append(
+            BlockRewrite(
+                FindingKind.EMPTY_BRANCH,
+                group,
+                (),
+                removed[0].directive.source_range.start,
+                removed[-1].body_range.end,
+                "",
+                tuple(group.branches[first:last]),
+            )
+        )
+
+    def _run_is_safe(self, block: ConditionalBlock, first: int, last: int) -> bool:
+        """Whether deleting branches ``first:last`` changes no evaluation that matters.
+
+        The deleted conditions must be inert, and a branch kept after the run is now evaluated
+        whenever the run's tests were true before, so each must be harmless and inert too.
+        """
+        kept = block.branches[last:]
+        if not all(self._condition_is_harmless(item.directive) for item in kept):
+            return False
+        names = {
+            name
+            for item in (*block.branches[first:last], *kept)
+            for name in _IDENTIFIER.findall(item.directive.logical_condition or "")
+        }
+        return self._inert(self._dependencies(frozenset(names)))
+
+    def _branch_can_go(self, branch: ConditionalBranch, structural: _StructuralBranch) -> bool:
+        """Whether one empty branch can be deleted: plain, reachable and harmless to evaluate."""
+        span = structural.directive.source_range
+        if (
+            self._source[span.start.offset : span.end.offset]
+            != self._plain[span.start.offset : span.end.offset]
+        ):
+            return False  # A comment on the directive would be lost.
+        if branch.analysis is None or branch.analysis.status != "reachable":
+            return False
+        return self._condition_is_harmless(structural.directive)
 
     # --- blocks whose only content is one block -----------------------------------------
 
@@ -651,6 +848,8 @@ class _Finder:
         indent = raw[: len(raw) - len(raw.lstrip())]
         newline = next((mark for mark in ("\r\n", "\n", "\r") if raw.endswith(mark)), "")
         innermost = chain[-1][1].branches[0]
+        if self._blank_between(innermost.body_range.start.offset, innermost.body_range.end.offset):
+            return  # Collapsing an empty block is never the point; delete it instead.
         body = innermost.body_range.text(self._source)
         assert block.endif is not None
         endif = block.endif.source_range
@@ -800,6 +999,8 @@ class _Finder:
         """
         directive = structural.directive
         if branch.analysis is None or branch.analysis.status != "reachable":
+            return False
+        if id(branch) in self._emptied_branches:
             return False
         test = self._branch_test(directive)
         if test is None or (

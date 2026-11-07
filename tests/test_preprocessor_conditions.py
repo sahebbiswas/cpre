@@ -309,6 +309,7 @@ def test_text_report_labels_opaque_predicates():
 def test_default_report_filters_unchanged_branches():
     tree = conditions.analyze_source(
         """#if UNCHANGED
+x;
 #endif
 #if DUP && DUP
 #endif
@@ -544,8 +545,8 @@ def test_cli_recursively_analyzes_c_and_cpp_sources(tmp_path):
 
 
 def test_cli_recursive_fail_on_findings_aggregates_files(tmp_path):
-    (tmp_path / "clean.c").write_text("#if A\n#endif\n", encoding="utf-8")
-    (tmp_path / "finding.h").write_text("#if 0\n#endif\n", encoding="utf-8")
+    (tmp_path / "clean.c").write_text("#if A\nx;\n#endif\n", encoding="utf-8")
+    (tmp_path / "finding.h").write_text("#if 0\nx;\n#endif\n", encoding="utf-8")
 
     result = subprocess.run(
         [
@@ -623,10 +624,13 @@ def test_cli_json_filters_by_default_and_verbose_restores_full_tree(tmp_path):
     source = tmp_path / "conditions.c"
     source.write_text(
         """#if UNCHANGED
+x;
 #endif
 #if DUP && DUP
+x;
 #endif
 #if 0
+x;
 #endif
 """,
         encoding="utf-8",
@@ -659,8 +663,8 @@ def test_cli_json_filters_by_default_and_verbose_restores_full_tree(tmp_path):
 
 
 def test_cli_batch_json_omits_files_without_displayed_entries(tmp_path):
-    (tmp_path / "unchanged.c").write_text("#if OK\n#endif\n", encoding="utf-8")
-    (tmp_path / "changed.c").write_text("#if DUP && DUP\n#endif\n", encoding="utf-8")
+    (tmp_path / "unchanged.c").write_text("#if OK\nx;\n#endif\n", encoding="utf-8")
+    (tmp_path / "changed.c").write_text("#if DUP && DUP\nx;\n#endif\n", encoding="utf-8")
 
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--recursive", str(tmp_path), "--json"],

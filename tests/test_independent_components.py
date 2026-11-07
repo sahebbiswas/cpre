@@ -188,7 +188,7 @@ def test_deeply_nested_conditionals_keep_parent_and_child_coupled():
 
 def test_nested_child_condition_is_still_analyzed_in_its_parents_context():
     source = "#if A\n#if A\nx;\n#endif\n#endif\n" + "".join(
-        f"#if F_{index}\n#endif\n" for index in range(80)
+        f"#if F_{index}\nx;\n#endif\n" for index in range(80)
     )
 
     result = cpre.analyze_source(source, options=cpre.AnalysisOptions(max_atoms=1))
@@ -238,7 +238,7 @@ def test_defined_and_value_atoms_of_one_macro_stay_in_one_component_under_assump
 
 
 def test_defined_assumption_on_one_macro_reaches_every_group_that_mentions_it():
-    source = "#if defined(X)\n#endif\n" + "".join(f"#if F_{i}\n#endif\n" for i in range(80))
+    source = "#if defined(X)\nx;\n#endif\n" + "".join(f"#if F_{i}\nx;\n#endif\n" for i in range(80))
 
     result = cpre.analyze_source(source, assumptions=cpre.MacroAssumptions(undefined={"X"}))
 

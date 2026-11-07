@@ -355,7 +355,7 @@ def test_cli_json_marks_complete_files(tmp_path, capsys):
 
 
 def test_cli_batch_json_keeps_incomplete_files_without_verbose(tmp_path, capsys):
-    (tmp_path / "a_quiet.c").write_text("#if A\n#endif\n", encoding="utf-8")
+    (tmp_path / "a_quiet.c").write_text("#if A\nx;\n#endif\n", encoding="utf-8")
     (tmp_path / "b_wide.c").write_text(WIDE, encoding="utf-8")
 
     exit_code = main([str(tmp_path), "--recursive", "--json"])

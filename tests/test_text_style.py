@@ -355,7 +355,7 @@ def test_cli_ends_with_the_summary_line(source, capsys):
 
 def test_cli_has_no_summary_without_findings(tmp_path, capsys):
     path = tmp_path / "clean.c"
-    path.write_text("#if A\n#endif\n", encoding="utf-8")
+    path.write_text("#if A\nx;\n#endif\n", encoding="utf-8")
     main([str(path)])
     out = capsys.readouterr().out
     assert "Summary" not in out

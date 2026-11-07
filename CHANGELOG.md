@@ -15,6 +15,19 @@ raise that document's schema major version and are listed here (see the
 ## [Unreleased]
 
 ### Added
+- Blocks with no content and trailing branches with no content are reported (#243). A block whose
+  branches hold only blank lines (or empty blocks) is `EMPTY_BLOCK` and carries an exact edit that
+  deletes it; the last `#elif`/`#else` branches of a block that have no body are `EMPTY_BRANCH`
+  and carry an exact edit that deletes them. An empty branch in the middle of a chain is never
+  reported, since deleting it would let a later branch run. A comment on any affected line, a
+  volatile condition (`__COUNTER__`, `__LINE__`, `##`, `_Pragma`) or a dead or redundant branch
+  keeps the finding from being reported. Both count for `--fail-on-findings`. **Behaviour change**:
+  files with empty `#if … #endif` blocks now report them. See
+  [Empty blocks and branches](docs/empty-blocks.md).
+  - Text: an `EMPTY` badge and an `empty` line, counted as `empty blocks` and `empty branch runs`.
+  - JSON: the group's `suggestions` lists `{kind: "empty_block" | "empty_branch", lines}`. A compatible addition.
+  - SARIF: rules `CPRE009` (`empty-block`) and `CPRE010` (`empty-branch`), both `warning`, each with a `fix`.
+  - Python: `FindingKind.EMPTY_BLOCK` and `FindingKind.EMPTY_BRANCH`; `FindingCounts` gains `empty_blocks` and `empty_branches`.
 - A block whose only content is another block is reported as collapsible (#242). `#if A` holding
   nothing but `#if B … #endif` carries an exact suggested edit that rewrites the pair as
   `#if A && B`, and a chain of three or more is one finding. Both blocks must be plain and

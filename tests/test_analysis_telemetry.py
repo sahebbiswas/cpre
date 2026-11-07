@@ -157,7 +157,7 @@ def test_cli_json_has_telemetry_only_when_requested(capsys, source_file):
 
 def test_cli_batch_json_keeps_clean_files_when_telemetry_is_requested(capsys, tmp_path):
     clean = tmp_path / "clean.c"
-    clean.write_bytes(b"#if A\n#endif\n")
+    clean.write_bytes(b"#if A\nx;\n#endif\n")
     other = tmp_path / "other.c"
     other.write_bytes(b"int x;\n")
     assert main(["--json", str(clean), str(other)]) == 0

@@ -272,6 +272,14 @@ def _holds_without_assumptions(
             return False
         if rewrite.branches:
             continue  # A join is about its own branches (below), not the block's opener.
+        if rewrite.kind is FindingKind.EMPTY_BLOCK:
+            # Every branch goes with the block, so each must be reachable without them too.
+            if any(
+                item.analysis is None or item.analysis.status != "reachable"
+                for item in base.branches
+            ):
+                return False
+            continue
         opener = base.branches[0].analysis
         if opener is None or opener.status != "reachable":
             return False

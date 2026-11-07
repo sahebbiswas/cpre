@@ -9,7 +9,7 @@ from cpre.sarif import sarif_log
 
 def test_sarif_log_has_github_compatible_shape_and_rules():
     analysis = cpre.analyze_source(
-        "#if (A && B) || (A && !B)\n#endif\n",
+        "#if (A && B) || (A && !B)\nx;\n#endif\n",
         filename="src/example.c",
     )
 
@@ -30,6 +30,8 @@ def test_sarif_log_has_github_compatible_shape_and_rules():
         "CPRE006",
         "CPRE007",
         "CPRE008",
+        "CPRE009",
+        "CPRE010",
     ]
     assert run["invocations"] == [{"executionSuccessful": True}]
 
@@ -103,8 +105,8 @@ def test_sarif_dead_branch_has_warning_without_fix():
 
 
 def test_sarif_batch_uses_one_run_with_multiple_artifact_uris():
-    left = cpre.analyze_source("#if A && A\n#endif\n", filename="src/left.c")
-    right = cpre.analyze_source("#if B && B\n#endif\n", filename="src/right.c")
+    left = cpre.analyze_source("#if A && A\nx;\n#endif\n", filename="src/left.c")
+    right = cpre.analyze_source("#if B && B\nx;\n#endif\n", filename="src/right.c")
 
     run = sarif_log([left, right], tool_version="0.6.2")["runs"][0]
 
@@ -145,8 +147,8 @@ def test_sarif_incomplete_analysis_is_tool_notification_not_finding():
 def test_cli_sarif_emits_single_document_for_batch(tmp_path, capsys):
     left = tmp_path / "left.c"
     right = tmp_path / "right.c"
-    left.write_text("#if A && A\n#endif\n", encoding="utf-8")
-    right.write_text("#if B || B\n#endif\n", encoding="utf-8")
+    left.write_text("#if A && A\nx;\n#endif\n", encoding="utf-8")
+    right.write_text("#if B || B\nx;\n#endif\n", encoding="utf-8")
 
     exit_code = main([str(left), str(right), "--sarif"])
 

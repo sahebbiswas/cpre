@@ -183,6 +183,10 @@ What to do, in order:
 
 **"Why does `defined(X)` differ from `X`?"** They are different atoms: `defined(X)` is definedness, `X` is the value (true when defined as non-zero). cpre relates them with the C rule that a true value implies defined.
 
+**"Why is my empty `#if` block not reported as `EMPTY`?"** Only a block whose branches hold nothing but blank lines (or empty blocks) is reported, and only if no line of it carries a comment, no condition is volatile (`__COUNTER__`, `__LINE__`, a `##`-built name or a `_Pragma`), and none of its branches is already reported as dead or redundant. A `#define`, `#error`, `#pragma` or `#include` in the block, even alone, is content. See [Empty blocks and branches](empty-blocks.md).
+
+**"Why is an empty `#elif` in the middle of a chain not reported?"** Only branches at the end of a block can be deleted: when the empty branch's test is true it ends the chain, and deleting it would let a later branch run instead.
+
 **"Why is my nested `#if` inside `#if` not reported as `NEST`?"** The outer block must hold nothing but the inner block (blank lines are fine), both must be plain single-branch blocks without comments on the lines the edit rewrites, and both conditions must already be in their simplest form. See [Collapsible nesting](collapsible-nesting.md).
 
 **"Why does `NEST` not fail `--fail-on-findings`?"** It is a style suggestion, because many codebases nest on purpose. It is reported, listed in the `Summary` line and given at SARIF `note` level.
