@@ -87,6 +87,16 @@ _RULES: tuple[dict[str, object], ...] = (
         },
         "defaultConfiguration": {"level": "warning"},
     },
+    {
+        "id": "CPRE008",
+        "name": "collapsible-nesting",
+        "shortDescription": {"text": "Nested conditional blocks can be one block"},
+        "fullDescription": {
+            "text": "A conditional block holds nothing but another conditional block, so the "
+            "two can be one block that tests both conditions with &&."
+        },
+        "defaultConfiguration": {"level": "note"},
+    },
 )
 
 _RULE_INDEX = {str(rule["id"]): index for index, rule in enumerate(_RULES)}
@@ -98,6 +108,7 @@ _RULE_FOR_KIND = {
     FindingKind.MERGEABLE_BLOCKS: ("CPRE005", "warning"),
     FindingKind.COMPLEMENTARY_BLOCKS: ("CPRE006", "warning"),
     FindingKind.JOINABLE_BRANCHES: ("CPRE007", "warning"),
+    FindingKind.COLLAPSIBLE_NESTING: ("CPRE008", "note"),
 }
 
 # Findings about several adjacent blocks: located at the first block, with the others as
@@ -107,12 +118,14 @@ _BLOCK_KINDS = frozenset(
         FindingKind.MERGEABLE_BLOCKS,
         FindingKind.COMPLEMENTARY_BLOCKS,
         FindingKind.JOINABLE_BRANCHES,
+        FindingKind.COLLAPSIBLE_NESTING,
     }
 )
 _RELATED_MESSAGES = {
     FindingKind.MERGEABLE_BLOCKS: "Block that can be merged into the first one",
     FindingKind.COMPLEMENTARY_BLOCKS: "Block that can become the #else of the first one",
     FindingKind.JOINABLE_BRANCHES: "Branch with the same body that can be joined into the first one",
+    FindingKind.COLLAPSIBLE_NESTING: "Nested block that can be collapsed into the first one",
 }
 
 _NOTIFICATION_DESCRIPTIONS = {
@@ -206,6 +219,8 @@ def _fix_description(finding: Finding) -> str:
             return f"Make the block starting at {where} the #else of this one"
         if finding.kind is FindingKind.JOINABLE_BRANCHES:
             return f"Join the branches starting at {where} into this one with ||"
+        if finding.kind is FindingKind.COLLAPSIBLE_NESTING:
+            return f"Collapse the nested blocks starting at {where} into this one with &&"
         return f"Merge the blocks starting at {where} into this one"
     return f"Replace condition with {finding.edit.replacement}"
 

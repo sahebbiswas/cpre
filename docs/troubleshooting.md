@@ -183,6 +183,10 @@ What to do, in order:
 
 **"Why does `defined(X)` differ from `X`?"** They are different atoms: `defined(X)` is definedness, `X` is the value (true when defined as non-zero). cpre relates them with the C rule that a true value implies defined.
 
+**"Why is my nested `#if` inside `#if` not reported as `NEST`?"** The outer block must hold nothing but the inner block (blank lines are fine), both must be plain single-branch blocks without comments on the lines the edit rewrites, and both conditions must already be in their simplest form. See [Collapsible nesting](collapsible-nesting.md).
+
+**"Why does `NEST` not fail `--fail-on-findings`?"** It is a style suggestion, because many codebases nest on purpose. It is reported, listed in the `Summary` line and given at SARIF `note` level.
+
 **"Why are my `#elif` branches with the same body not reported as `JOIN`?"** The bodies must be the same text character for character (a different comment or indentation counts), the branches must be adjacent and reachable, an `#else` is never joined, and a directive with a comment or a line continuation is skipped. See [Joinable branches](joinable-branches.md).
 
 **"Why are my `#if FLAG` and `#if !FLAG` blocks not reported as `ELSE`?"** The same rules apply as for `MERGE`, with an opposite condition instead of an equal one, and `#if A` followed by `#ifndef A` is never a pair because a value test and a definedness test are different tests. See [Complementary blocks](complementary-blocks.md).

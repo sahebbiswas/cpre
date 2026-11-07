@@ -48,6 +48,7 @@ _BLOCK_SUGGESTION_LABELS = {
     FindingKind.MERGEABLE_BLOCKS.value: ("MERGE", "merge"),
     FindingKind.COMPLEMENTARY_BLOCKS.value: ("ELSE", "else"),
     FindingKind.JOINABLE_BRANCHES.value: ("JOIN", "join"),
+    FindingKind.COLLAPSIBLE_NESTING.value: ("NEST", "nest"),
 }
 
 
@@ -394,7 +395,9 @@ class FindingCounts:
     ``mergeable`` counts runs of adjacent blocks that test one condition and could be a
     single block; ``complementary`` counts pairs of adjacent blocks that test a condition
     and its opposite and could be one ``#if``/``#else`` block; ``joinable`` counts runs of adjacent branches
-    with the same body that could be one branch.
+    with the same body that could be one branch; ``collapsible`` counts blocks whose only
+    content is another block, which could be one ``#if``. It is a style suggestion, so like
+    ``simplifiable`` it is reported but never fails a run.
     """
 
     dead: int = 0
@@ -404,6 +407,7 @@ class FindingCounts:
     mergeable: int = 0
     complementary: int = 0
     joinable: int = 0
+    collapsible: int = 0
 
     def __add__(self, other: FindingCounts) -> FindingCounts:
         return FindingCounts(
@@ -414,6 +418,7 @@ class FindingCounts:
             self.mergeable + other.mergeable,
             self.complementary + other.complementary,
             self.joinable + other.joinable,
+            self.collapsible + other.collapsible,
         )
 
     @property
@@ -429,7 +434,7 @@ class FindingCounts:
 
     @property
     def total(self) -> int:
-        return self.failing + self.simplifiable
+        return self.failing + self.simplifiable + self.collapsible
 
 
 def count_findings(tree: ConditionalTree) -> FindingCounts:
@@ -445,6 +450,8 @@ def count_findings(tree: ConditionalTree) -> FindingCounts:
                 counts += FindingCounts(complementary=1)
             elif suggestion.kind == FindingKind.JOINABLE_BRANCHES.value:
                 counts += FindingCounts(joinable=1)
+            elif suggestion.kind == FindingKind.COLLAPSIBLE_NESTING.value:
+                counts += FindingCounts(collapsible=1)
         for branch in group.branches:
             assert branch.analysis is not None
             status = branch.analysis.status
@@ -462,7 +469,9 @@ def has_findings(tree: ConditionalTree) -> bool:
     for group in tree.groups:
         if not analyzed(group):
             continue
-        if block_suggestions(group):
+        if any(
+            item.kind != FindingKind.COLLAPSIBLE_NESTING.value for item in block_suggestions(group)
+        ):
             return True
         for branch in group.branches:
             assert branch.analysis is not None

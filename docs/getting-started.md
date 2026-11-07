@@ -104,6 +104,7 @@ How to read it:
 - **`SIMPLIFY`** means the branch can be taken and its condition has a shorter equivalent: `TURBO || TURBO` is just `TURBO`.
 - **`DEAD`** means the branch can never be selected. The `#elif` on line 7 is dead because an earlier branch already covers every case where `TURBO` is defined, so its condition is `+ 0`.
 - **`REDUNDANT`** means the condition is always true where it sits (`+ 1`). The inner `#ifdef DEBUG` is already guaranteed by the outer one. The `ok` line and the `│` guide show that it is nested inside line 13, which is listed only to give that context.
+- **`NEST`** (not in this sample) means a block holds nothing but another block, so the two could be one `#if A && B`; it is a style note and does not fail `--fail-on-findings`. See [Collapsible nesting](collapsible-nesting.md).
 - **`JOIN`** (not in this sample) means adjacent `#if`/`#elif` branches have identical bodies, so they could be one branch tested with `||`; see [Joinable branches](joinable-branches.md).
 - **`ELSE`** (not in this sample) means a block is followed directly by another that tests the opposite condition, so the two could be one `#if`/`#else`; see [Complementary blocks](complementary-blocks.md).
 - **`MERGE`** (not in this sample) means a block is followed directly by another that tests the same condition, so the two could be one block; see [Mergeable blocks](mergeable-blocks.md).

@@ -44,7 +44,7 @@ from dataclasses import dataclass
 from functools import cached_property
 
 from ._types import FindingKind
-from .expressions import expression_atoms_in_order
+from .expressions import expression_atoms_in_order, expressions_differ
 from .lexer import lex, macro_name, strip_comments
 from .model import (
     TRUE,
@@ -123,7 +123,10 @@ class BlockRewrite:
     * ``JOINABLE_BRANCHES``: from the first joined branch's directive through the end of
       the last joined branch's body, with one directive that tests the conditions joined
       by ``||`` and the body once. Here ``branches`` holds the joined branches of
-      ``first``, and ``related`` is empty.
+      ``first``, and ``related`` is empty;
+    * ``COLLAPSIBLE_NESTING``: the whole outermost block, replaced by one block that tests
+      the conditions of the whole chain joined by ``&&`` around the innermost body.
+      ``related`` holds the blocks nested inside ``first``.
     """
 
     kind: FindingKind
@@ -133,6 +136,34 @@ class BlockRewrite:
     edit_end: StructuralSourceLocation
     replacement: str
     branches: tuple[ConditionalBranch, ...] = ()
+
+
+def _is_parenthesized(text: str) -> bool:
+    """Whether ``text`` is one parenthesized group, such as ``(A || B)``.
+
+    Parentheses inside a character or string literal, such as ``'('``, do not count.
+    """
+    if not (text.startswith("(") and text.endswith(")")):
+        return False
+    depth = 0
+    quote = ""
+    escaped = False
+    for index, char in enumerate(text):
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = ""
+            continue
+        if char in "'\"":
+            quote = char
+            continue
+        depth += (char == "(") - (char == ")")
+        if depth == 0 and index < len(text) - 1:
+            return False
+    return depth == 0 and not quote
 
 
 @dataclass(frozen=True)
@@ -230,6 +261,7 @@ class _Finder:
         self._limits = limits
         self._budget = budget
         self.rewrites: list[BlockRewrite] = []
+        self._collapsed: set[int] = set()  # Groups already part of a reported chain.
 
     # These are needed only once a pair has passed the cheaper checks, and most sources have
     # no such pair, so they are computed on first use.
@@ -535,7 +567,113 @@ class _Finder:
             else:
                 start += 1
         for group, block in zip(groups, blocks, strict=True):
+            if id(group) not in self._collapsed:
+                self._scan_nesting(group, block)
             self._scan_branches(group, block)
+
+    # --- blocks whose only content is one block -----------------------------------------
+
+    def _blank_between(self, start: int, end: int) -> bool:
+        return start <= end and all(char in _BLANK for char in self._source[start:end])
+
+    def _opener_is_plain(self, group: ConditionalGroup, block: ConditionalBlock) -> bool:
+        """Whether ``block`` is a single reachable branch whose opening line can be rewritten."""
+        opener = self._opener(group)
+        if len(block.branches) != 1 or block.endif is None or opener is None:
+            return False
+        analysis = opener.analysis
+        assert analysis is not None
+        if opener.expression is not None and (
+            expressions_differ(opener.expression, analysis.simplified)
+            or expressions_differ(opener.expression, analysis.contextual)
+        ):
+            return False  # Simplify the condition first; the collapsed one would repeat it.
+        directive = block.branches[0].directive
+        if self._branch_test(directive) is None:
+            return False
+        span = directive.source_range
+        raw = self._source[span.start.offset : span.end.offset]
+        if raw != self._plain[span.start.offset : span.end.offset]:
+            return False  # A comment on the opening line would be lost.
+        line = raw.rstrip("\r\n")
+        if "\n" in line or "\r" in line or _DIRECTIVE_START.match(raw) is None:
+            return False
+        names = self._dependencies(
+            frozenset(_IDENTIFIER.findall(self._branch_test(directive) or ""))
+        )
+        return self._inert(names)
+
+    def _only_child(
+        self, group: ConditionalGroup, block: ConditionalBlock
+    ) -> tuple[ConditionalGroup, ConditionalBlock] | None:
+        """The block that is all of ``block``'s content, if it is joinable to ``block``."""
+        if not self._opener_is_plain(group, block):
+            return None
+        children, structural = group.branches[0].children, block.branches[0].children
+        if len(children) != 1 or len(structural) != 1 or block.endif is None:
+            return None
+        child, child_block = children[0], structural[0]
+        if not self._opener_is_plain(child, child_block) or child_block.endif is None:
+            return None
+        inner_test = self._branch_test(child_block.branches[0].directive)
+        if inner_test is None or not (
+            self._is_expression(inner_test) and self._calls_are_known(inner_test)
+        ):
+            # The inner condition was never read while the outer one was false; written
+            # after ``&&`` it is always parsed, so it must be well-formed.
+            return None
+        inner_endif = child_block.endif.source_range
+        if (
+            self._source[inner_endif.start.offset : inner_endif.end.offset]
+            != self._plain[inner_endif.start.offset : inner_endif.end.offset]
+        ):
+            return None  # The inner ``#endif`` is deleted, and a comment on it with it.
+        opener_end = block.branches[0].directive.source_range.end.offset
+        if not self._blank_between(opener_end, child_block.source_range.start.offset):
+            return None
+        if not self._blank_between(
+            child_block.endif.source_range.end.offset, block.endif.source_range.start.offset
+        ):
+            return None
+        return child, child_block
+
+    def _scan_nesting(self, group: ConditionalGroup, block: ConditionalBlock) -> None:
+        """Report ``group`` when it holds one block, and that one holds one block, and so on."""
+        chain = [(group, block)]
+        while (child := self._only_child(*chain[-1])) is not None:
+            chain.append(child)
+        if len(chain) < 2:
+            return
+        tests = [self._branch_test(item.branches[0].directive) for _, item in chain]
+        condition = " && ".join(self._and_operand(test) for test in tests if test is not None)
+        directive = block.branches[0].directive
+        raw = directive.source_range.text(self._source)
+        indent = raw[: len(raw) - len(raw.lstrip())]
+        newline = next((mark for mark in ("\r\n", "\n", "\r") if raw.endswith(mark)), "")
+        innermost = chain[-1][1].branches[0]
+        body = innermost.body_range.text(self._source)
+        assert block.endif is not None
+        endif = block.endif.source_range
+        self._collapsed.update(id(item) for item, _ in chain[1:])
+        self.rewrites.append(
+            BlockRewrite(
+                FindingKind.COLLAPSIBLE_NESTING,
+                group,
+                tuple(item for item, _ in chain[1:]),
+                directive.source_range.start,
+                endif.end,
+                f"{indent}#if {condition}{newline}{body}{endif.text(self._source)}",
+            )
+        )
+
+    def _and_operand(self, test: str) -> str:
+        """``test`` ready to sit next to ``&&``: bare only when that cannot change its meaning."""
+        _, definitions, unsafe = self._directives
+        if _SIMPLE_TEST.match(test) is not None:
+            names = self._dependencies(frozenset(_IDENTIFIER.findall(test)))
+            if names.isdisjoint(unsafe):
+                return test
+        return test if _is_parenthesized(test) else f"({test})"
 
     # --- adjacent branches of one block with the same body ---------------------------
 

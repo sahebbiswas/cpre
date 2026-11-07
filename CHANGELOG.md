@@ -15,6 +15,16 @@ raise that document's schema major version and are listed here (see the
 ## [Unreleased]
 
 ### Added
+- A block whose only content is another block is reported as collapsible (#242). `#if A` holding
+  nothing but `#if B … #endif` carries an exact suggested edit that rewrites the pair as
+  `#if A && B`, and a chain of three or more is one finding. Both blocks must be plain and
+  reachable, with no comment on the lines the edit rewrites or deletes, and neither condition may
+  already have a simpler form. This is a style suggestion: it is reported at SARIF `note` level and
+  does **not** make `--fail-on-findings` fail. See [Collapsible nesting](docs/collapsible-nesting.md).
+  - Text: a `NEST` badge and a `nest` line, counted as `collapsible nestings` in the summary.
+  - JSON: the group's `suggestions` lists `{kind: "collapsible_nesting", lines}`. A compatible addition.
+  - SARIF: rule `CPRE008` (`collapsible-nesting`, `note`) with `relatedLocations` and a `fix`.
+  - Python: `FindingKind.COLLAPSIBLE_NESTING`.
 - Adjacent `#if`/`#elif` branches with identical bodies are reported as joinable (#244). A run
   such as `#if A … #elif B …` with the same body carries an exact suggested edit that rewrites it
   as one branch, `#if A || B`. Bodies must be the same text (comments and whitespace count), every
