@@ -8,6 +8,7 @@ New to cpre? Start with [Getting started](getting-started.md); for recipes see t
 | --- | --- | --- | --- |
 | `cpre FILE…` | Dead, redundant and simplifiable branches and macros; text, `--json` or `--sarif` | No | `--fail-on-findings` and a finding exists |
 | `cpre simplify-macros FILE…` (also spelled `analyze-macros`) | Report, `--diff`, `--check` or `--rewrite` macro simplifications | No | `--check` with a pending rewrite, or `--fail-on-findings` and a finding |
+| `cpre simplify-blocks FILE…` | Apply, `--diff` or `--check` the suggested block edits (merge, complement, join, remove empty) | No | `--check` with a pending rewrite |
 | `cpre preprocess FILE` | One concrete configuration: transformed source, `--list-unknown-macros`, `--dump-macros` | Only through `-I`/`--iquote`/`--config-from` | not used |
 | `cpre cover FILE` | Verified `-D`/`-U` argument lists that together select every reachable branch | Only through `-I`/`--iquote` | An outcome is not covered |
 | `cpre evaluate NAME_OR_EXPR…` | The integer value of macros and expressions under one concrete configuration | Only through `--config-from` | An item has no provable value |
@@ -567,6 +568,30 @@ cpre preprocess -I include --has-include-from-search --has-include '<sys/epoll.h
 `cpre preprocess` currently accepts one source file. Directory/batch processing is intentionally not inherited from the symbolic analysis CLI. Without `-I`, `--iquote`, or `--skip-includes`, reachable `#include` directives, unsupported pragmas, `__has_include` queries (unless `--has-include-from-search` is given), and other constructs outside the documented concrete-preprocessing contract remain governed by the library's atomic incomplete-result behavior.
 
 For the full transformation, configuration, mapping, deterministic-context, and host-callback contract, see [Concrete preprocessing](preprocessing.md) and [Concrete macro configuration](concrete-configuration.md). For canonical versus compact output semantics, see [Compact preprocessing output](compact-preprocessing.md).
+
+## Applying block edits: `simplify-blocks`
+
+`cpre simplify-blocks` applies the exact edits the default command suggests for [mergeable](mergeable-blocks.md), [complementary](complementary-blocks.md) and [joinable](joinable-branches.md) blocks and for [empty blocks and branches](empty-blocks.md). Nothing is written without `--rewrite`. With no mode flag it prints what would apply, file by file (or `No block edits to apply.`); `--fail-on-findings` then exits `1` when anything applies.
+
+```bash
+cpre simplify-blocks --diff src/config.c      # print a unified diff
+cpre simplify-blocks --check src/*.c          # exit 1, naming each file that would change
+cpre simplify-blocks --rewrite src/config.c   # edit in place (alias --in-place)
+```
+
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:3ea019f95fef919b46f1c05d06790e4e55173de468b11debb396b2a48fd39be8 -->
+
+- Each round applies in one batch every edit that does not overlap an earlier one (the outermost, earliest range wins, since [edits can overlap](collapsible-nesting.md#edits-can-overlap)).
+- After every round, cpre analyzes and verifies the result before repeating until no more edits apply (merging two blocks can make a third adjacent). Verification fails if the text no longer analyzes completely, an applied finding is still reported, or the count of any finding kind outside `REWRITE_KINDS` increases, including contextual simplifications. If a round fails verification, nothing is written, an error is printed and the status is `2`. A new block suggestion alone, such as a block that now holds only one block, is not a failure.
+
+<!-- /coderabbit-ai-generated:v1 -->
+- Line endings, a missing final newline and every byte outside the edited ranges are kept.
+- `--collapse-nesting` also applies the [collapsible nesting](collapsible-nesting.md) suggestion, a style change that is off by default.
+- `-D`, `-U`, `--config-from`, `--config-exclude`, `--config-from-unknown-names` and `--strict-merge` mean what they mean for `cpre` (see [Macros defined elsewhere](mergeable-blocks.md#macros-defined-elsewhere)); the limit options and `--recursive` apply too.
+- `--rewrite` cannot be combined with `--diff` or `--check`, and cannot read standard input (usage errors, status `2`); `--diff` and `--check` accept `-`.
+- `--json` writes `cpre.simplify-blocks/1` ([JSON contract](json-contract.md#cpresimplify-blocks1-file-record)).
 
 ## Dedicated macro simplification and rewrite workflow
 

@@ -5,6 +5,7 @@ prints are built by :mod:`cpre.serialization` and :mod:`cpre.text_reports`, so o
 front ends can reuse them without importing any command.
 
 - :mod:`.analyze`: the default command, conditional and macro analysis;
+- :mod:`.simplify_blocks`: ``simplify-blocks``;
 - :mod:`.simplify_macros`: ``simplify-macros`` (alias ``analyze-macros``);
 - :mod:`.preprocess` and :mod:`.preprocess_configuration`: ``preprocess``;
 - :mod:`.cover`: ``cover``;
@@ -25,6 +26,7 @@ from .boolean_expression import test_input_main
 from .cover import cover_main
 from .evaluate import evaluate_main
 from .preprocess import preprocess_main
+from .simplify_blocks import simplify_blocks_main
 from .simplify_macros import simplify_macros_main
 
 __all__ = [
@@ -33,6 +35,7 @@ __all__ = [
     "evaluate_main",
     "main",
     "preprocess_main",
+    "simplify_blocks_main",
     "simplify_macros_main",
     "test_input_main",
 ]
@@ -49,6 +52,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 def _dispatch(argv: Sequence[str]) -> int:
     if argv and argv[0] in ("simplify-macros", "analyze-macros"):
         return simplify_macros_main(argv[1:], prog=f"cpre {argv[0]}")
+    if argv and argv[0] == "simplify-blocks":
+        return simplify_blocks_main(argv[1:], prog="cpre simplify-blocks")
     if argv and argv[0] == "preprocess":
         return preprocess_main(argv[1:], prog="cpre preprocess")
     if argv and argv[0] == "cover":
