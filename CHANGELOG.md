@@ -15,6 +15,17 @@ raise that document's schema major version and are listed here (see the
 ## [Unreleased]
 
 ### Added
+- Adjacent `#if`/`#elif` branches with identical bodies are reported as joinable (#244). A run
+  such as `#if A … #elif B …` with the same body carries an exact suggested edit that rewrites it
+  as one branch, `#if A || B`. Bodies must be the same text (comments and whitespace count), every
+  branch must be reachable, an `#else` is never joined, and conditions that depend on `__LINE__` or
+  `__COUNTER__` are skipped. Non-trivial operands are parenthesized. See
+  [Joinable branches](docs/joinable-branches.md).
+  - Text: a `JOIN` badge and a `join` line, counted as `joinable branch runs` in the summary.
+  - JSON: the group's `suggestions` lists `{kind: "joinable_branches", lines}`. A compatible addition.
+  - SARIF: rule `CPRE007` (`joinable-branches`, `warning`) with `relatedLocations` and a `fix`.
+  - Python: `FindingKind.JOINABLE_BRANCHES`.
+  - A run counts as a finding for `--fail-on-findings`.
 - Adjacent blocks that test a condition and its opposite are reported as one `#if`/`#else` block
   (#241). `#if A … #endif` followed by `#if !A … #endif` (blank lines only between them, no
   comment on either junction directive, no `#else`/`#elif`) carries an exact suggested edit that

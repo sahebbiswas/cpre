@@ -24,6 +24,11 @@ def block_note(kind: FindingKind | str, lines: Sequence[int]) -> str:
             f"the opposite condition is tested at {where(lines)}; "
             "the blocks can be one #if with an #else"
         )
+    if kind is FindingKind.JOINABLE_BRANCHES:
+        return (
+            f"the branches at {where(lines)} have the same body; "
+            "they can be joined into one branch with ||"
+        )
     raise ValueError(f"no note for {kind}")
 
 

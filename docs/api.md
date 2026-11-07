@@ -274,13 +274,17 @@ for finding in result.findings:
             report_mergeable_blocks(finding)
         case cpre.FindingKind.COMPLEMENTARY_BLOCKS:
             report_complementary_blocks(finding)
+        case cpre.FindingKind.JOINABLE_BRANCHES:
+            report_joinable_branches(finding)
 ```
 
 Findings carry physical source location, directive/condition context, a human-readable reason, and structured simplification/edit fields where applicable. `depends_on_assumptions` identifies proofs that materially depend on caller-supplied macro assumptions.
 
-A `MERGEABLE_BLOCKS` finding is about a run of adjacent blocks rather than one branch. Its `location` is the first block's opening directive and `related_locations` holds the opening directive of each later block that could be merged into it; `related_locations` is `()` for every kind other than mergeable and complementary blocks. Its `edit` merges the run (`FixConfidence.EXACT`); it has no simplification and does not depend on assumptions. See [Mergeable blocks](mergeable-blocks.md).
+A `MERGEABLE_BLOCKS` finding is about a run of adjacent blocks rather than one branch. Its `location` is the first block's opening directive and `related_locations` holds the opening directive of each later block that could be merged into it; `related_locations` is `()` for the dead, redundant and simplification kinds, which are about one branch. Its `edit` merges the run (`FixConfidence.EXACT`); it has no simplification and does not depend on assumptions. See [Mergeable blocks](mergeable-blocks.md).
 
 A `COMPLEMENTARY_BLOCKS` finding is shaped the same way: `location` is the first block's opening directive, `related_locations` holds the opening directive of the block that tests the opposite condition, and `edit` rewrites the pair as one `#if`/`#else` (`FixConfidence.EXACT`). See [Complementary blocks](complementary-blocks.md).
+
+A `JOINABLE_BRANCHES` finding is about adjacent branches of one block: `location` is the first joined branch's directive, `related_locations` holds the later joined branches' directives, and `edit` rewrites the run as one branch tested with `||` (`FixConfidence.EXACT`). See [Joinable branches](joinable-branches.md).
 
 Treat the set of kinds as open: a new release may add a `FindingKind` member, so a consumer that matches on kind should have a default branch rather than assume the four original kinds are all there is.
 
