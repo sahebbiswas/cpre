@@ -11,6 +11,7 @@ Every top-level document has `schema` as its first key. The value is `cpre.<kind
 | `schema` | Written by |
 | --- | --- |
 | `cpre.analysis/1` | `cpre --json` |
+| `cpre.simplify-blocks/1` | `cpre simplify-blocks --json` |
 | `cpre.simplify-macros/1` | `cpre simplify-macros --json` |
 | `cpre.simplify-macros-preview/1` | `cpre simplify-macros --check --json` and `--diff --json` |
 | `cpre.preprocess/1` | `cpre preprocess --json` |
@@ -48,6 +49,10 @@ Every top-level document has `schema` as its first key. The value is `cpre.<kind
 - `semantics` is `ordinary` or `symbolic-literal`; `symbolic_literals` lists the integers treated as free atoms.
 - With `--expand-macros`, the file record also has `expand_macros: true`, and each macro record has `expanded_from` (the macros substituted, in expansion order, empty when none) and `expanded_replacement` (the expanded text that was simplified, or `null`). A simplification found by expansion has `rewritable: false`. Without the option these keys are absent, so existing records are unchanged and the schema stays `cpre.analysis/1`.
 - `telemetry` appears only with `--telemetry` and is diagnostic (see [Opt-in diagnostic data](#opt-in-diagnostic-data)).
+
+### `cpre.simplify-blocks/1` (file record)
+
+`path`, `would_change`, `rewritten`, `rounds`, `applied` (a list of `{kind, line}`, where `line` is the line in the text as it was when that round ran), `remaining` (selected findings still reported after the rewrite) and `diff` (the unified diff with `--diff`, otherwise `null`). With `--check` or `--diff` nothing is written, so `rewritten` is `false` and `would_change` says what `--rewrite` would do. For a batch, files that would not change are omitted.
 
 ### `cpre.simplify-macros/1` (file record)
 

@@ -16,8 +16,8 @@ import pytest
 PACKAGE = Path(__file__).resolve().parent.parent / "cpre"
 
 # The only modules allowed to import the facades: the package root re-exports the public API,
-# the facades themselves, and the command line front end that sits on top of everything.
-ABOVE_THE_CORE = {"__init__", "__main__", "api", "cpre", "cli"}
+# the facades themselves, the block rewriter built on the API, and the command line front end that sits on top of everything.
+ABOVE_THE_CORE = {"__init__", "__main__", "api", "block_rewrite", "cpre", "cli"}
 FACADES = {"api", "cpre"}
 
 

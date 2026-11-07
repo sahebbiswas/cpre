@@ -332,7 +332,7 @@ if edit is not None:
     confidence = edit.confidence
 ```
 
-The edits of one result can overlap: a [collapsible nesting](collapsible-nesting.md#edits-can-overlap) or a [joinable branch](joinable-branches.md) edit covers a body that holds other findings. Apply them one at a time, outermost first, analyzing again in between, rather than all together.
+The edits of one result can overlap: a [collapsible nesting](collapsible-nesting.md#edits-can-overlap) or a [joinable branch](joinable-branches.md) edit covers a body that holds other findings. Apply them one at a time, outermost first, analyzing again in between (`cpre.block_rewrite.rewrite_blocks()` and `cpre simplify-blocks` do), rather than all together.
 
 `SourceRange.end` is exclusive. Locations are physical, one-based source positions. Backslash-continued directives retain physical line/column provenance.
 
