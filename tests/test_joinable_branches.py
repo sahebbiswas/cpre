@@ -87,7 +87,7 @@ def test_two_separate_runs_in_one_chain_are_two_findings():
             "#define BAR(a) a\n#if FOO(1)\nx;\n#elif BAR(2)\nx;\n#endif\n",
             "#define BAR(a) a\n#if (FOO(1)) || (BAR(2))\nx;\n#endif\n",
         ),
-        ("#if A\n#elif B\n#endif\n", "#if A || B\n#endif\n"),
+        ("#if A\nx;\n#elif B\nx;\n#endif\n", "#if A || B\nx;\n#endif\n"),
     ],
 )
 def test_the_joined_condition_for_each_directive_form(source, expected):
@@ -203,7 +203,7 @@ EQUIVALENT = [
     ("#if A\nx;\n#elif B\nx;\n#endif\n", ("A", "B")),
     ("#if A\nx;\n#elif B\nx;\n#elif C\nx;\n#else\ny;\n#endif\n", ("A", "B", "C")),
     ("#ifdef A\nx;\n#elifndef B\nx;\n#else\ny;\n#endif\n", ("A", "B")),
-    ("#if A\n#elif B\n#elif C\n#endif\n", ("A", "B", "C")),
+    ("#if A\nx;\n#elif B\nx;\n#elif C\nx;\n#endif\n", ("A", "B", "C")),
     ("#if A\n#define B 1\n#elif B\n#define B 1\n#endif\nz = B;\n", ("A", "B")),
     ("#if A\nx;\n#elif defined(B) && !A\nx;\n#else\ny;\n#endif\n", ("A", "B")),
     ("#if A > 0\nx;\n#elif B\nx;\n#endif\n", ("A", "B")),

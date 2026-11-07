@@ -130,7 +130,7 @@ def test_top_level_public_api_exposes_supported_symbols_only():
 
 
 def test_analyze_source_returns_structured_result_and_filename():
-    result = cpre.analyze_source("#if FEATURE\n#endif\n", filename="feature.c")
+    result = cpre.analyze_source("#if FEATURE\nx;\n#endif\n", filename="feature.c")
 
     assert isinstance(result, cpre.AnalysisResult)
     assert isinstance(result.tree, cpre.ConditionalTree)
@@ -296,7 +296,7 @@ def test_macro_form_directive_does_not_emit_condition_edit():
 
 
 def test_no_simplification_is_represented_by_absence():
-    result = cpre.analyze_source("#if FEATURE\n#endif\n")
+    result = cpre.analyze_source("#if FEATURE\nx;\n#endif\n")
 
     assert result.findings == ()
 
@@ -323,7 +323,7 @@ def test_opaque_predicates_are_preserved_in_findings():
 
 
 def test_formatting_only_normalization_does_not_create_a_finding():
-    result = cpre.analyze_source("#if defined(FEATURE)\n#endif\n")
+    result = cpre.analyze_source("#if defined(FEATURE)\nx;\n#endif\n")
 
     assert result.findings == ()
 

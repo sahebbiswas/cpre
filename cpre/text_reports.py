@@ -345,6 +345,10 @@ def summary_line(counts: FindingCounts, style: Style | None = None) -> str:
         parts.append(style.paint(plural(counts.complementary, "complementary block pair"), "merge"))
     if counts.joinable:
         parts.append(style.paint(plural(counts.joinable, "joinable branch run"), "merge"))
+    if counts.empty_blocks:
+        parts.append(style.paint(plural(counts.empty_blocks, "empty block"), "merge"))
+    if counts.empty_branches:
+        parts.append(style.paint(plural(counts.empty_branches, "empty branch run"), "merge"))
     if counts.collapsible:
         parts.append(style.paint(plural(counts.collapsible, "collapsible nesting"), "merge"))
     if counts.simplifiable:

@@ -49,6 +49,8 @@ _BLOCK_SUGGESTION_LABELS = {
     FindingKind.COMPLEMENTARY_BLOCKS.value: ("ELSE", "else"),
     FindingKind.JOINABLE_BRANCHES.value: ("JOIN", "join"),
     FindingKind.COLLAPSIBLE_NESTING.value: ("NEST", "nest"),
+    FindingKind.EMPTY_BLOCK.value: ("EMPTY", "empty"),
+    FindingKind.EMPTY_BRANCH.value: ("EMPTY", "empty"),
 }
 
 
@@ -67,7 +69,7 @@ def block_suggestions(group: ConditionalGroup) -> list[BlockSuggestion]:
 
 # Suggestions about a run of branches are shown at the first branch of the run; the others
 # are about the whole block and are shown at its first branch.
-_BRANCH_ANCHORED = frozenset({FindingKind.JOINABLE_BRANCHES.value})
+_BRANCH_ANCHORED = frozenset({FindingKind.JOINABLE_BRANCHES.value, FindingKind.EMPTY_BRANCH.value})
 
 
 def branch_suggestions(
@@ -397,7 +399,9 @@ class FindingCounts:
     and its opposite and could be one ``#if``/``#else`` block; ``joinable`` counts runs of adjacent branches
     with the same body that could be one branch; ``collapsible`` counts blocks whose only
     content is another block, which could be one ``#if``. It is a style suggestion, so like
-    ``simplifiable`` it is reported but never fails a run.
+    ``simplifiable`` it is reported but never fails a run. ``empty_blocks`` counts blocks with
+    no content, and ``empty_branches`` runs of trailing branches with no content, both of
+    which can be deleted.
     """
 
     dead: int = 0
@@ -408,6 +412,8 @@ class FindingCounts:
     complementary: int = 0
     joinable: int = 0
     collapsible: int = 0
+    empty_blocks: int = 0
+    empty_branches: int = 0
 
     def __add__(self, other: FindingCounts) -> FindingCounts:
         return FindingCounts(
@@ -419,6 +425,8 @@ class FindingCounts:
             self.complementary + other.complementary,
             self.joinable + other.joinable,
             self.collapsible + other.collapsible,
+            self.empty_blocks + other.empty_blocks,
+            self.empty_branches + other.empty_branches,
         )
 
     @property
@@ -430,6 +438,8 @@ class FindingCounts:
             + self.mergeable
             + self.complementary
             + self.joinable
+            + self.empty_blocks
+            + self.empty_branches
         )
 
     @property
@@ -452,6 +462,10 @@ def count_findings(tree: ConditionalTree) -> FindingCounts:
                 counts += FindingCounts(joinable=1)
             elif suggestion.kind == FindingKind.COLLAPSIBLE_NESTING.value:
                 counts += FindingCounts(collapsible=1)
+            elif suggestion.kind == FindingKind.EMPTY_BLOCK.value:
+                counts += FindingCounts(empty_blocks=1)
+            elif suggestion.kind == FindingKind.EMPTY_BRANCH.value:
+                counts += FindingCounts(empty_branches=1)
         for branch in group.branches:
             assert branch.analysis is not None
             status = branch.analysis.status

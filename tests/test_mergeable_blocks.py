@@ -54,9 +54,13 @@ def test_blocks_that_touch_with_no_blank_line_are_reported():
     assert _lines(finding) == (1, (4,))
 
 
-def test_empty_bodies_are_reported():
-    (finding,) = _merges("#if A\n#endif\n#if A\n#endif\n")
-    assert _lines(finding) == (1, (3,))
+def test_blocks_with_no_content_are_empty_blocks_not_a_merge():
+    source = "#if A\n#endif\n#if A\n#endif\n"
+
+    assert _merges(source) == []
+    assert [f.kind for f in cpre.analyze_source(source).findings] == [
+        cpre.FindingKind.EMPTY_BLOCK
+    ] * 2
 
 
 @pytest.mark.parametrize(
@@ -91,19 +95,19 @@ def test_a_run_of_three_is_one_finding_listing_both_later_blocks():
 
 
 def test_a_run_stops_at_a_block_with_another_condition():
-    source = "#if A\n#endif\n#if A\n#endif\n#if B\n#endif\n#if B\n#endif\n#if A\n#endif\n"
+    source = "#if A\nx;\n#endif\n#if A\nx;\n#endif\n#if B\nx;\n#endif\n#if B\nx;\n#endif\n#if A\nx;\n#endif\n"
 
     findings = _merges(source)
 
-    assert [_lines(finding) for finding in findings] == [(1, (3,)), (5, (7,))]
+    assert [_lines(finding) for finding in findings] == [(1, (4,)), (7, (10,))]
 
 
 def test_each_condition_group_in_a_file_is_reported_separately():
-    source = "#if A\n#endif\n#if A\n#endif\nint x;\n#if A\n#endif\n#if A\n#endif\n"
+    source = "#if A\nx;\n#endif\n#if A\nx;\n#endif\nint x;\n#if A\nx;\n#endif\n#if A\nx;\n#endif\n"
 
     findings = _merges(source)
 
-    assert [_lines(finding) for finding in findings] == [(1, (3,)), (6, (8,))]
+    assert [_lines(finding) for finding in findings] == [(1, (4,)), (8, (11,))]
 
 
 def test_nested_blocks_are_reported_inside_their_parent_branch():
@@ -113,13 +117,13 @@ def test_nested_blocks_are_reported_inside_their_parent_branch():
         "\n"
         "#if A\ny;\n#endif\n"
         "#else\n"
-        "#if B\n#endif\n#if B\n#endif\n"
+        "#if B\nx;\n#endif\n#if B\nx;\n#endif\n"
         "#endif\n"
     )
 
     findings = _merges(source)
 
-    assert [_lines(finding) for finding in findings] == [(2, (6,)), (10, (12,))]
+    assert [_lines(finding) for finding in findings] == [(2, (6,)), (10, (13,))]
 
 
 def test_siblings_in_different_branches_of_a_parent_are_not_merged():
@@ -128,13 +132,13 @@ def test_siblings_in_different_branches_of_a_parent_are_not_merged():
 
 
 def test_findings_are_in_source_order_with_other_findings():
-    source = "#if A\n#endif\n#if A\n#endif\n#if B\n#if B\n#endif\n#endif\n"
+    source = "#if A\nx;\n#endif\n#if A\nx;\n#endif\n#if B\n#if B\nx;\n#endif\n#endif\n"
 
     result = cpre.analyze_source(source)
 
     assert [(finding.kind, finding.location.line) for finding in result.findings] == [
         (MERGEABLE, 1),
-        (cpre.FindingKind.REDUNDANT_BRANCH, 6),
+        (cpre.FindingKind.REDUNDANT_BRANCH, 8),
     ]
 
 
@@ -167,12 +171,12 @@ def test_a_comment_inside_a_body_does_not_matter():
 
 
 def test_assumptions_can_only_remove_a_finding_never_add_or_change_one():
-    source = "#if A\n#endif\n#if A\n#endif\n"
+    source = "#if A\nx;\n#endif\n#if A\nx;\n#endif\n"
 
     plain = _merges(source)
     unrelated = _merges(source, assumptions={"B": True})
 
-    assert [_lines(f) for f in plain] == [_lines(f) for f in unrelated] == [(1, (3,))]
+    assert [_lines(f) for f in plain] == [_lines(f) for f in unrelated] == [(1, (4,))]
     assert unrelated[0].depends_on_assumptions is False
 
 
@@ -299,9 +303,9 @@ def test_only_the_first_block_body_matters_for_a_pair():
 
 
 def test_a_run_breaks_where_a_middle_block_changes_the_condition():
-    source = "#if A\n#endif\n#if A\n#undef A\n#endif\n#if A\n#endif\n"
+    source = "#if A\nx;\n#endif\n#if A\n#undef A\n#endif\n#if A\nx;\n#endif\n"
     (finding,) = _merges(source)
-    assert _lines(finding) == (1, (3,))
+    assert _lines(finding) == (1, (4,))
 
 
 @pytest.mark.parametrize(
@@ -344,13 +348,15 @@ def test_unmatched_sibling_nesting_does_not_pair_with_the_next_parent_block():
 
 
 def test_blocks_of_an_unanalyzed_component_are_never_reported():
-    source = "#if A && B\n#endif\n#if A && B\n#endif\n#if C\n#endif\n#if C\n#endif\n"
+    source = (
+        "#if A && B\nx;\n#endif\n#if A && B\nx;\n#endif\n#if C\nx;\n#endif\n#if C\nx;\n#endif\n"
+    )
 
     result = cpre.analyze_source(source, options=cpre.AnalysisOptions(max_atoms=1))
     merged = [finding for finding in result.findings if finding.kind is MERGEABLE]
 
     assert not result.complete
-    assert [_lines(finding) for finding in merged] == [(5, (7,))]
+    assert [_lines(finding) for finding in merged] == [(7, (10,))]
     assert all(group.merge_with == () for group in result.tree.groups[:2])
 
 
@@ -364,13 +370,13 @@ def test_a_proof_that_exhausts_the_work_budget_curtails_the_whole_result():
     # A comment between the blocks rules the pair out before any proof, so its work is
     # exactly what the ordinary analysis needs. The same budget must then be too small for
     # the proof that the uncommented pair needs on top of it.
-    pair = "#if A && B\n#endif\n#if B && A\n#endif\n"
-    unproven = "#if A && B\n#endif\n// c\n#if B && A\n#endif\n"
+    pair = "#if A && B\nx;\n#endif\n#if B && A\nx;\n#endif\n"
+    unproven = "#if A && B\nx;\n#endif\n// c\n#if B && A\nx;\n#endif\n"
     needed = _work(unproven)
 
     assert _lines(_merges(pair, options=cpre.AnalysisOptions(max_work=needed + 100_000))[0]) == (
         1,
-        (3,),
+        (4,),
     )
     starved = cpre.analyze_source(pair, options=cpre.AnalysisOptions(max_work=needed))
 
@@ -380,8 +386,8 @@ def test_a_proof_that_exhausts_the_work_budget_curtails_the_whole_result():
 
 
 def test_the_proof_counts_toward_the_shared_work_budget():
-    pair = "#if A && B\n#endif\n#if B && A\n#endif\n"
-    unproven = "#if A && B\n#endif\n// c\n#if B && A\n#endif\n"
+    pair = "#if A && B\nx;\n#endif\n#if B && A\nx;\n#endif\n"
+    unproven = "#if A && B\nx;\n#endif\n// c\n#if B && A\nx;\n#endif\n"
 
     assert _work(pair) > _work(unproven)
 
@@ -389,12 +395,12 @@ def test_the_proof_counts_toward_the_shared_work_budget():
 def test_a_pair_whose_proof_exceeds_a_node_limit_is_skipped_not_reported():
     # Each condition fits the node limit on its own as an expression, but the proof builds
     # both. Whatever the limit allows, no wrong finding appears.
-    source = "#if A && B && C\n#endif\n#if C && B && A\n#endif\n"
+    source = "#if A && B && C\nx;\n#endif\n#if C && B && A\nx;\n#endif\n"
 
     complete = _merges(source)
     limited = cpre.analyze_source(source, options=cpre.AnalysisOptions(max_bdd_nodes=5))
 
-    assert [_lines(f) for f in complete] == [(1, (3,))]
+    assert [_lines(f) for f in complete] == [(1, (4,))]
     assert all(f.kind is not MERGEABLE for f in limited.findings) or not limited.complete
 
 
@@ -416,9 +422,9 @@ def test_a_condition_with_an_extra_unrelated_term_is_still_compared():
 
 
 def test_the_tree_records_the_run_on_its_first_block_only():
-    result = cpre.analyze_source("#if A\n#endif\n#if A\n#endif\n#if A\n#endif\n")
+    result = cpre.analyze_source("#if A\nx;\n#endif\n#if A\nx;\n#endif\n#if A\nx;\n#endif\n")
 
-    assert [group.merge_with for group in result.tree.groups] == [(3, 5), (), ()]
+    assert [group.merge_with for group in result.tree.groups] == [(4, 7), (), ()]
 
 
 def test_a_source_without_runs_has_empty_merge_with_everywhere():
@@ -471,7 +477,7 @@ def test_text_report_for_a_run_lists_every_later_block(tmp_path, capsys):
 
 
 def test_text_report_for_a_nested_run_is_shown_under_its_parent(tmp_path, capsys):
-    source = _write(tmp_path, "#if P\n#if A\n#endif\n#if A\n#endif\n#endif\n")
+    source = _write(tmp_path, "#if P\n#if A\nx;\n#endif\n#if A\nx;\n#endif\n#endif\n")
 
     main(["--color", "never", str(source)])
 
@@ -493,7 +499,7 @@ def test_fail_on_findings_exits_1_for_a_mergeable_run(tmp_path, capsys):
 
     assert main(["--fail-on-findings", str(source)]) == 1
     capsys.readouterr()
-    clean = _write(tmp_path, "#if A\n#endif\n#if B\n#endif\n", "clean.c")
+    clean = _write(tmp_path, "#if A\nx;\n#endif\n#if B\nx;\n#endif\n", "clean.c")
     assert main(["--fail-on-findings", str(clean)]) == 0
 
 
@@ -522,7 +528,7 @@ def test_json_records_merge_with_on_every_group(tmp_path, capsys):
 
 def test_json_shows_a_file_with_only_a_merge_in_a_filtered_batch(tmp_path, capsys):
     one = _write(tmp_path, TWO, "one.c")
-    two = _write(tmp_path, "#if A\n#endif\n", "two.c")
+    two = _write(tmp_path, "#if A\nx;\n#endif\n", "two.c")
 
     assert main(["--json", str(one), str(two)]) == 0
     document = json.loads(capsys.readouterr().out)
@@ -565,7 +571,7 @@ def test_sarif_has_a_rule_and_related_locations(tmp_path, capsys):
 
 
 def test_sarif_results_without_related_locations_are_unchanged():
-    analysis = cpre.analyze_source("#if A\n#if A\n#endif\n#endif\n", filename="x.c")
+    analysis = cpre.analyze_source("#if A\n#if A\nx;\n#endif\n#endif\n", filename="x.c")
 
     (result,) = sarif_log([analysis], tool_version="1")["runs"][0]["results"]
 
@@ -573,7 +579,7 @@ def test_sarif_results_without_related_locations_are_unchanged():
 
 
 def test_other_findings_have_no_related_locations():
-    result = cpre.analyze_source("#if A\n#if A\n#endif\n#endif\n")
+    result = cpre.analyze_source("#if A\n#if A\nx;\n#endif\n#endif\n")
 
     assert [finding.kind for finding in result.findings] == [cpre.FindingKind.REDUNDANT_BRANCH]
     assert all(finding.related_locations == () for finding in result.findings)
@@ -654,7 +660,7 @@ def test_the_unsafe_cases_are_not_reported_because_a_merge_would_change_the_outp
 
 def test_a_long_definition_chain_is_walked_once_per_name_not_once_per_pair():
     chain = "".join(f"#define M{i} M{i + 1}\n" for i in range(300)) + "#define M300 1\n"
-    blocks = "#if M0\n#endif\n" * 400
+    blocks = "#if M0\nx;\n#endif\n" * 400
     result = cpre.analyze_source(chain + blocks)
 
     assert [f.kind for f in result.findings] == [MERGEABLE]
@@ -684,7 +690,9 @@ def test_conditions_that_a_rewrite_would_move_or_repeat_are_not_reported(source)
 
 
 def test_a_line_test_before_the_blocks_does_not_matter():
-    assert len(_merges("#if __LINE__ > 100\n#endif\n#if A\n#endif\n#if A\n#endif\n")) == 1
+    assert (
+        len(_merges("#if __LINE__ > 100\nx;\n#endif\n#if A\nx;\n#endif\n#if A\nx;\n#endif\n")) == 1
+    )
 
 
 def test_a_long_run_proves_each_pair_once_and_not_the_first_twice(monkeypatch):
@@ -701,7 +709,9 @@ def test_a_long_run_proves_each_pair_once_and_not_the_first_twice(monkeypatch):
 
     monkeypatch.setattr(_block_rewrites._Finder, "_relation", counting)
 
-    result = cpre.analyze_source("#if A && B\n#endif\n#if B && A\n#endif\n#if A && B\n#endif\n")
+    result = cpre.analyze_source(
+        "#if A && B\nx;\n#endif\n#if B && A\nx;\n#endif\n#if A && B\nx;\n#endif\n"
+    )
 
     assert [f.kind for f in result.findings] == [MERGEABLE]
     assert len(calls) == 2

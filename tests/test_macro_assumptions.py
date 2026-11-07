@@ -12,7 +12,7 @@ def _find(result, kind, line):
 
 
 def test_no_assumptions_preserve_symbolic_behavior():
-    source = "#if FEATURE\n#endif\n"
+    source = "#if FEATURE\nx;\n#endif\n"
     assert cpre.analyze_source(source).findings == ()
 
 

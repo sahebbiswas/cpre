@@ -477,7 +477,7 @@ def test_discovery_reports_progress_during_a_large_walk(tmp_path):
 # --- the command line -------------------------------------------------------------------
 
 
-FINDING = "#if A\n#if A\n#endif\n#endif\n"
+FINDING = "#if A\n#if A\nx;\n#endif\n#endif\n"
 
 
 @pytest.fixture
@@ -485,7 +485,7 @@ def tree(tmp_path):
     root = tmp_path / "src"
     (root / "sub").mkdir(parents=True)
     (root / "a.c").write_text(FINDING, encoding="utf-8")
-    (root / "b.c").write_text("#if B\n#endif\n", encoding="utf-8")
+    (root / "b.c").write_text("#if B\nx;\n#endif\n", encoding="utf-8")
     (root / "sub" / "c.h").write_text(FINDING, encoding="utf-8")
     return root
 

@@ -102,8 +102,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--fail-on-findings",
         action="store_true",
         help=(
-            "exit with status 1 when a dead, redundant, mergeable, complementary, or joinable "
-            "branch, or a simplifiable macro, is found"
+            "exit with status 1 when a dead, redundant, mergeable, complementary, joinable, or "
+            "empty branch or block, or a simplifiable macro, is found"
         ),
     )
     add_symbolic_literal_options(parser, "macro")
